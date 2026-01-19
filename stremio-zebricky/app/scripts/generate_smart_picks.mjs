@@ -172,7 +172,7 @@ function normalizeCandidate(item) {
 function applyFilters(cands, profile) {
   const yr = parseYearRange(profile?.filters?.years);
 
-  // include může být v legacy CSV nebo v novém poli includeGenres
+  // INCLUDE: buď nové pole includeGenres[], nebo legacy CSV filters.genres
   const wantGenres =
     Array.isArray(profile?.includeGenres) && profile.includeGenres.length
       ? profile.includeGenres
@@ -180,7 +180,7 @@ function applyFilters(cands, profile) {
           .filter(Boolean)
       : parseGenresCsv(profile?.filters?.genres);
 
-  // exclude může být v legacy CSV (filters.genresExclude / filters.excludeGenres) nebo v novém poli excludeGenres
+  // EXCLUDE: buď nové pole excludeGenres[], nebo legacy CSV filters.genresExclude / filters.excludeGenres
   const blockGenres =
     Array.isArray(profile?.excludeGenres) && profile.excludeGenres.length
       ? profile.excludeGenres
@@ -198,14 +198,19 @@ function applyFilters(cands, profile) {
       if (c.year < yr.min || c.year > yr.max) return false;
     }
 
-    // EXCLUDE
-    if (blockGenres.length) {
-      if (overlapsAny(c.genres || [], blockGenres)) return false;
+    // ✅ normalizuj genres kandidáta (pro jistotu)
+    const cg = Array.isArray(c.genres)
+      ? c.genres.map((g) => String(g).trim().toLowerCase()).filter(Boolean)
+      : [];
+
+    // SOFT EXCLUDE: aplikuj jen když žánry známe
+    if (blockGenres.length && cg.length) {
+      if (overlapsAny(cg, blockGenres)) return false;
     }
 
-    // INCLUDE
-    if (wantGenres.length) {
-      if (!overlapsAny(c.genres || [], wantGenres)) return false;
+    // SOFT INCLUDE: aplikuj jen když žánry známe
+    if (wantGenres.length && cg.length) {
+      if (!overlapsAny(cg, wantGenres)) return false;
     }
 
     return true;

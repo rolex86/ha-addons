@@ -816,6 +816,139 @@
         line-height: 1.45;
         white-space: pre-wrap;
       }
+
+      /* ===========================
+   Mobile UX improvements
+   =========================== */
+
+      @media (max-width: 700px) {
+        .topbar {
+          position: static;
+        }
+
+        /* trochu víc místa po stranách */
+        .wrap {
+          padding: 12px 12px 22px;
+        }
+
+        /* topbar na mobilu: méně "sticky" stresu + lepší rozložení */
+        .topbar {
+          top: 8px;
+          padding: 12px;
+          gap: 10px;
+          flex-direction: column;
+          align-items: stretch;
+        }
+        .brand {
+          gap: 6px;
+        }
+
+        /* akce: tlačítka hezky do gridu, ať nejsou malá */
+        .actions {
+          width: 100%;
+          justify-content: flex-start;
+          gap: 8px;
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+        }
+
+        /* token input přes celou šířku, ať se dobře píše */
+        #token {
+          max-width: none !important;
+          grid-column: 1 / -1;
+        }
+
+        /* status pills taky přes celou šířku (ne miniaturní vpravo) */
+        #status,
+        #updatePill {
+          grid-column: 1 / -1;
+        }
+
+        /* tlačítka ať jsou "fat-finger friendly" */
+        .btn,
+        .tableBtn {
+          padding: 12px 12px;
+          font-size: 14px;
+          border-radius: 14px;
+        }
+        .btn.small {
+          padding: 12px 12px;
+          font-size: 14px;
+          border-radius: 14px;
+        }
+
+        /* inputs/textareas: větší font = žádný iOS auto-zoom + lepší editace */
+        input:not([type="checkbox"]):not([type="range"]),
+        select,
+        textarea {
+          padding: 12px 12px;
+          border-radius: 14px;
+          font-size: 16px; /* klíčové pro iOS */
+          line-height: 1.25;
+        }
+
+        /* labely a pomocné texty trochu větší */
+        label.small,
+        .lbl,
+        .sub,
+        .hint,
+        details.help > summary,
+        .helpBody,
+        .sectionTitle span {
+          font-size: 13px;
+        }
+        .sectionTitle strong {
+          font-size: 13px;
+        }
+
+        /* checkboxy větší "tap area" */
+        .chk {
+          font-size: 14px;
+        }
+        .chk input,
+        .genreItem input,
+        .chip input,
+        .chkRow input {
+          width: 20px;
+          height: 20px;
+        }
+
+        /* sekce tělo trochu víc dýchá */
+        .sectionBody {
+          padding: 14px 12px;
+        }
+
+        /* tabulky: na mobilu radši horizontálně scrollovat a zvětšit text */
+        .tableWrap,
+        .tableWrap table,
+        .tableWrap thead,
+        .tableWrap tbody,
+        .tableWrap tr,
+        .tableWrap td,
+        .tableWrap th {
+          font-size: 14px;
+        }
+        table.tbl th,
+        table.tbl td,
+        table th,
+        table td {
+          padding: 12px 10px;
+          font-size: 14px;
+        }
+      }
+
+      /* iOS: zabraň “text autosize” randomu a zoomu při fokusu */
+      html {
+        -webkit-text-size-adjust: 100%;
+      }
+
+      /* lepší fokus (i na mobilu) */
+      input:focus,
+      select:focus,
+      textarea:focus {
+        border-color: rgba(45, 140, 255, 0.55);
+        box-shadow: 0 0 0 3px rgba(45, 140, 255, 0.18);
+      }
     </style>
   </head>
 

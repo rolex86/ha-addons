@@ -91,7 +91,7 @@ async function fetchTraktPage({
   limit,
   timeoutMs,
 }) {
-  const params = { ...(filters ?? {}), page, limit };
+  const params = { ...(filters ?? {}), page, limit, extended: "full" };
   const url = buildUrl(pathname, params);
 
   console.log(`[TRAKT] GET ${pathname} page=${page} limit=${limit}`);

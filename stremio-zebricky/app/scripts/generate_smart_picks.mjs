@@ -103,7 +103,11 @@ function inferTypeFromPath(p) {
   return null;
 }
 
-async function traktFetch(pathname, clientId, { page = 1, limit = 100, timeoutMs = 15000 } = {}) {
+async function traktFetch(
+  pathname,
+  clientId,
+  { page = 1, limit = 100, timeoutMs = 15000 } = {},
+) {
   const url = new URL(`https://api.trakt.tv${pathname}`);
   url.searchParams.set("extended", "full");
   url.searchParams.set("page", String(page));
@@ -125,7 +129,9 @@ async function traktFetch(pathname, clientId, { page = 1, limit = 100, timeoutMs
 
     if (!res.ok) {
       const txt = await res.text().catch(() => "");
-      throw new Error(`Trakt ${res.status} ${pathname} :: ${txt.slice(0, 200)}`);
+      throw new Error(
+        `Trakt ${res.status} ${pathname} :: ${txt.slice(0, 200)}`,
+      );
     }
 
     return await res.json();
@@ -144,7 +150,15 @@ function normalizeCandidate(item, type) {
 
   const name = obj?.title || obj?.name;
   const year = obj?.year;
-  const genres = Array.isArray(obj?.genres) ? obj.genres : [];
+  const genres = Array.isArray(obj?.genres)
+    ? obj.genres
+        .map((g) =>
+          String(g || "")
+            .trim()
+            .toLowerCase(),
+        )
+        .filter(Boolean)
+    : [];
 
   return {
     imdb,
@@ -158,17 +172,40 @@ function normalizeCandidate(item, type) {
 
 function applyFilters(cands, profile) {
   const yr = parseYearRange(profile?.filters?.years);
-  const wantGenres = parseGenresCsv(profile?.filters?.genres);
+
+  // include může být v legacy CSV nebo v novém poli includeGenres
+  const wantGenres =
+    Array.isArray(profile?.includeGenres) && profile.includeGenres.length
+      ? profile.includeGenres
+          .map((x) => String(x).trim().toLowerCase())
+          .filter(Boolean)
+      : parseGenresCsv(profile?.filters?.genres);
+
+  // exclude může být v legacy CSV (genresExclude / excludeGenres) nebo v novém poli excludeGenres
+  const blockGenres =
+    Array.isArray(profile?.excludeGenres) && profile.excludeGenres.length
+      ? profile.excludeGenres
+          .map((x) => String(x).trim().toLowerCase())
+          .filter(Boolean)
+      : parseGenresCsv(
+          profile?.filters?.genresExclude ||
+            profile?.filters?.excludeGenres ||
+            "",
+        );
 
   return cands.filter((c) => {
+    // years
     if (yr && Number.isFinite(c.year)) {
       if (c.year < yr.min || c.year > yr.max) return false;
-    } else if (yr) {
-      // když nemá rok, necháme radši projít
     }
 
+    // EXCLUDE: pokud se kandidat překrývá s blockGenres -> pryč
+    if (blockGenres.length) {
+      if (overlapsAny(c.genres || [], blockGenres)) return false;
+    }
+
+    // INCLUDE: chceme alespoň jeden shodný žánr
     if (wantGenres.length) {
-      // chceme alespoň jeden shodný žánr
       if (!overlapsAny(c.genres || [], wantGenres)) return false;
     }
 
@@ -187,7 +224,16 @@ async function loadLocalListItems(listId) {
       imdb: it.imdb,
       name: it.name || it.imdb,
       year: Number.isFinite(Number(it.year)) ? Number(it.year) : undefined,
-      genres: Array.isArray(it.genres) ? it.genres : [],
+      genres: Array.isArray(it.genres)
+        ? it.genres
+            .map((g) =>
+              String(g || "")
+                .trim()
+                .toLowerCase(),
+            )
+            .filter(Boolean)
+        : [],
+
       releaseInfo: it.releaseInfo || (it.year ? String(it.year) : undefined),
       // necháme už existující obohacení, pokud je:
       poster: it.poster,
@@ -249,34 +295,49 @@ function stableSignature(obj) {
     id: obj?.id,
     type: obj?.type,
     // pořadí je relevantní (daily picks)
-    items: Array.isArray(obj?.items) ? obj.items.map((x) => x?.imdb).filter(Boolean) : [],
+    items: Array.isArray(obj?.items)
+      ? obj.items.map((x) => x?.imdb).filter(Boolean)
+      : [],
   };
 }
 
 function sameSignature(a, b) {
-  return JSON.stringify(stableSignature(a)) === JSON.stringify(stableSignature(b));
+  return (
+    JSON.stringify(stableSignature(a)) === JSON.stringify(stableSignature(b))
+  );
 }
 
 async function main() {
   const cfg = await readJsonSafe(CONFIG_PATH, null);
   if (!cfg) throw new Error(`Missing config: ${CONFIG_PATH}`);
 
-  const secrets = await readJsonSafe(SECRETS_PATH, { trakt: { client_id: "", client_secret: "" } });
+  const secrets = await readJsonSafe(SECRETS_PATH, {
+    trakt: { client_id: "", client_secret: "" },
+  });
   const clientId = String(secrets?.trakt?.client_id || "").trim();
-  if (!clientId) throw new Error(`Missing secrets.trakt.client_id in ${SECRETS_PATH}`);
+  if (!clientId)
+    throw new Error(`Missing secrets.trakt.client_id in ${SECRETS_PATH}`);
 
   const sp = cfg.smartPicks;
   if (!sp?.enabled) {
-    console.log("Smart Picks disabled (smartPicks.enabled=false). Nothing to do.");
+    console.log(
+      "Smart Picks disabled (smartPicks.enabled=false). Nothing to do.",
+    );
     return;
   }
 
   const defaults = cfg.defaults || {};
-  const sleepMs = Number.isFinite(Number(defaults.sleepMs)) ? Number(defaults.sleepMs) : 120;
-  const timeoutMs = Number.isFinite(Number(defaults.timeoutMs)) ? Number(defaults.timeoutMs) : 15000;
+  const sleepMs = Number.isFinite(Number(defaults.sleepMs))
+    ? Number(defaults.sleepMs)
+    : 120;
+  const timeoutMs = Number.isFinite(Number(defaults.timeoutMs))
+    ? Number(defaults.timeoutMs)
+    : 15000;
 
   const profiles = Array.isArray(sp.profiles) ? sp.profiles : [];
-  const defaultSize = Number.isFinite(Number(sp.defaultSize)) ? Number(sp.defaultSize) : 10;
+  const defaultSize = Number.isFinite(Number(sp.defaultSize))
+    ? Number(sp.defaultSize)
+    : 10;
 
   await fs.mkdir(LIST_DIR, { recursive: true });
 
@@ -286,7 +347,9 @@ async function main() {
     if (!pid) continue;
     if (ptype !== "movie" && ptype !== "series") continue;
 
-    const size = Number.isFinite(Number(profile.size)) ? Number(profile.size) : defaultSize;
+    const size = Number.isFinite(Number(profile.size))
+      ? Number(profile.size)
+      : defaultSize;
 
     let fromTrakt = Array.isArray(profile.fromTrakt) ? profile.fromTrakt : [];
     let fromLists = Array.isArray(profile.fromLists) ? profile.fromLists : [];
@@ -304,12 +367,18 @@ async function main() {
         ptype === "series"
           ? ["/shows/trending", "/shows/popular"]
           : ["/movies/trending", "/movies/popular"];
-      console.log(`  [fallback] no sources selected -> using ${fromTrakt.join(", ")}`);
+      console.log(
+        `  [fallback] no sources selected -> using ${fromTrakt.join(", ")}`,
+      );
     }
 
     console.log(`\n[SmartPicks] ${pid} (${ptype}) size=${size}`);
-    console.log(`  fromTrakt: ${fromTrakt.length ? fromTrakt.join(", ") : "(none)"}`);
-    console.log(`  fromLists: ${fromLists.length ? fromLists.join(", ") : "(none)"}`);
+    console.log(
+      `  fromTrakt: ${fromTrakt.length ? fromTrakt.join(", ") : "(none)"}`,
+    );
+    console.log(
+      `  fromLists: ${fromLists.length ? fromLists.join(", ") : "(none)"}`,
+    );
 
     // 1) local candidates
     const localAll = [];
@@ -330,22 +399,32 @@ async function main() {
 
       const inferred = inferTypeFromPath(srcPath);
       if (inferred && inferred !== ptype) {
-        console.warn(`  WARN: skipping ${srcPath} because it looks like ${inferred}, profile is ${ptype}`);
+        console.warn(
+          `  WARN: skipping ${srcPath} because it looks like ${inferred}, profile is ${ptype}`,
+        );
         continue;
       }
 
       // pages/limit per profile overrides, fallback defaults
       const candidatePages = Number.isFinite(Number(profile.candidatePages))
         ? Number(profile.candidatePages)
-        : (Number.isFinite(Number(defaults.candidatePages)) ? Number(defaults.candidatePages) : 5);
+        : Number.isFinite(Number(defaults.candidatePages))
+          ? Number(defaults.candidatePages)
+          : 5;
 
       const pageLimit = Number.isFinite(Number(profile.pageLimit))
         ? Number(profile.pageLimit)
-        : (Number.isFinite(Number(defaults.pageLimit)) ? Number(defaults.pageLimit) : 100);
+        : Number.isFinite(Number(defaults.pageLimit))
+          ? Number(defaults.pageLimit)
+          : 100;
 
       for (let p = 1; p <= candidatePages; p++) {
         try {
-          const data = await traktFetch(srcPath, clientId, { page: p, limit: pageLimit, timeoutMs });
+          const data = await traktFetch(srcPath, clientId, {
+            page: p,
+            limit: pageLimit,
+            timeoutMs,
+          });
           await sleep(sleepMs);
 
           for (const row of Array.isArray(data) ? data : []) {
@@ -353,7 +432,9 @@ async function main() {
             if (cand) traktAll.push(cand);
           }
         } catch (e) {
-          console.warn(`  WARN: trakt fetch failed ${srcPath} page=${p}: ${e?.message || e}`);
+          console.warn(
+            `  WARN: trakt fetch failed ${srcPath} page=${p}: ${e?.message || e}`,
+          );
           break;
         }
       }
@@ -365,15 +446,36 @@ async function main() {
 
     // volitelně soft CSFD filtry (pokud už položky mají csfdRating z dřívějška)
     if (ptype === "movie" && profile.csfdRules) {
-      const minRating = Number.isFinite(Number(profile.csfdRules.minRating)) ? Number(profile.csfdRules.minRating) : null;
-      const minCount = Number.isFinite(Number(profile.csfdRules.minCount)) ? Number(profile.csfdRules.minCount) : null;
-      const maxCount = Number.isFinite(Number(profile.csfdRules.maxCount)) ? Number(profile.csfdRules.maxCount) : null;
+      const minRating = Number.isFinite(Number(profile.csfdRules.minRating))
+        ? Number(profile.csfdRules.minRating)
+        : null;
+      const minCount = Number.isFinite(Number(profile.csfdRules.minCount))
+        ? Number(profile.csfdRules.minCount)
+        : null;
+      const maxCount = Number.isFinite(Number(profile.csfdRules.maxCount))
+        ? Number(profile.csfdRules.maxCount)
+        : null;
 
       merged = merged.filter((c) => {
         // pokud rating/count neznáme, necháme projít (dofiltrované po enrich v dalších bězích)
-        if (minRating !== null && Number.isFinite(c.csfdRating) && c.csfdRating < minRating) return false;
-        if (minCount !== null && Number.isFinite(c.csfdRatingCount) && c.csfdRatingCount < minCount) return false;
-        if (maxCount !== null && Number.isFinite(c.csfdRatingCount) && c.csfdRatingCount > maxCount) return false;
+        if (
+          minRating !== null &&
+          Number.isFinite(c.csfdRating) &&
+          c.csfdRating < minRating
+        )
+          return false;
+        if (
+          minCount !== null &&
+          Number.isFinite(c.csfdRatingCount) &&
+          c.csfdRatingCount < minCount
+        )
+          return false;
+        if (
+          maxCount !== null &&
+          Number.isFinite(c.csfdRatingCount) &&
+          c.csfdRatingCount > maxCount
+        )
+          return false;
         return true;
       });
     }
@@ -410,10 +512,14 @@ async function main() {
     }
 
     if (prev && sameSignature(prev, out)) {
-      console.log(`  🟨 ${pid}: UNCHANGED -> skip write (items=${out.items.length}, candidates=${merged.length})`);
+      console.log(
+        `  🟨 ${pid}: UNCHANGED -> skip write (items=${out.items.length}, candidates=${merged.length})`,
+      );
     } else {
       await writeJsonAtomic(outPath, out);
-      console.log(`  🟩 ${pid}: CHANGED -> written (items=${out.items.length}, candidates=${merged.length})`);
+      console.log(
+        `  🟩 ${pid}: CHANGED -> written (items=${out.items.length}, candidates=${merged.length})`,
+      );
     }
   }
 

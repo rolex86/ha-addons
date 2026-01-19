@@ -1,0 +1,42 @@
+name: "Stremio - Vlastní žebříčky (CZ Classics)"
+slug: stremio_zebricky
+description: "Stremio addon server (7000) + Config UI (7788) s persistencí do /data."
+version: "0.0.6"
+url: "https://example.local/org.vlastni.zebricky.cz"
+
+arch:
+  - aarch64
+  - amd64
+  - armv7
+  - i386
+
+startup: services
+boot: auto
+init: false
+
+# Web UI button (v HA se zobrazí "Open Web UI") – míří na Config UI
+webui: "http://[HOST]:[PORT:7788]/"
+panel_icon: mdi:view-dashboard
+panel_title: "CZ Classics UI"
+
+ports:
+  7000/tcp: 7000
+  7788/tcp: 7788
+ports_description:
+  7000/tcp: "Stremio addon server"
+  7788/tcp: "Config UI"
+
+map:
+  - data:rw
+
+environment:
+  HOST: "0.0.0.0"
+  PORT: "7000"
+  CONFIG_UI_HOST: "0.0.0.0"
+  CONFIG_UI_PORT: "7788"
+  CONFIG_UI_UPDATE_CMD: "node /app/tools/update-lists.js"
+
+options:
+  config_ui_token: ""
+schema:
+  config_ui_token: "str?"

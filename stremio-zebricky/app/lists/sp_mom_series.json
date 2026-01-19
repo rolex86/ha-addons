@@ -1,0 +1,161 @@
+{
+  "id": "sp_mom_series",
+  "name": "Smart Picks – Máma (seriály)",
+  "type": "series",
+  "generatedAt": "2026-01-16T14:29:27.138Z",
+  "items": [
+    {
+      "imdb": "tt32267877",
+      "name": "Favàritx",
+      "year": 2025,
+      "genres": [
+        "drama",
+        "mystery",
+        "crime"
+      ],
+      "releaseInfo": "2025",
+      "poster": "https://live.metahub.space/poster/small/tt32267877/img?src=cinemeta",
+      "background": "https://live.metahub.space/background/medium/tt32267877/img?src=cinemeta",
+      "imdbRating": "5.9",
+      "description": "Detectives Marta Serra and Álex Castro are faced with a complex case when Laura Vidal, a prominent government official, is found dead. What begins as an apparent suicide develops into a pattern of murders in which the perpetrator camouflages his crimes as suicides. The victims appear to be connected by a dark secret from the past, which adds an extra dimension to the case."
+    },
+    {
+      "imdb": "tt31078757",
+      "name": "Mrs Playmen",
+      "year": 2025,
+      "genres": [
+        "drama"
+      ],
+      "releaseInfo": "2025",
+      "poster": "https://live.metahub.space/poster/small/tt31078757/img?src=cinemeta",
+      "background": "https://live.metahub.space/background/medium/tt31078757/img?src=cinemeta",
+      "imdbRating": "6.3",
+      "description": "Betrayed by her husband, a woman must step up and run an erotic magazine that becomes a symbol of empowerment in '70s Rome. Inspired by true events."
+    },
+    {
+      "imdb": "tt32409123",
+      "name": "Death Valley",
+      "year": 2025,
+      "genres": [
+        "mystery",
+        "drama",
+        "comedy"
+      ],
+      "releaseInfo": "2025",
+      "poster": "https://images.metahub.space/poster/small/tt32409123/img?src=cinemeta",
+      "background": "https://images.metahub.space/background/medium/tt32409123/img?src=cinemeta",
+      "imdbRating": "7.0",
+      "runtime": "45 min",
+      "description": "Retired actor John Chapel and detective sergeant Janie Mallowan team up to investigate murders each week in Wales."
+    },
+    {
+      "imdb": "tt31974367",
+      "name": "The Beast in Me",
+      "year": 2025,
+      "genres": [
+        "thriller",
+        "mystery",
+        "drama"
+      ],
+      "releaseInfo": "2025",
+      "poster": "https://images.metahub.space/poster/small/tt31974367/img?src=cinemeta",
+      "background": "https://images.metahub.space/background/medium/tt31974367/img?src=cinemeta",
+      "imdbRating": "7.5",
+      "runtime": "49 min",
+      "description": "Author Aggie Wiggs, grieving the loss of her son, finds new purpose unraveling the mystery behind neighbor Nile Jarvis' vanished wife and his suspicious dealings."
+    },
+    {
+      "imdb": "tt28088031",
+      "name": "Ransom Canyon",
+      "year": 2025,
+      "genres": [
+        "romance",
+        "drama",
+        "western"
+      ],
+      "releaseInfo": "2025",
+      "poster": "https://images.metahub.space/poster/small/tt28088031/img?src=cinemeta",
+      "background": "https://images.metahub.space/background/medium/tt28088031/img?src=cinemeta",
+      "imdbRating": "6.8",
+      "runtime": "47 min",
+      "description": "Passions run deep in a small Texas town, as three ranching dynasties fight for their land, their legacies and the people they love."
+    },
+    {
+      "imdb": "tt37090894",
+      "name": "Langer",
+      "year": 2025,
+      "genres": [
+        "crime",
+        "drama",
+        "action",
+        "adventure"
+      ],
+      "releaseInfo": "2025",
+      "poster": "https://live.metahub.space/poster/small/tt37090894/img?src=cinemeta",
+      "background": "https://live.metahub.space/background/medium/tt37090894/img?src=cinemeta",
+      "imdbRating": "5.0",
+      "description": "Piotr Langer, a young and dashing businessman who inherited a financial holding company from his tragically deceased father. In his spare time, Piotr indulges in his longtime passion - he is an elusive serial killer who has been pursued unsuccessfully by prosecutors for years.\n\nOne day a stunning woman, Nina, appears in his life, and in order to attract Langer's attention and get closer to him, she shows up at his charity gala. Soon after, she becomes involved in a dangerous game and a relationship with Langer, which doesn't make it any easier for her to uncover evidence that he is a serial killer. Will justice prevail this time...?"
+    },
+    {
+      "imdb": "tt36988358",
+      "name": "Takopi's Original Sin",
+      "year": 2025,
+      "genres": [
+        "anime",
+        "drama",
+        "fantasy",
+        "science-fiction"
+      ],
+      "releaseInfo": "2025",
+      "poster": "https://images.metahub.space/poster/small/tt36988358/img?src=cinemeta",
+      "background": "https://images.metahub.space/background/medium/tt36988358/img?src=cinemeta",
+      "imdbRating": "8.8",
+      "runtime": "26 min",
+      "description": "Takopi travels from his home of Happy Planet to spread happiness on Earth, but meets the unsmiling Shizuka. Her school friends and home life are causing her somber expression and pure hearted Takopi is determined to change things."
+    },
+    {
+      "imdb": "tt30505625",
+      "name": "Mix Tape",
+      "year": 2025,
+      "genres": [
+        "drama"
+      ],
+      "releaseInfo": "2025",
+      "poster": "https://images.metahub.space/poster/small/tt30505625/img?src=cinemeta",
+      "background": "https://images.metahub.space/background/medium/tt30505625/img?src=cinemeta",
+      "imdbRating": "7.6",
+      "runtime": "57 min",
+      "description": "Daniel and Alison meet in 1989 Sheffield and fall in love as teenagers before life takes them in different directions. They reconnect years later through shared musical memories, wondering if they're meant to be together."
+    },
+    {
+      "imdb": "tt31036715",
+      "name": "Malice",
+      "year": 2025,
+      "genres": [
+        "thriller",
+        "drama",
+        "mystery"
+      ],
+      "releaseInfo": "2025",
+      "poster": "https://images.metahub.space/poster/small/tt31036715/img?src=cinemeta",
+      "background": "https://images.metahub.space/background/medium/tt31036715/img?src=cinemeta",
+      "runtime": "50 min",
+      "description": "Follows a young man who tries to infiltrate the world of a wealthy family to reveal its secrets."
+    },
+    {
+      "imdb": "tt32268630",
+      "name": "Sheriff Country",
+      "year": 2025,
+      "genres": [
+        "drama",
+        "crime"
+      ],
+      "releaseInfo": "2025",
+      "poster": "https://images.metahub.space/poster/small/tt32268630/img?src=cinemeta",
+      "background": "https://images.metahub.space/background/medium/tt32268630/img?src=cinemeta",
+      "imdbRating": "6.5",
+      "runtime": "43 min",
+      "description": "Mickey Fox investigates criminal activity and patrols the streets of small-town Edgewater while contending with her ex-con father and a mysterious incident involving her wayward daughter."
+    }
+  ]
+}

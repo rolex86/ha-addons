@@ -1,0 +1,10 @@
+{
+  "running": false,
+  "phase": "done",
+  "ok": true,
+  "label": "Enrich (poster + Cinemeta + CSFD)",
+  "code": 0,
+  "at": "2026-01-16T14:41:08.649Z",
+  "step": 3,
+  "steps": 3
+}

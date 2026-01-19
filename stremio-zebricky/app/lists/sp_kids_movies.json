@@ -1,0 +1,210 @@
+{
+  "id": "sp_kids_movies",
+  "name": "Smart Picks – Děti (filmy)",
+  "type": "movie",
+  "generatedAt": "2026-01-16T14:29:24.573Z",
+  "items": [
+    {
+      "imdb": "tt6751668",
+      "name": "Parazit",
+      "year": 2019,
+      "genres": [
+        "Drama",
+        "Komedie",
+        "Thriller"
+      ],
+      "releaseInfo": "2019 • ČSFD: 84% (25.2k)",
+      "poster": "https://images.metahub.space/poster/small/tt6751668/img?src=cinemeta",
+      "background": "https://images.metahub.space/background/medium/tt6751668/img?src=cinemeta",
+      "imdbRating": "8.5",
+      "runtime": "133 min",
+      "csfdId": 505790,
+      "description": "Černá komedie režiséra Bong Joon-hoa (Snowpiercer, Okja) sleduje chudou, ale mazanou čtyřčlennou rodinu, která se rozhodne infiltrovat do bohaté domácnosti byznysmena Parka. Co se může stát, když se setkají dva tak odlišné světy? Originální dílo mistrovsky pracuje s prvky thrilleru, dramatu i satiry a přináší vtipný a nepředvídatelný divácký zážitek. Parazit byl oceněný Zlatou palmou a podle mnohých ohlasů se tak stal nejzábavnějším vítězem festivalu v Cannes od dob Pulp Fiction.(Aerofilms)\n\nČSFD: 84% (25.2k)",
+      "csfdRating": 84,
+      "csfdRatingCount": 25171
+    },
+    {
+      "imdb": "tt7510222",
+      "name": "Já, padouch 4",
+      "year": 2024,
+      "genres": [
+        "Animovaný",
+        "Dobrodružný",
+        "Komedie",
+        "Rodinný"
+      ],
+      "releaseInfo": "2024 • ČSFD: 63% (3.3k)",
+      "poster": "https://images.metahub.space/poster/small/tt7510222/img?src=cinemeta",
+      "background": "https://images.metahub.space/background/medium/tt7510222/img?src=cinemeta",
+      "imdbRating": "6.2",
+      "runtime": "94 min",
+      "csfdId": 660905,
+      "description": "Čas se nedá zastavit a platí to i pro padoucha Grua, který lehce „zfotrovatěl“ a místo geniálních zlodušských plánů vymýšlí, jak se vetřít do přízně svého malinkého synka, Grua juniora. Ten má totiž výrazně raději maminku Lucy a tátu permanentně vytáčí. O něco hlubší vrásky však Gruovi způsobuje darebák jménem Maxime Le Mal, který ho šikanoval už na základce. Právě utekl z vězení, kam se dostal s Gruovým velkým přispěním, a ze všeho nejvíc se touží pomstít. A protože Anti-velepadoušská liga v tom vidí hrozbu z nejhrozivějších, zařadí Grua s rodinou do programu na ochranu svědků, což znamená nové identity a poklidný život na předměstí. A jako by to nestačilo, zapojí se pět mimoňských dobrovolníků do speciálního programu, který je má vybavit superschopnostmi pro případ, že by se Gruovo krytí provalilo. Ambiciózní plán má samozřejmě mouchy obřích rozměrů, protože Super-Mimoňové jsou super-magnety na katastrofy nejrůznějšího druhu a protože vedle Gruova nového domu bydlí puberťačka, jež touží po kariéře superpadoucha a Grua okamžitě pozná. A touží po tom, aby ji tenhle mistr zaučil. Zapomínat nesmíme ani na pomstychtivého Maxima, který čeká na svou šanci.(CinemArt)\n\nČSFD: 63% (3.3k)",
+      "csfdRating": 63,
+      "csfdRatingCount": 3293
+    },
+    {
+      "imdb": "tt1979376",
+      "name": "Toy Story 4: Příběh hraček",
+      "year": 2019,
+      "genres": [
+        "Animovaný",
+        "Fantasy",
+        "Dobrodružný",
+        "Komedie",
+        "Rodinný"
+      ],
+      "releaseInfo": "2019 • ČSFD: 78% (11.2k)",
+      "poster": "https://images.metahub.space/poster/small/tt1979376/img?src=cinemeta",
+      "background": "https://images.metahub.space/background/medium/tt1979376/img?src=cinemeta",
+      "imdbRating": "7.6",
+      "runtime": "100 min",
+      "csfdId": 300761,
+      "description": "Kovboj Woody vždycky dobře věděl, co je smyslem jeho života. A tím bylo starat se a chránit jeho dítě, ať už to byl chlapeček Andy nebo holčička Bonnie. Když však Bonnie přinese do svého pokojíku novou hračku, které říká „Vidlík“, otevře se Woodymu a jeho věrným kamarádům docela nový velký svět.(Falcon)\n\nČSFD: 78% (11.2k)",
+      "csfdRating": 78,
+      "csfdRatingCount": 11227
+    },
+    {
+      "imdb": "tt1325004",
+      "name": "Twilight sága: Zatmění",
+      "year": 2010,
+      "genres": [
+        "Dobrodružný",
+        "Drama",
+        "Fantasy",
+        "Romantický"
+      ],
+      "releaseInfo": "2010 • ČSFD: 48% (36k)",
+      "poster": "https://images.metahub.space/poster/small/tt1325004/img?src=cinemeta",
+      "background": "https://images.metahub.space/background/medium/tt1325004/img?src=cinemeta",
+      "imdbRating": "5.1",
+      "runtime": "124 min",
+      "csfdId": 252134,
+      "description": "Seattlem otřásá série záhadných vražd a Belle znovu hrozí nebezpečí od záludné upírky, jež stále touží ji zabít. Uprostřed toho všeho se navíc musí rozhodnout, čemu dá přednost: lásce k Edwardovi, nebo přátelství s Jacobem. Edward je upír, Jacob vlkodlak. Jsou jako led a oheň. Společnou mají jen vzájemnou nesmiřitelnou nenávist. A ještě jedno rozhodnutí musí Bella učinit: má zvolit život, či smrt? Ale co pro ni znamená život a co je smrt?(oficiální text distributora)\n\nČSFD: 48% (36k)",
+      "csfdRating": 48,
+      "csfdRatingCount": 35962
+    },
+    {
+      "imdb": "tt3501632",
+      "name": "Thor: Ragnarok",
+      "year": 2017,
+      "genres": [
+        "Akční",
+        "Dobrodružný",
+        "Fantasy",
+        "Sci-Fi",
+        "Komedie"
+      ],
+      "releaseInfo": "2017 • ČSFD: 82% (40.1k)",
+      "poster": "https://images.metahub.space/poster/small/tt3501632/img?src=cinemeta",
+      "background": "https://images.metahub.space/background/medium/tt3501632/img?src=cinemeta",
+      "imdbRating": "7.9",
+      "runtime": "131 min",
+      "csfdId": 374525,
+      "description": "Thor je uvězněn na opačném konci vesmíru bez svého mocného kladiva a je nucen pustit se do závodu s časem, aby se vrátil včas do Asgardu a zastavil Ragnarok - zkázu svého domova a konec asgardské civilizace - který se snaží rozpoutat mocný nový nepřítel, nemilosrdná Hela. Předtím ale musí přežít smrtící gladiátorskou soutěž, v níž se ocitá tváří v tvář svému bývalému spojenci z řad Avengers - neuvěřitelnému Hulkovi.(Falcon)\n\nČSFD: 82% (40.1k)",
+      "csfdRating": 82,
+      "csfdRatingCount": 40088
+    },
+    {
+      "imdb": "tt12001534",
+      "name": "Čtvrteční klub amatérských detektivů",
+      "year": 2025,
+      "genres": [
+        "Krimi",
+        "Komedie",
+        "Thriller",
+        "Mysteriózní"
+      ],
+      "releaseInfo": "2025 • ČSFD: 61% (3.2k)",
+      "poster": "https://images.metahub.space/poster/small/tt12001534/img?src=cinemeta",
+      "background": "https://images.metahub.space/background/medium/tt12001534/img?src=cinemeta",
+      "imdbRating": "6.5",
+      "runtime": "118 min",
+      "csfdId": 1512309,
+      "description": "Na motivy mezinárodního bestselleru Richarda Osmana nese film Čtvrteční klub amatérských detektivů příběh čtyř nezdolných penzistů – Elizabeth (Helen Mirren), Rona (Pierce Brosnan), Ibrahima (Ben Kingsley) a Joyce (Celia Imrie) – kteří tráví svůj volný čas řešením dávno odložených případů vražd jen tak pro zábavu. Když se však jednoho dne stane nevysvětlitelná smrt přímo na jejich prahu, jejich neformální pátrání se promění v napínavé dobrodružství a oni sami se ocitají uprostřed skutečné detektivky. Režie se ujal Chris Columbus a film vznikl v rámci spolupráce mezi Netflixem a Amblin Entertainment.(Netflix)\n\nČSFD: 61% (3.2k)",
+      "csfdRating": 61,
+      "csfdRatingCount": 3152
+    },
+    {
+      "imdb": "tt3469046",
+      "name": "Já, padouch 3",
+      "year": 2017,
+      "genres": [
+        "Animovaný",
+        "Fantasy",
+        "Sci-Fi",
+        "Dobrodružný",
+        "Akční",
+        "Komedie",
+        "Rodinný"
+      ],
+      "releaseInfo": "2017 • ČSFD: 63% (12k)",
+      "poster": "https://images.metahub.space/poster/small/tt3469046/img?src=cinemeta",
+      "background": "https://images.metahub.space/background/medium/tt3469046/img?src=cinemeta",
+      "imdbRating": "6.3",
+      "runtime": "90 min",
+      "csfdId": 364790,
+      "description": "Bývalý padouch Gru má problém. Mezi prsty si nechal utéct aktuálně nejhledanějšího zlosyna na světě, a tak ho vyhodili z práce v Antipadoušské lize. Jeho Mimoni jsou navíc čím dál nespokojenější s tím, že už páníček není zlý. Nejmladší dcera Agnes touží po živém jednorožci, který bude neuvěřitelně heboučký. A do toho všeho se Gru dozví, že má dvojče, které je mu k nerozeznání podobné. Až na ty vlasy. Vraťme se ale k tomu lumpovi, který přechytračil Grua. Jmenuje se Balthazar Bratt a v osmdesátých letech minulého století byl dětskou hvězdou populární televizní show. Ke své smůle se nedokázal přenést přes její konec a od té doby škodí, kudy chodí. Nosí retro oblečení a nemožný účes, poslouchá staré písničky na kazetách a jako zbraně používá Rubikovu kostku a žvýkačkové bubliny. Prostě odporný typ. O mnoho větší sympaťák je další nováček v příběhu, Gruův bratr Dru. Je to neuvěřitelně přátelský a milý chlapík, který si ze všeho nejvíc přeje, aby ho bratr zasvětil do umění zločinu. Jenže Gru začal být zatvrzelý dobrák (dokonce tak zatvrzelý, že s ním nehnula ani otevřená vzpoura Mimoňů, kteří ho kvůli jeho dobrému chování opustili). Jediný, kvůli komu by byl Gru ochotný přejít alespoň dočasně na stranu zla, je jeho věčný soupeř Balthazar Bratt. A když si mu tenhle zastydlý klon Michaela Jacksona dovolí sáhnout na rodinu, využije všechny padoušské zkušenosti k tomu, aby své blízké zachránil. V tom mu nadšeně sekunduje jeho nově nalezený brácha Dru a jeho Mimoni, kteří si až ve vězení uvědomili, co je pro ně v životě nejdůležitější.(CinemArt)\n\nČSFD: 63% (12k)",
+      "csfdRating": 63,
+      "csfdRatingCount": 11993
+    },
+    {
+      "imdb": "tt0458352",
+      "name": "Ďábel nosí Pradu",
+      "year": 2006,
+      "genres": [
+        "Drama",
+        "Romantický",
+        "Komedie"
+      ],
+      "releaseInfo": "2006 • ČSFD: 69% (38.1k)",
+      "poster": "https://images.metahub.space/poster/small/tt0458352/img?src=cinemeta",
+      "background": "https://images.metahub.space/background/medium/tt0458352/img?src=cinemeta",
+      "imdbRating": "7.0",
+      "runtime": "109 min",
+      "csfdId": 215378,
+      "description": "V závratném světě newyorské módy, kde nepovedený účes může zabít celou vaši kariéru, je časopis Runway vysněným Olympem všech, kdo se jen trochu zajímají o svůj vzhled. Pod vedením nejmocnější ženy módního průmyslu Mirandy Priestly (Meryl Streep), která mu vládne tvrdou rukou s dokonale pěstěnými nehty, je Runway obávaným testem, kterým musí projít každý, kdo chce v tomto světě něco znamenat. Při plnění svého poslání – učinit z Runway módní bibli New Yorku, a tedy zároveň celého světa – nepřipustí, aby jí cokoliv stálo v cestě… včetně dlouhé řady asistentek, které nesplnily její očekávání. Je to práce, ve které nemůže vydržet nikdo, kdo má alespoň špetku sebeúcty – ale zároveň místo, pro něž by milióny mladých Newyorčanek dokázaly zabít. Místo Mirandiny asistentky by mohlo být bránou do velkého světa módy pro čerstvou absolventku prestižní vysoké školy Andy Sachs (Anne Hathaway). V nevýrazném oblečení, které ji pasuje spíše na nesmělou studentku než na moderní ženu, působí mezi armádou superštíhlých módních dračic, křižujících chodby manhattanské centrály časopisu v botách na jehlovém podpatku, jako pěst na oko. Už během první návštěvy jí začíná být jasné, že úspěch v tomhle průmyslu vyžaduje víc než jen nadšení a odhodlání. Miranda má sice celý módní svět obtočený kolem prstu, ale má velké potíže najít a udržet si dobrou asistentku. Andy se pro tuhle práci naprosto nehodí. Má však něco, co ostatní adeptky postrádají: Nehodlá se smířit s neúspěchem. Aby se stala perfektní asistentkou, musí se změnit podle Mirandiných představ. Brzy umí – k nevelkému nadšení svého přítele (Adrian Grenier) – mluvit jako prvotřídní znalec moderních trendů, chodit jako modelka a už si za žádných okolností neplete Dolceho s Gabbanou. Čím více však vidí očima Mirandy, tím více si uvědomuje, že její nový svět je úžasné, avšak velmi nelítostné místo – a že uspět v něm někdy vyžaduje velké oběti. Předlohou filmu Ďábel nosí Pradu je stejnojmenný knižní hit z pera Lauren Weisberger, který strávil šest měsíců na žebříčku bestsellerů The New York Times a byl přeložen do 27 jazyků. Režíroval ho David Frankel, který zkoumal vrtochy módního světa a celebrit již v úspěšném seriálu Sex ve městě.(oficiální text distributora)\n\nČSFD: 69% (38.1k)",
+      "csfdRating": 69,
+      "csfdRatingCount": 38115
+    },
+    {
+      "imdb": "tt5950044",
+      "name": "Superman",
+      "year": 2025,
+      "genres": [
+        "Akční",
+        "Dobrodružný",
+        "Sci-Fi",
+        "Fantasy"
+      ],
+      "releaseInfo": "2025 • ČSFD: 63% (8.9k)",
+      "poster": "https://images.metahub.space/poster/small/tt5950044/img?src=cinemeta",
+      "background": "https://images.metahub.space/background/medium/tt5950044/img?src=cinemeta",
+      "imdbRating": "7.1",
+      "csfdId": 1328563,
+      "description": "James Gunn se svým osobitým stylem ujme původního superhrdiny v nově přetvořeném univerzu DC a ve strhující směsici epické akce, humoru a emocí představí divákům Supermana plného soucitu a víry v dobro lidstva.(Vertical Entertainment)\n\nČSFD: 63% (8.9k)",
+      "csfdRating": 63,
+      "csfdRatingCount": 8859
+    },
+    {
+      "imdb": "tt21235248",
+      "name": "Krotitelé duchů: Říše ledu",
+      "year": 2024,
+      "genres": [
+        "Dobrodružný",
+        "Sci-Fi",
+        "Fantasy",
+        "Komedie"
+      ],
+      "releaseInfo": "2024 • ČSFD: 57% (4.1k)",
+      "poster": "https://images.metahub.space/poster/small/tt21235248/img?src=cinemeta",
+      "background": "https://images.metahub.space/background/medium/tt21235248/img?src=cinemeta",
+      "imdbRating": "6.1",
+      "runtime": "115 min",
+      "csfdId": 1218155,
+      "description": "Ve snímku Krotitelé duchů: Říše ledu se rodina Spenglerových vrací tam, kde to všechno začalo, tedy do legendární hasičské stanice v New Yorku, aby zde její členové spojili síly s původními Krotiteli duchů. Ti mezitím vybudovali přísně tajnou laboratoř, jejímž účelem je posunout chytání duchů na zcela novou úroveň. Když ale do našeho světa prostřednictvím starobylého artefaktu proniknou zlé síly, musejí novopečení Krotitelé duchů i staří veteráni vynaložit veškeré úsilí na to, aby ochránili svůj domov a zachránili celý svět před příchodem nové doby ledové.(Falcon)\n\nČSFD: 57% (4.1k)",
+      "csfdRating": 57,
+      "csfdRatingCount": 4120
+    }
+  ]
+}

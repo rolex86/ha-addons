@@ -1,0 +1,167 @@
+{
+  "id": "sp_dad_series",
+  "name": "Smart Picks – Táta (seriály)",
+  "type": "series",
+  "generatedAt": "2026-01-16T14:29:26.298Z",
+  "items": [
+    {
+      "imdb": "tt7491982",
+      "name": "FBI",
+      "year": 2018,
+      "genres": [
+        "crime",
+        "drama",
+        "action",
+        "adventure"
+      ],
+      "releaseInfo": "2018",
+      "poster": "https://images.metahub.space/poster/small/tt7491982/img?src=cinemeta",
+      "background": "https://images.metahub.space/background/medium/tt7491982/img?src=cinemeta",
+      "imdbRating": "7.1",
+      "runtime": "42 min",
+      "description": "Follows the inner workings of the New York Field Office of the FBI, as they fight to keep New York City and the country safe."
+    },
+    {
+      "imdb": "tt10946316",
+      "name": "The Institute",
+      "year": 2025,
+      "genres": [
+        "mystery",
+        "thriller",
+        "fantasy",
+        "science-fiction"
+      ],
+      "releaseInfo": "2025",
+      "poster": "https://images.metahub.space/poster/small/tt10946316/img?src=cinemeta",
+      "background": "https://images.metahub.space/background/medium/tt10946316/img?src=cinemeta",
+      "imdbRating": "6.7",
+      "runtime": "51 min",
+      "description": "A teen genius wakes up in a strange place full of children who got there the same way he did, and who all, like him, possess unusual abilities."
+    },
+    {
+      "imdb": "tt27191732",
+      "name": "Dope Girls",
+      "year": 2025,
+      "genres": [
+        "crime",
+        "drama"
+      ],
+      "releaseInfo": "2025",
+      "poster": "https://live.metahub.space/poster/small/tt27191732/img?src=cinemeta",
+      "background": "https://live.metahub.space/background/medium/tt27191732/img?src=cinemeta",
+      "imdbRating": "6.3",
+      "description": "As WWI ends, housewife Kate Galloway sets up a nightclub in Soho to support her daughters. But Kate must contend with a dangerous gangster family and the police to survive."
+    },
+    {
+      "imdb": "tt32268630",
+      "name": "Sheriff Country",
+      "year": 2025,
+      "genres": [
+        "drama",
+        "crime"
+      ],
+      "releaseInfo": "2025",
+      "poster": "https://images.metahub.space/poster/small/tt32268630/img?src=cinemeta",
+      "background": "https://images.metahub.space/background/medium/tt32268630/img?src=cinemeta",
+      "imdbRating": "6.5",
+      "runtime": "43 min",
+      "description": "Mickey Fox investigates criminal activity and patrols the streets of small-town Edgewater while contending with her ex-con father and a mysterious incident involving her wayward daughter."
+    },
+    {
+      "imdb": "tt33258199",
+      "name": "A Wild Last Boss Appeared!",
+      "year": 2025,
+      "genres": [
+        "anime",
+        "action",
+        "adventure",
+        "fantasy",
+        "science-fiction",
+        "drama"
+      ],
+      "releaseInfo": "2025",
+      "poster": "https://images.metahub.space/poster/small/tt33258199/img?src=cinemeta",
+      "background": "https://images.metahub.space/background/medium/tt33258199/img?src=cinemeta",
+      "imdbRating": "7.3",
+      "runtime": "24 min",
+      "description": "The last boss of a great battle with heroes returns 200 years after her defeat to explore the world and its changes since her time."
+    },
+    {
+      "imdb": "tt32066226",
+      "name": "Bookish",
+      "year": 2025,
+      "genres": [
+        "crime",
+        "mystery",
+        "drama"
+      ],
+      "releaseInfo": "2025",
+      "poster": "https://images.metahub.space/poster/small/tt32066226/img?src=cinemeta",
+      "background": "https://images.metahub.space/background/medium/tt32066226/img?src=cinemeta",
+      "imdbRating": "7.2",
+      "runtime": "52 min",
+      "description": "Gabriel Book, proprietor of an antiquarian bookshop, relies on his vast collection to unravel baffling cases. He nurtures a group of lovable yet troubled individuals, providing informal protection and guidance."
+    },
+    {
+      "imdb": "tt1606375",
+      "name": "Downton Abbey",
+      "year": 2010,
+      "genres": [
+        "drama"
+      ],
+      "releaseInfo": "2010",
+      "poster": "https://images.metahub.space/poster/small/tt1606375/img?src=cinemeta",
+      "background": "https://images.metahub.space/background/medium/tt1606375/img?src=cinemeta",
+      "imdbRating": "8.7",
+      "runtime": "55 min",
+      "description": "A chronicle of the lives of the British aristocratic Crawley family and their servants in the early twentieth century."
+    },
+    {
+      "imdb": "tt37660730",
+      "name": "Beyond the Bar",
+      "year": 2025,
+      "genres": [
+        "drama"
+      ],
+      "releaseInfo": "2025",
+      "poster": "https://images.metahub.space/poster/small/tt37660730/img?src=cinemeta",
+      "background": "https://images.metahub.space/background/medium/tt37660730/img?src=cinemeta",
+      "imdbRating": "8.1",
+      "runtime": "71 min",
+      "description": "A young, rookie lawyer with a strong sense of justice joins a top law firm - navigating the complex legal world under a cold, demanding mentor."
+    },
+    {
+      "imdb": "tt37538765",
+      "name": "Silence",
+      "year": 2025,
+      "genres": [
+        "comedy",
+        "drama",
+        "fantasy",
+        "science-fiction"
+      ],
+      "releaseInfo": "2025",
+      "poster": "https://live.metahub.space/poster/small/tt37538765/img?src=cinemeta",
+      "background": "https://live.metahub.space/background/medium/tt37538765/img?src=cinemeta",
+      "imdbRating": "5.4",
+      "description": "In the shadows of history, a secret beats like a pulse. Two vampire sisters survive a shortage of “clean human blood” during the Black Death, but the true poison is the silence that surrounds them. Centuries later, one of their descendants faces the same conflict during the AIDS pandemic in Spain and discovers that social condemnation has not changed. Love between the “sick” and the “healthy,” between humans and vampires, still inspires the same terror. What happens when eternity is measured in centuries of silence?"
+    },
+    {
+      "imdb": "tt38491451",
+      "name": "Tatsuki Fujimoto 17-26",
+      "year": 2025,
+      "genres": [
+        "anime",
+        "drama",
+        "comedy",
+        "fantasy",
+        "science-fiction"
+      ],
+      "releaseInfo": "2025",
+      "poster": "https://live.metahub.space/poster/small/tt38491451/img?src=cinemeta",
+      "background": "https://live.metahub.space/background/medium/tt38491451/img?src=cinemeta",
+      "imdbRating": "8.1",
+      "description": "Six studios and seven directors adapt the early works of Tatsuki Fujimoto, the mastermind behind \"Chainsaw Man,\" into an anime anthology. Each episode is an anime adaptation of a short story he drew from ages seventeen to twenty-six, including the first manga he ever submitted for competition. Watch as vivid tales of young love, chaos, madness, and the bonds between people unfold in each episode."
+    }
+  ]
+}

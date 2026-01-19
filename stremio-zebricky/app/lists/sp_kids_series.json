@@ -1,0 +1,172 @@
+{
+  "id": "sp_kids_series",
+  "name": "Smart Picks – Děti (seriály)",
+  "type": "series",
+  "generatedAt": "2026-01-16T14:29:27.992Z",
+  "items": [
+    {
+      "imdb": "tt0244365",
+      "name": "Star Trek: Enterprise",
+      "year": 2001,
+      "genres": [
+        "drama",
+        "action",
+        "adventure",
+        "science-fiction",
+        "fantasy"
+      ],
+      "releaseInfo": "2001",
+      "poster": "https://images.metahub.space/poster/small/tt0244365/img?src=cinemeta",
+      "background": "https://images.metahub.space/background/medium/tt0244365/img?src=cinemeta",
+      "imdbRating": "7.6",
+      "runtime": "60 min",
+      "description": "A century before Captain Kirk's five-year mission, Jonathan Archer captains the United Earth ship Enterprise during the early years of Starfleet, leading up to the Earth-Romulan War and the formation of the Federation."
+    },
+    {
+      "imdb": "tt35047134",
+      "name": "Man vs Baby",
+      "year": 2025,
+      "genres": [
+        "comedy",
+        "family"
+      ],
+      "releaseInfo": "2025",
+      "poster": "https://images.metahub.space/poster/small/tt35047134/img?src=cinemeta",
+      "background": "https://images.metahub.space/background/medium/tt35047134/img?src=cinemeta",
+      "runtime": "29 min",
+      "description": "After a disastrous experience housesitting a high-tech mansion hampered by an inconvenient insect in Man vs Bee, Trevor Bingley now finds himself looking after a luxurious London penthouse, with another unlikely companion he didn'..."
+    },
+    {
+      "imdb": "tt8634332",
+      "name": "The Righteous Gemstones",
+      "year": 2019,
+      "genres": [
+        "comedy",
+        "drama"
+      ],
+      "releaseInfo": "2019",
+      "poster": "https://images.metahub.space/poster/small/tt8634332/img?src=cinemeta",
+      "background": "https://images.metahub.space/background/medium/tt8634332/img?src=cinemeta",
+      "imdbRating": "8.1",
+      "runtime": "37 min",
+      "description": "Follows a world-famous televangelist family with a long tradition of deviance, greed, and charitable work."
+    },
+    {
+      "imdb": "tt3743822",
+      "name": "Fear the Walking Dead",
+      "year": 2015,
+      "genres": [
+        "drama",
+        "action",
+        "adventure",
+        "horror"
+      ],
+      "releaseInfo": "2015",
+      "poster": "https://images.metahub.space/poster/small/tt3743822/img?src=cinemeta",
+      "background": "https://images.metahub.space/background/medium/tt3743822/img?src=cinemeta",
+      "imdbRating": "6.8",
+      "runtime": "46 min",
+      "description": "A Walking Dead spinoff set in Los Angeles, California. Follows two families who must band together to survive the undead apocalypse."
+    },
+    {
+      "imdb": "tt10233448",
+      "name": "Vinland Saga",
+      "year": 2019,
+      "genres": [
+        "action",
+        "adventure",
+        "anime",
+        "drama",
+        "war",
+        "history"
+      ],
+      "releaseInfo": "2019",
+      "poster": "https://images.metahub.space/poster/small/tt10233448/img?src=cinemeta",
+      "background": "https://images.metahub.space/background/medium/tt10233448/img?src=cinemeta",
+      "imdbRating": "8.8",
+      "runtime": "26 min",
+      "description": "Following a tragedy, Thorfinn embarks on a journey with the man responsible for it to take his life in a duel as a true and honorable warrior to pay homage."
+    },
+    {
+      "imdb": "tt33132245",
+      "name": "Sword Of Coming",
+      "year": 2024,
+      "genres": [
+        "donghua",
+        "action",
+        "adventure",
+        "fantasy",
+        "science-fiction"
+      ],
+      "releaseInfo": "2024",
+      "poster": "https://images.metahub.space/poster/small/tt33132245/img?src=cinemeta",
+      "background": "https://images.metahub.space/background/medium/tt33132245/img?src=cinemeta",
+      "imdbRating": "8.1",
+      "runtime": "26 min",
+      "description": "This coming-of-age tale follows a young man who discovers a hidden world of cultivation and martial arts."
+    },
+    {
+      "imdb": "tt0264235",
+      "name": "Curb Your Enthusiasm",
+      "year": 2000,
+      "genres": [
+        "comedy"
+      ],
+      "releaseInfo": "2000",
+      "poster": "https://images.metahub.space/poster/small/tt0264235/img?src=cinemeta",
+      "background": "https://images.metahub.space/background/medium/tt0264235/img?src=cinemeta",
+      "imdbRating": "8.8",
+      "runtime": "33 min",
+      "description": "Larry David stars as an over-the-top version of himself in this comedy series that shows how seemingly trivial details of day-to-day life can precipitate a catastrophic chain of events."
+    },
+    {
+      "imdb": "tt12637874",
+      "name": "Fallout",
+      "year": 2024,
+      "genres": [
+        "action",
+        "adventure",
+        "fantasy",
+        "science-fiction"
+      ],
+      "releaseInfo": "2024",
+      "poster": "https://images.metahub.space/poster/small/tt12637874/img?src=cinemeta",
+      "background": "https://images.metahub.space/background/medium/tt12637874/img?src=cinemeta",
+      "imdbRating": "8.3",
+      "runtime": "58 min",
+      "description": "In a future, post-apocalyptic Los Angeles brought about by nuclear decimation, citizens must live in underground bunkers to protect themselves from radiation, mutants and bandits."
+    },
+    {
+      "imdb": "tt12324366",
+      "name": "Percy Jackson and the Olympians",
+      "year": 2023,
+      "genres": [
+        "action",
+        "adventure",
+        "drama",
+        "fantasy",
+        "family"
+      ],
+      "releaseInfo": "2023",
+      "poster": "https://images.metahub.space/poster/small/tt12324366/img?src=cinemeta",
+      "background": "https://images.metahub.space/background/medium/tt12324366/img?src=cinemeta",
+      "imdbRating": "7.0",
+      "runtime": "40 min",
+      "description": "Demigod Percy Jackson leads a quest across America to prevent a war among the Olympian gods."
+    },
+    {
+      "imdb": "tt0108778",
+      "name": "Friends",
+      "year": 1994,
+      "genres": [
+        "comedy"
+      ],
+      "releaseInfo": "1994",
+      "poster": "https://images.metahub.space/poster/small/tt0108778/img?src=cinemeta",
+      "background": "https://images.metahub.space/background/medium/tt0108778/img?src=cinemeta",
+      "imdbRating": "8.9",
+      "runtime": "22 min",
+      "description": "The personal and professional lives of six friends living in the Manhattan borough of New York City."
+    }
+  ]
+}

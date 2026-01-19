@@ -1,0 +1,847 @@
+<!doctype html>
+<html lang="cs">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Config UI – Vlastní žebříčky</title>
+  <style>
+    :root{
+      --bg:#0b0f14;
+      --panel:#111823;
+      --panel2:#0f1620;
+      --text:#e9eef7;
+      --muted:#9aa7b7;
+      --border:rgba(255,255,255,.10);
+      --border2:rgba(255,255,255,.08);
+      --shadow:0 10px 30px rgba(0,0,0,.35);
+      --radius:16px;
+      --radius2:12px;
+      --gap:14px;
+      --blue:#2d8cff;
+      --green:#22c55e;
+      --red:#ef4444;
+      --yellow:#f59e0b;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      --sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Sans", "Liberation Sans", sans-serif;
+    }
+    *{ box-sizing:border-box; }
+    html,body{ height:100%; }
+    body{
+      margin:0;
+      font-family:var(--sans);
+      background:
+        radial-gradient(900px 600px at 20% 0%, rgba(45,140,255,.16), transparent 55%),
+        radial-gradient(900px 600px at 80% 10%, rgba(34,197,94,.10), transparent 60%),
+        var(--bg);
+      color:var(--text);
+    }
+
+    .wrap{ max-width:1400px; margin:0 auto; padding:18px 18px 28px; }
+
+    .topbar{
+      display:flex; align-items:center; justify-content:space-between; gap:12px;
+      padding:14px 16px;
+      background:linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.02));
+      border:1px solid var(--border);
+      border-radius:var(--radius);
+      box-shadow:var(--shadow);
+      position:sticky; top:12px; z-index:10;
+      backdrop-filter: blur(6px);
+    }
+    .brand{ display:flex; flex-direction:column; gap:2px; min-width:260px; }
+    .brand .h{ font-weight:800; letter-spacing:.02em; }
+    .brand .s{ font-size:12px; color:var(--muted); }
+
+    .actions{
+      display:flex; align-items:center; gap:10px;
+      flex-wrap:wrap; justify-content:flex-end;
+    }
+
+    .grid{ margin-top:16px; display:grid; grid-template-columns: 380px 1fr; gap:var(--gap); align-items:start; }
+    @media (max-width: 1100px){
+      .grid{ grid-template-columns: 1fr; }
+      .brand{ min-width:unset; }
+      .actions{ justify-content:flex-start; }
+    }
+
+    .card{
+      background:linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02));
+      border:1px solid var(--border);
+      border-radius:var(--radius);
+      box-shadow:var(--shadow);
+      padding:16px;
+    }
+    .card h3{ margin:0 0 12px 0; font-size:13px; letter-spacing:.08em; text-transform:uppercase; color:#cfe0ff; }
+    .sub{ margin:0 0 12px 0; color:var(--muted); font-size:13px; line-height:1.45; }
+
+    label.small{ display:block; margin:10px 0 6px; font-size:12px; color:var(--muted); }
+
+    /* IMPORTANT: match inputs even if type is missing (SmartPicks) */
+    input:not([type="checkbox"]):not([type="range"]),
+    select, textarea{
+      width:100%;
+      padding:10px 12px;
+      border-radius:12px;
+      border:1px solid var(--border2);
+      outline:none;
+      background:rgba(0,0,0,.22);
+      color:var(--text);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.04);
+    }
+    textarea{ min-height:90px; resize:vertical; }
+
+    .row2{ display:grid; grid-template-columns: 1fr 1fr; gap:12px; }
+    @media (max-width: 700px){ .row2{ grid-template-columns:1fr; } }
+
+    .btn{
+      border:1px solid var(--border2);
+      background:rgba(255,255,255,.06);
+      color:var(--text);
+      padding:10px 12px;
+      border-radius:12px;
+      cursor:pointer;
+      font-weight:700;
+      transition:.15s transform, .15s opacity, .15s background;
+      user-select:none;
+    }
+    .btn:hover{ transform: translateY(-1px); background:rgba(255,255,255,.09); }
+    .btn:active{ transform: translateY(0px); opacity:.9; }
+
+    .btn.primary{ background:rgba(45,140,255,.18); border-color:rgba(45,140,255,.35); }
+    .btn.primary:hover{ background:rgba(45,140,255,.25); }
+    .btn.danger{ background:rgba(239,68,68,.15); border-color:rgba(239,68,68,.35); }
+    .btn.danger:hover{ background:rgba(239,68,68,.22); }
+    .btn.success{ background:rgba(34,197,94,.14); border-color:rgba(34,197,94,.32); }
+    .btn.success:hover{ background:rgba(34,197,94,.20); }
+    .btn.small{ padding:7px 10px; font-size:12px; border-radius:10px; }
+
+    .pill{
+      display:inline-flex; align-items:center; gap:6px;
+      padding:6px 10px;
+      border-radius:999px;
+      border:1px solid var(--border2);
+      background:rgba(0,0,0,.18);
+      color:var(--muted);
+      font-size:12px;
+      white-space:nowrap;
+    }
+    .pill strong{ color:var(--text); }
+
+    .mono{ font-family:var(--mono); }
+    .muted{ color:var(--muted); }
+
+    .divider{ height:1px; background:var(--border2); margin:16px 0; }
+
+    table{
+      width:100%;
+      border-collapse:separate;
+      border-spacing:0;
+      overflow:hidden;
+      border-radius:14px;
+      border:1px solid var(--border2);
+    }
+    th,td{
+      text-align:left;
+      padding:12px 12px;
+      font-size:13px;
+      border-bottom:1px solid rgba(255,255,255,.06);
+      vertical-align:middle;
+    }
+    th{
+      font-size:12px;
+      color:var(--muted);
+      background:rgba(255,255,255,.04);
+      position:sticky;
+      top:0;
+      z-index:1;
+    }
+    tr:last-child td{ border-bottom:none; }
+
+    .tableBtn{
+      display:inline-flex; align-items:center; justify-content:center; gap:8px;
+      padding:8px 12px;
+      border-radius:12px;
+      border:1px solid var(--border2);
+      background:rgba(255,255,255,.06);
+      color:var(--text);
+      font-weight:800;
+      cursor:pointer;
+      transition:.15s transform, .15s background, .15s opacity;
+      user-select:none;
+    }
+    .tableBtn:hover{ transform:translateY(-1px); background:rgba(255,255,255,.10); }
+    .tableBtn:active{ transform:translateY(0px); opacity:.92; }
+
+    /* Year sliders */
+    .yearGrid{ display:grid; grid-template-columns: 1fr 1fr; gap:12px; align-items:start; }
+    @media (max-width: 900px){ .yearGrid{ grid-template-columns:1fr; } }
+    .yearBox{
+      border:1px solid var(--border2);
+      border-radius:14px;
+      padding:14px;
+      background:rgba(0,0,0,.16);
+    }
+    .yearBox .head{
+      display:flex; align-items:center; justify-content:space-between;
+      gap:10px; margin-bottom:8px; color:var(--muted); font-size:12px;
+    }
+    input[type="range"]{ width:100%; margin:8px 0 0; accent-color: var(--blue); }
+    .hint{ margin-top:8px; color:var(--muted); font-size:12px; line-height:1.4; }
+
+    /* Genres (List editor) */
+    .genrePanel{
+      border:1px solid var(--border2);
+      border-radius:14px;
+      padding:14px;
+      background:rgba(0,0,0,.16);
+    }
+    .genreTop{
+      display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:10px;
+    }
+    .genreTop input{ flex:1 1 220px; }
+
+    #genreBox{
+      display:grid;
+      grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+      gap:8px 10px;
+      margin-top:8px;
+      max-height:260px;
+      overflow:auto;
+      padding-right:6px;
+    }
+
+    .genreItem{
+      display:flex; align-items:center; gap:10px;
+      border:1px solid rgba(255,255,255,.07);
+      background:rgba(255,255,255,.03);
+      border-radius:999px;
+      padding:7px 10px;
+      cursor:pointer;
+      user-select:none;
+    }
+    .genreItem:hover{ background:rgba(255,255,255,.05); }
+    .genreItem input{ width:16px; height:16px; margin:0; accent-color:var(--blue); flex:0 0 auto; }
+    .genreItem code{ font-family:var(--mono); font-size:12px; color:#d9e6ff; background:transparent; }
+
+    .card.noShift{ padding-left:16px !important; padding-right:16px !important; margin-left:0 !important; }
+
+    /* accordion */
+    .section{
+      border:1px solid var(--border2);
+      border-radius:14px;
+      background:rgba(0,0,0,.12);
+      overflow:hidden;
+      margin-bottom:14px;
+    }
+    .section > summary{
+      list-style:none;
+      cursor:pointer;
+      padding:12px 14px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      background:linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.02));
+      border-bottom:1px solid rgba(255,255,255,.06);
+      user-select:none;
+    }
+    .section > summary::-webkit-details-marker{ display:none; }
+    .sectionTitle{ display:flex; flex-direction:column; gap:2px; }
+    .sectionTitle strong{ letter-spacing:.06em; text-transform:uppercase; font-size:12px; color:#cfe0ff; }
+    .sectionTitle span{ font-size:12px; color:var(--muted); }
+    .sectionChevron{
+      font-size:12px; color:var(--muted);
+      padding:6px 10px; border-radius:999px;
+      border:1px solid var(--border2); background:rgba(0,0,0,.18);
+      white-space:nowrap;
+    }
+    details[open] > summary .sectionChevron{ color:var(--text); }
+    .sectionBody{ padding:14px; }
+
+    /* SmartPicks styling */
+    .row{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+    .grid2{ display:grid; grid-template-columns: 1fr 1fr; gap:12px; align-items:start; }
+    @media (max-width: 1000px){ .grid2{ grid-template-columns:1fr; } }
+
+    .box{
+      border:1px solid var(--border2);
+      border-radius:14px;
+      background:rgba(0,0,0,.16);
+      padding:14px;
+    }
+    .boxHead{
+      display:flex; align-items:center; justify-content:space-between;
+      gap:10px; margin-bottom:10px;
+      color:var(--text); font-size:13px;
+    }
+    .tableWrap{ overflow:auto; border-radius:12px; }
+    table.tbl th, table.tbl td{ padding:10px 10px; font-size:12.5px; }
+    table.tbl th{ font-size:12px; }
+
+    .field{ display:flex; flex-direction:column; gap:6px; }
+    .lbl{ font-size:12px; color:var(--muted); }
+    .chk{ display:flex; align-items:center; gap:8px; color:var(--text); font-size:13px; }
+    .chk input{ width:16px; height:16px; accent-color:var(--blue); }
+
+    .hr{ height:1px; background:rgba(255,255,255,.08); margin:12px 0; }
+
+    .subHead{
+      display:flex; align-items:baseline; justify-content:space-between;
+      gap:10px; flex-wrap:wrap; margin-bottom:8px;
+    }
+    .subHead strong{ font-size:13px; }
+
+    .chipBox{
+      display:grid;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap:8px 10px;
+      padding-right:6px;
+      max-height:200px;
+      overflow:auto;
+    }
+    .chip{
+      display:flex; align-items:center; gap:10px;
+      padding:8px 10px;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,.07);
+      background:rgba(255,255,255,.03);
+      cursor:pointer;
+      user-select:none;
+    }
+    .chip:hover{ background:rgba(255,255,255,.05); }
+    .chip input{ width:16px; height:16px; margin:0; accent-color:var(--blue); flex:0 0 auto; }
+
+    .checkList{
+      max-height:260px;
+      overflow:auto;
+      padding-right:6px;
+      display:grid;
+      gap:8px;
+    }
+    .chkRow{
+      display:flex; align-items:flex-start; gap:10px;
+      padding:8px 10px;
+      border-radius:12px;
+      border:1px solid rgba(255,255,255,.07);
+      background:rgba(255,255,255,.03);
+      cursor:pointer;
+      user-select:none;
+    }
+    .chkRow:hover{ background:rgba(255,255,255,.05); }
+    .chkRow input{ width:16px; height:16px; margin-top:2px; accent-color:var(--blue); flex:0 0 auto; }
+    .chkRow span{ font-size:12.5px; line-height:1.35; }
+
+    .genreBox{
+      display:grid;
+      grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+      gap:8px 10px;
+      max-height:260px;
+      overflow:auto;
+      padding-right:6px;
+      border:1px solid rgba(255,255,255,.06);
+      border-radius:12px;
+      padding:10px;
+      background:rgba(0,0,0,.10);
+    }
+    .genreTri{
+      display:flex; align-items:center; gap:10px;
+      width:100%;
+      text-align:left;
+      border-radius:999px;
+      padding:8px 10px;
+      border:1px solid rgba(255,255,255,.07);
+      background:rgba(255,255,255,.03);
+      color:var(--text);
+      cursor:pointer;
+      user-select:none;
+    }
+    .genreTri:hover{ background:rgba(255,255,255,.05); }
+    .genreTri code{ font-family:var(--mono); font-size:12px; color:#d9e6ff; }
+    .genreTri[data-state="include"]{ border-color: rgba(34,197,94,.35); background: rgba(34,197,94,.10); }
+    .genreTri[data-state="exclude"]{ border-color: rgba(239,68,68,.35); background: rgba(239,68,68,.10); }
+
+    .compactBottom{
+      margin-top:12px;
+      display:flex;
+      justify-content:flex-end;
+      gap:10px;
+      flex-wrap:wrap;
+    }
+
+    /* Update log box */
+    .logBox{
+      border:1px solid rgba(255,255,255,.08);
+      border-radius:12px;
+      background:rgba(0,0,0,.18);
+      padding:12px;
+      max-height:340px;
+      overflow:auto;
+      font-family:var(--mono);
+      font-size:12px;
+      line-height:1.45;
+      white-space:pre-wrap;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+    <div class="topbar">
+      <div class="brand">
+        <div class="h">Config UI – Vlastní žebříčky</div>
+        <div class="s">Upravuje <span class="mono">config/lists.trakt.json</span> a <span class="mono">config/secrets.json</span></div>
+      </div>
+      <div class="actions">
+        <span class="pill">Seznamů: <strong id="countPill">0</strong></span>
+        <input id="token" type="password" placeholder="CONFIG_UI_TOKEN (pokud je zapnutý)" style="max-width:320px;">
+        <button class="btn small" id="btnLoad" type="button">Načíst z disku</button>
+        <button class="btn success small" id="btnSaveAll" type="button">Uložit vše na disk</button>
+        <button class="btn small" id="btnRunUpdate" type="button">Spustit aktualizaci</button>
+        <button class="btn danger small" id="btnStopUpdate" type="button">Stop</button>
+        <button class="btn small" id="btnRestartAddon" type="button">Restart add-on serveru</button>
+        <span id="status" class="pill">Status: <strong>—</strong></span>
+        <span id="updatePill" class="pill">Update: <strong>—</strong></span>
+      </div>
+    </div>
+
+    <div class="grid">
+      <!-- LEFT -->
+      <div class="card">
+        <h3>Defaults</h3>
+        <p class="sub">Výchozí hodnoty pro generování (lze přepsat per-list).</p>
+
+        <label class="small">candidatePages</label>
+        <input id="d_candidatePages" type="number" min="1" step="1" />
+
+        <label class="small">pageLimit</label>
+        <input id="d_pageLimit" type="number" min="1" step="1" />
+
+        <label class="small">finalSize</label>
+        <input id="d_finalSize" type="number" min="1" step="1" />
+
+        <label class="small">sleepMs</label>
+        <input id="d_sleepMs" type="number" min="0" step="10" />
+
+        <label class="small">timeoutMs</label>
+        <input id="d_timeoutMs" type="number" min="1000" step="500" />
+
+        <label class="small">csfdCacheTtlDays</label>
+        <input id="d_csfdTtl" type="number" min="1" step="1" />
+
+        <div class="divider"></div>
+
+        <h3>dupRules</h3>
+        <p class="sub">Aby se ti napříč řádky neopakovaly stejné filmy.</p>
+
+        <label class="small">dupRules.hardBlockTop</label>
+        <input id="d_hardTop" type="number" min="0" step="1" />
+
+        <label class="small">dupRules.penaltyPerHit</label>
+        <input id="d_penalty" type="number" min="0" step="1" />
+
+        <div class="divider"></div>
+
+        <h3>Trakt secrets</h3>
+        <p class="sub">Používá se pro Trakt API. Ukládá se do <span class="mono">config/secrets.json</span>.</p>
+
+        <label class="small">TRAKT Client ID</label>
+        <input id="traktId" type="text" placeholder="client_id" />
+
+        <label class="small">TRAKT Client Secret</label>
+        <input id="traktSecret" type="password" placeholder="client_secret" />
+
+        <div class="divider"></div>
+        <p class="sub"><strong>Tip:</strong> pokud jsi v LAN (RPi), nastav <span class="mono">CONFIG_UI_TOKEN</span>.</p>
+      </div>
+
+      <!-- RIGHT -->
+      <div class="card noShift">
+
+        <!-- UPDATE SECTION -->
+        <details class="section">
+          <summary>
+            <div class="sectionTitle">
+              <strong>Aktualizace / enrich</strong>
+              <span>Spustí ručně update proces a streamuje logy</span>
+            </div>
+            <div class="sectionChevron">Rozbalit / sbalit</div>
+          </summary>
+          <div class="sectionBody">
+            <div class="row" style="justify-content:space-between;">
+              <div class="pill">Běží: <strong id="updRunning">—</strong></div>
+              <div class="pill">Progress: <strong id="updProgress">—</strong></div>
+            </div>
+
+            <div class="row" style="margin-top:10px;">
+              <button class="btn small" id="btnClearUpdateLog" type="button">Vyčistit log</button>
+            </div>
+
+            <div id="updateLog" class="logBox" style="margin-top:10px;"></div>
+            <div class="hint">Tip: ve skriptu můžeš logovat <span class="mono">PROGRESS {"label":"list xyz","done":20,"total":500}</span> pro přesnější progress.</div>
+          </div>
+        </details>
+
+        <!-- LISTS SECTION -->
+        <details class="section" open>
+          <summary>
+            <div class="sectionTitle">
+              <strong>Seznamy</strong>
+              <span>Tabulka listů + editor listu</span>
+            </div>
+            <div class="sectionChevron">Rozbalit / sbalit</div>
+          </summary>
+          <div class="sectionBody">
+
+            <p class="sub">Klikni na <strong>Edit</strong> v řádku nebo vytvoř nový list dole.</p>
+
+            <div style="overflow:auto; border-radius:14px;">
+              <table>
+                <thead>
+                  <tr>
+                    <th style="width:160px">id</th>
+                    <th>name</th>
+                    <th style="width:90px">type</th>
+                    <th style="width:230px">source.path</th>
+                    <th style="width:120px">years</th>
+                    <th>genres</th>
+                    <th style="width:110px"></th>
+                  </tr>
+                </thead>
+                <tbody id="tblBody"></tbody>
+              </table>
+            </div>
+
+            <div class="divider"></div>
+
+            <h3>List editor</h3>
+
+            <div class="row2">
+              <div>
+                <label class="small">id (unikátní)</label>
+                <input id="f_id" type="text" placeholder="např. vhs_era" />
+              </div>
+              <div>
+                <label class="small">name (zobrazí se ve Stremiu)</label>
+                <input id="f_name" type="text" placeholder="např. VHS éra (1985–2000)" />
+              </div>
+            </div>
+
+            <div class="row2" style="margin-top:10px;">
+              <div>
+                <label class="small">type</label>
+                <select id="f_type">
+                  <option value="movie">movie</option>
+                  <option value="series">series</option>
+                </select>
+              </div>
+              <div>
+                <label class="small">source.path (Trakt)</label>
+                <select id="f_source"></select>
+              </div>
+            </div>
+
+            <div style="margin-top:12px;">
+              <label class="small">Roky (od–do)</label>
+              <div class="yearGrid">
+                <div class="yearBox">
+                  <div class="head">
+                    <span>Od</span>
+                    <input id="yearMinNum" type="number" style="width:110px;" />
+                  </div>
+                  <input id="yearMin" type="range" />
+                </div>
+
+                <div class="yearBox">
+                  <div class="head">
+                    <span>Do</span>
+                    <input id="yearMaxNum" type="number" style="width:110px;" />
+                  </div>
+                  <input id="yearMax" type="range" />
+                </div>
+              </div>
+
+              <div class="hint">
+                Vybrané roky se uloží do <span class="mono">filters.years</span> jako <span class="mono">YYYY-YYYY</span>.
+                Když necháš plný rozsah, uloží se prázdný filter.
+              </div>
+
+              <input id="f_years" type="text" style="display:none" />
+            </div>
+
+            <div style="margin-top:12px;">
+              <label class="small">Žánry (klikni + filtruj)</label>
+
+              <div class="genrePanel">
+                <div class="genreTop">
+                  <input id="genreSearch" type="text" placeholder="hledej žánr… (např. thri)" />
+                  <input id="genreCustom" type="text" placeholder="přidat vlastní žánr (slug)" style="max-width:260px;" />
+                  <button class="btn small" id="btnAddGenre" type="button">Přidat</button>
+                  <button class="btn small" id="btnClearGenres" type="button">Vyčistit</button>
+                </div>
+
+                <div id="genreBox"></div>
+
+                <div class="hint">
+                  Výsledek se uloží jako CSV do <span class="mono">filters.genres</span> (např. <span class="mono">action,thriller,crime</span>).
+                </div>
+
+                <input id="f_genres" type="text" style="display:none" />
+              </div>
+            </div>
+
+            <div id="csfdRow" style="margin-top:14px;">
+              <h3>ČSFD filtry (jen pro movie)</h3>
+
+              <div class="row2">
+                <div>
+                  <label class="small">csfdRules.minRating</label>
+                  <input id="f_minRating" type="number" min="0" max="100" step="1" placeholder="např. 70" />
+                </div>
+                <div>
+                  <label class="small">csfdRules.minCount</label>
+                  <input id="f_minCount" type="number" min="0" step="1" placeholder="např. 800" />
+                </div>
+              </div>
+
+              <div class="row2" style="margin-top:10px;">
+                <div>
+                  <label class="small">csfdRules.maxCount</label>
+                  <input id="f_maxCount" type="number" min="0" step="1" placeholder="např. 60000" />
+                </div>
+                <div></div>
+              </div>
+            </div>
+
+            <div class="divider"></div>
+
+            <h3>Per-list overrides (volitelné)</h3>
+            <div class="row2">
+              <div>
+                <label class="small">candidatePages</label>
+                <input id="f_candidatePages" type="number" min="1" step="1" placeholder="nechat prázdné = defaults" />
+              </div>
+              <div>
+                <label class="small">pageLimit</label>
+                <input id="f_pageLimit" type="number" min="1" step="1" placeholder="nechat prázdné = defaults" />
+              </div>
+            </div>
+
+            <div class="row2" style="margin-top:10px;">
+              <div>
+                <label class="small">finalSize</label>
+                <input id="f_finalSize" type="number" min="1" step="1" placeholder="nechat prázdné = defaults" />
+              </div>
+              <div>
+                <label class="small">sleepMs</label>
+                <input id="f_sleepMs" type="number" min="0" step="10" placeholder="nechat prázdné = defaults" />
+              </div>
+            </div>
+
+            <div class="row2" style="margin-top:10px;">
+              <div>
+                <label class="small">timeoutMs</label>
+                <input id="f_timeoutMs" type="number" min="1000" step="500" placeholder="nechat prázdné = defaults" />
+              </div>
+              <div></div>
+            </div>
+
+            <div class="row2" style="margin-top:10px;">
+              <div>
+                <label class="small">dupRules.hardBlockTop</label>
+                <input id="f_hardTop" type="number" min="0" step="1" placeholder="nechat prázdné = defaults" />
+              </div>
+              <div>
+                <label class="small">dupRules.penaltyPerHit</label>
+                <input id="f_penalty" type="number" min="0" step="1" placeholder="nechat prázdné = defaults" />
+              </div>
+            </div>
+
+            <div class="compactBottom">
+              <button class="btn small" id="btnNew" type="button">Nový</button>
+              <button class="btn small" id="btnSort" type="button">Seřadit podle názvu</button>
+              <button class="btn primary" id="btnUpsert" type="button">Uložit list (do UI)</button>
+              <button class="btn danger" id="btnDelete" type="button">Smazat list</button>
+            </div>
+
+          </div>
+        </details>
+
+        <!-- SMARTPICKS -->
+        <details class="section">
+          <summary>
+            <div class="sectionTitle">
+              <strong>SmartPicks</strong>
+              <span>Profily (Ty / žena / děti) – rozbal jen když to chceš ladit</span>
+            </div>
+            <div class="sectionChevron">Rozbalit / sbalit</div>
+          </summary>
+
+          <div class="sectionBody">
+            <div class="row" style="justify-content:space-between;">
+              <div>
+                <div style="font-weight:800; margin-bottom:6px;">SmartPicks</div>
+                <div class="muted">
+                  Ukládá se do <span class="mono">lists.trakt.json</span> → <span class="mono">lists.smartPicks</span>.
+                </div>
+              </div>
+
+              <div class="row" style="gap:10px;">
+                <label class="chk">
+                  <input id="sp_enabled" type="checkbox" />
+                  <span>Zapnuto</span>
+                </label>
+
+                <label class="field" style="min-width:180px;">
+                  <span class="lbl">Default počet</span>
+                  <input id="sp_defaultSize" type="number" min="1" max="50" step="1" value="10" />
+                </label>
+
+                <button id="btnSpNew" class="btn small" type="button">Nový profil</button>
+                <button id="btnSpSort" class="btn small" type="button">Seřadit</button>
+              </div>
+            </div>
+
+            <div class="divider"></div>
+
+            <!-- Stack (pod sebe) -->
+            <div class="box">
+              <div class="boxHead">
+                <strong>Profily</strong>
+                <span class="pill" id="sp_countPill">0</span>
+              </div>
+
+              <div class="tableWrap">
+                <table class="tbl">
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Název</th>
+                      <th>Typ</th>
+                      <th>Počet</th>
+                      <th>Zdroje</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody id="sp_tblBody"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="divider"></div>
+
+            <div class="box">
+              <div class="boxHead">
+                <strong>Editor profilu</strong>
+                <span class="muted" id="sp_editHint"></span>
+              </div>
+
+              <div class="row2">
+                <label class="field">
+                  <span class="lbl">Profil ID (např. <code>me</code>)</span>
+                  <input id="sp_id" type="text" placeholder="me" />
+                </label>
+
+                <label class="field">
+                  <span class="lbl">Název profilu</span>
+                  <input id="sp_name" type="text" placeholder="Pro mě" />
+                </label>
+              </div>
+
+              <div class="row2" style="margin-top:10px;">
+                <label class="field">
+                  <span class="lbl">Typ</span>
+                  <select id="sp_type">
+                    <option value="movie">Filmy</option>
+                    <option value="series">Seriály</option>
+                  </select>
+                </label>
+
+                <label class="field">
+                  <span class="lbl">Počet položek</span>
+                  <input id="sp_size" type="number" min="1" max="50" step="1" value="10" />
+                </label>
+              </div>
+
+              <div style="margin-top:12px;">
+                <label class="small">Roky (od–do)</label>
+                <div class="yearGrid">
+                  <div class="yearBox">
+                    <div class="head">
+                      <span>Od</span>
+                      <input id="spYearMinNum" type="number" style="width:110px;" />
+                    </div>
+                    <input id="spYearMin" type="range" />
+                  </div>
+
+                  <div class="yearBox">
+                    <div class="head">
+                      <span>Do</span>
+                      <input id="spYearMaxNum" type="number" style="width:110px;" />
+                    </div>
+                    <input id="spYearMax" type="range" />
+                  </div>
+                </div>
+
+                <div class="hint">
+                  Uloží se do <span class="mono">years</span> jako <span class="mono">YYYY-YYYY</span>. Plný rozsah = prázdné (bez filtru).
+                </div>
+
+                <input id="sp_years" type="text" style="display:none" />
+              </div>
+
+              <div class="hr"></div>
+
+              <div class="subHead">
+                <strong>Zdroje</strong>
+                <span class="muted">Trakt + existující listy</span>
+              </div>
+
+              <div class="muted" style="margin:6px 0 8px;">
+                <strong>Trakt zdroje:</strong>
+              </div>
+              <div id="sp_src_trakt" class="chipBox"></div>
+
+              <div class="row" style="gap:8px; margin-top:10px;">
+                <input id="sp_customSource" type="text" class="mono" placeholder="vlastní /movies/... nebo /shows/..." />
+                <button id="btnSpAddSource" class="btn small" type="button">Přidat</button>
+              </div>
+
+              <div class="muted" style="margin:12px 0 8px;">
+                <strong>Existující listy (podle typu):</strong>
+              </div>
+              <div id="sp_src_lists" class="checkList"></div>
+
+              <div class="hr"></div>
+
+              <div class="subHead">
+                <strong>Žánry</strong>
+                <span class="muted">klikáním přepínáš: none → include → exclude</span>
+              </div>
+
+              <div class="row" style="gap:8px; margin-top:8px;">
+                <input id="sp_genreSearch" type="text" placeholder="hledat žánr…" />
+                <button id="btnSpClearGenres" class="btn small" type="button">Vymazat</button>
+              </div>
+
+              <div id="sp_genreBox" class="genreBox" style="margin-top:10px;"></div>
+
+              <input id="sp_includeGenres" type="hidden" />
+              <input id="sp_excludeGenres" type="hidden" />
+
+              <div class="hr"></div>
+
+              <div class="row" style="gap:10px; justify-content:flex-end;">
+                <button id="btnSpDelete" class="btn danger" type="button">Smazat profil</button>
+                <button id="btnSpUpsert" class="btn primary" type="button">Uložit profil</button>
+              </div>
+            </div>
+          </div>
+        </details>
+
+      </div>
+    </div>
+  </div>
+
+  <script src="/client.js"></script>
+</body>
+</html>

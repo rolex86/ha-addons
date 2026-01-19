@@ -1,0 +1,26 @@
+{
+  "name": "stremio-addon-vlastni-zebricky",
+  "version": "0.0.6",
+  "description": "Vlastní žebříčky pro Stremio (Trakt → ČSFD + Cinemeta) + Smart Picks (watched filter)",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+
+    "generate:trakt": "node scripts/generate_lists_trakt_csfd.mjs",
+    "enrich:mix": "node scripts/enrich_poster_cinemeta_text_csfd.mjs",
+    "generate:smartpicks": "node scripts/generate_smart_picks.mjs",
+    "auth:trakt": "node scripts/trakt_device_auth.mjs",
+    "config:ui": "node tools/config-ui/server.js",
+
+
+    "update:lists": "npm run generate:trakt && npm run enrich:mix",
+    "update:nightly": "npm run generate:trakt && npm run enrich:mix && npm run generate:smartpicks",
+
+    "debug:config": "node -e \"console.log(require('fs').readFileSync('./config/lists.trakt.json','utf8'))\""
+  },
+  "dependencies": {
+    "node-csfd-api": "^4.1.3",
+    "stremio-addon-sdk": "^1.1.0"
+  }
+}

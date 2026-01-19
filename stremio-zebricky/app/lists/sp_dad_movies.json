@@ -1,0 +1,193 @@
+{
+  "id": "sp_dad_movies",
+  "name": "Smart Picks – Táta (filmy)",
+  "type": "movie",
+  "generatedAt": "2026-01-16T14:29:22.841Z",
+  "items": [
+    {
+      "imdb": "tt8509458",
+      "name": "Pierre the Pigeon-Hawk",
+      "year": 2022,
+      "genres": [
+        "Animovaný"
+      ],
+      "releaseInfo": 2022,
+      "poster": "https://live.metahub.space/poster/small/tt8509458/img?src=cinemeta",
+      "background": "https://live.metahub.space/background/medium/tt8509458/img?src=cinemeta",
+      "runtime": "84 min",
+      "csfdId": 1078826,
+      "description": "Set in NYC, the musically driven comedy centers on Pierre, born as a product of forbidden love between a hawk and a pigeon. Pierre is rejected by both communities. Tired of not fitting in, Pierre sets out on a mission to discover where he truly belongs.",
+      "csfdRating": null,
+      "csfdRatingCount": 1
+    },
+    {
+      "imdb": "tt0087332",
+      "name": "Krotitelé duchů",
+      "year": 1984,
+      "genres": [
+        "Sci-Fi",
+        "Fantasy",
+        "Komedie",
+        "Dobrodružný"
+      ],
+      "releaseInfo": "1984 • ČSFD: 83% (37.8k)",
+      "poster": "https://images.metahub.space/poster/small/tt0087332/img?src=cinemeta",
+      "background": "https://images.metahub.space/background/medium/tt0087332/img?src=cinemeta",
+      "imdbRating": "7.8",
+      "runtime": "107 min",
+      "csfdId": 10360,
+      "description": "Hejna malých zelených duchů, strašidla a paranormální jevy se začínají objevovat v New Yorku. Kdo může ochránit lidi před těmito nadpřirozenými bytostmi? Pouze tři nezaměstnaní parapsychologové. Dávají se dohromady a vytvářejí tým lovců duchů. Vybaveni ektoplazmovými kanóny, pastmi na duchy a speciálním vozidlem bojují proti přesile slizských oblud.(oficiální text distributora)\n\nČSFD: 83% (37.8k)",
+      "csfdRating": 83,
+      "csfdRatingCount": 37825
+    },
+    {
+      "imdb": "tt15220066",
+      "name": "Marshmallow",
+      "year": 2025,
+      "genres": [
+        "Horor",
+        "Sci-Fi"
+      ],
+      "releaseInfo": "2025 • ČSFD: 45% (237)",
+      "poster": "https://images.metahub.space/poster/small/tt15220066/img?src=cinemeta",
+      "background": "https://images.metahub.space/background/medium/tt15220066/img?src=cinemeta",
+      "imdbRating": "5.9",
+      "runtime": "93 min",
+      "csfdId": 1641314,
+      "description": "Když se kdysi bájná pohádka u táboráku stane skutečností, odhalí skupina táborníků hluboké tajemství, které zpochybňuje jejich samotnou existenci.(JasonCZ)\n\nČSFD: 45% (237)",
+      "csfdRating": 45,
+      "csfdRatingCount": 237
+    },
+    {
+      "imdb": "tt27047903",
+      "name": "Vřískot 7",
+      "year": 2026,
+      "genres": [
+        "Horor",
+        "Thriller",
+        "Mysteriózní"
+      ],
+      "releaseInfo": 2026,
+      "poster": "https://images.metahub.space/poster/small/tt27047903/img?src=cinemeta",
+      "background": "https://images.metahub.space/background/medium/tt27047903/img?src=cinemeta",
+      "csfdId": 1448507,
+      "description": "V poklidném městečku, kde si Sidney Prescott (Neve Campbell) vybudovala nový život, se objeví nový vrah v masce Ghostface. Psychopatický vrah se tentokrát vůbec neskrývá – je chorobně posedlý zničit Sidney celý její život. Nejtemnější obavy Sidney se naplní, když se její dcera (Isabel May) stane jeho dalším cílem. Od­hod­laná chránit svou rodinu, musí Sidney čelit hrůzám své minulosti, aby jednou provždy ukončila krveprolití.(Forum Film CZ)",
+      "csfdRating": null,
+      "csfdRatingCount": 0
+    },
+    {
+      "imdb": "tt20214908",
+      "name": "Další nebezpečná laskavost",
+      "year": 2025,
+      "genres": [
+        "Komedie",
+        "Thriller"
+      ],
+      "releaseInfo": "2025 • ČSFD: 50% (743)",
+      "poster": "https://images.metahub.space/poster/small/tt20214908/img?src=cinemeta",
+      "background": "https://images.metahub.space/background/medium/tt20214908/img?src=cinemeta",
+      "imdbRating": "5.3",
+      "runtime": "123 min",
+      "csfdId": 1631971,
+      "description": "Stephanie Smothersová (Anna Kendrick) a Emily Nelsonová (Blake Lively) se opět setkávají: tentokrát na prosluněném Capri v Itálii, kde si Emily bere za muže bohatého italského podnikatele. Kromě oslnivých hostů se na extravagantní obřad dostaví i notná dávka zrady a vražd a čekají nás zvraty stejně spletité, jako jsou uličky cestou z přístavu do starého města.(Prime Video)\n\nČSFD: 50% (743)",
+      "csfdRating": 50,
+      "csfdRatingCount": 743
+    },
+    {
+      "imdb": "tt32768323",
+      "name": "Hodnocení",
+      "year": 2024,
+      "genres": [
+        "Sci-Fi",
+        "Drama"
+      ],
+      "releaseInfo": "2024 • ČSFD: 67% (416)",
+      "poster": "https://images.metahub.space/poster/small/tt32768323/img?src=cinemeta",
+      "background": "https://images.metahub.space/background/medium/tt32768323/img?src=cinemeta",
+      "imdbRating": "6.6",
+      "runtime": "114 min",
+      "csfdId": 1560422,
+      "description": "Příběh se odehrává v blízké budoucnosti ve světě zničeném změnou klimatu. Část společnosti si vytvořila paralelní svět. Život je řízený a optimalizovaný a touha mít děti také není ponechána náhodě. Život úspěšného mladého páru je proto v průběhu sedmi dnů podroben přísné kontrole hodnotitelky.(JasonCZ)\n\nČSFD: 67% (416)",
+      "csfdRating": 67,
+      "csfdRatingCount": 416
+    },
+    {
+      "imdb": "tt28283547",
+      "name": "Potkani: Příběh ze světa Zaklínače",
+      "year": 2025,
+      "genres": [
+        "Akční",
+        "Dobrodružný",
+        "Fantasy",
+        "Drama"
+      ],
+      "releaseInfo": "2025 • ČSFD: 45% (802)",
+      "poster": "https://images.metahub.space/poster/small/tt28283547/img?src=cinemeta",
+      "background": "https://images.metahub.space/background/medium/tt28283547/img?src=cinemeta",
+      "imdbRating": "4.8",
+      "runtime": "83 min",
+      "csfdId": 1760086,
+      "description": "Parta šesti kriminálníků se chystá na odvážnou loupež. Jestli má ale všechno klapnout, musí pro jednou důvěřovat jeden druhému. A taky odepsanému zaklínači.(Netflix)\n\nČSFD: 45% (802)",
+      "csfdRating": 45,
+      "csfdRatingCount": 802
+    },
+    {
+      "imdb": "tt0468569",
+      "name": "Temný rytíř",
+      "year": 2008,
+      "genres": [
+        "Akční",
+        "Drama",
+        "Krimi",
+        "Thriller"
+      ],
+      "releaseInfo": "2008 • ČSFD: 91% (101.2k)",
+      "poster": "https://images.metahub.space/poster/small/tt0468569/img?src=cinemeta",
+      "background": "https://images.metahub.space/background/medium/tt0468569/img?src=cinemeta",
+      "imdbRating": "9.1",
+      "runtime": "152 min",
+      "csfdId": 223734,
+      "description": "Christian Bale se pod režijní taktovkou Christophera Nolana vrací v roli Bruce Waynea, který v kostýmu netopýřího muže Batmana pokračuje v boji se zločinem ve městě Gotham. A jeho nejnebezpečnějším protivníkem je král zločinců Joker (Heath Ledger).Akční dobrodružná fantasy v režii Christophera Nolana navazuje na film Batman začíná a Christian Bale si v ní zopakoval roli Batmana/Bruce Waynea v nekončícím boji se zločinem. Wayne v kostýmu netopýřího muže jde spolu s poručíkem Jamesem Gordonem (Gary Oldman) z Gothamské policie po králi zločinců Jokerovi známého podle symbolu - hrací karty s žolíkem - kterou zanechává na místech činu. Vtipálek s prořízlou tváří (Heath Ledger) má tentokrát v plánu Batmanovi dokázat, že slova Gotham a mír nikdy nebudou stát v jedné větě vedle sebe. Na uvolněné místo po bývalém králi místní mafie usedá Sal Maroni (Eric Roberts) a přebírá vládu nad většinou gangů v Gothamu. Na scéně se rovněž objevuje nový státní návladní Harvey Dent (Aaron Eckhart), který by rozdanými kartami (i s žolíkem v balíčku) mohl pořádně zamíchat...(oficiální text distributora)\n\nČSFD: 91% (101.2k)",
+      "csfdRating": 91,
+      "csfdRatingCount": 101177
+    },
+    {
+      "imdb": "tt29343289",
+      "name": "The Bayou",
+      "year": 2025,
+      "genres": [
+        "Thriller",
+        "Horor",
+        "Akční"
+      ],
+      "releaseInfo": "2025 • ČSFD: 39% (102)",
+      "poster": "https://images.metahub.space/poster/small/tt29343289/img?src=cinemeta",
+      "background": "https://images.metahub.space/background/medium/tt29343289/img?src=cinemeta",
+      "imdbRating": "4.2",
+      "runtime": "87 min",
+      "csfdId": 1523445,
+      "description": "Dovolená se změní v katastrofu, když Kyle (Athena Strates) a její přátelé z Houstonu uniknou havárii letadla v pustých louisianských mokřadech, aby zjistili, že na mělčině číhá něco mnohem nebezpečnějšího.(Tomas.C.1509)\n\nČSFD: 39% (102)",
+      "csfdRating": 39,
+      "csfdRatingCount": 102
+    },
+    {
+      "imdb": "tt10366206",
+      "name": "John Wick: Kapitola 4",
+      "year": 2023,
+      "genres": [
+        "Akční",
+        "Krimi",
+        "Thriller"
+      ],
+      "releaseInfo": "2023 • ČSFD: 74% (15.5k)",
+      "poster": "https://images.metahub.space/poster/small/tt10366206/img?src=cinemeta",
+      "background": "https://images.metahub.space/background/medium/tt10366206/img?src=cinemeta",
+      "imdbRating": "7.6",
+      "runtime": "170 min",
+      "csfdId": 758862,
+      "description": "John Wick (Keanu Reeves) odhalí cestu, jak porazit Nejvyšší radu. Než se mu však podaří získat svobodu, musí čelit novému nepříteli, který má mocné spojence po celém světě. Bude to o to težší, že nová spojenectví mění staré přátele v nepřátele...(Vertical Entertainment)\n\nČSFD: 74% (15.5k)",
+      "csfdRating": 74,
+      "csfdRatingCount": 15483
+    }
+  ]
+}

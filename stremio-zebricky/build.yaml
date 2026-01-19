@@ -1,0 +1,5 @@
+build_from:
+  aarch64: ghcr.io/hassio-addons/base-nodejs:stable
+  amd64: ghcr.io/hassio-addons/base-nodejs:stable
+  armv7: ghcr.io/hassio-addons/base-nodejs:stable
+  i386: ghcr.io/hassio-addons/base-nodejs:stable

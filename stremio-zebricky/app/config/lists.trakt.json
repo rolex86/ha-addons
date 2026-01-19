@@ -1,0 +1,372 @@
+{
+  "defaults": {
+    "candidatePages": 5,
+    "pageLimit": 100,
+    "finalSize": 140,
+    "sleepMs": 120,
+    "timeoutMs": 15000,
+    "csfdCacheTtlDays": 30,
+    "dupRules": {
+      "hardBlockTop": 45,
+      "penaltyPerHit": 80
+    }
+  },
+  "lists": [
+    {
+      "id": "vhs_era",
+      "name": "VHS éra (1985–2000)",
+      "source": {
+        "path": "/movies/watched/all"
+      },
+      "filters": {
+        "years": "1985-2000",
+        "genres": "action,thriller,crime,science-fiction"
+      },
+      "csfdRules": {
+        "minRating": 70,
+        "minCount": 8000
+      },
+      "finalSize": 160,
+      "type": "movie"
+    },
+    {
+      "id": "action_90s",
+      "name": "Akční kultovky 90. let",
+      "source": {
+        "path": "/movies/watched/all"
+      },
+      "filters": {
+        "years": "1990-1999",
+        "genres": "action,thriller"
+      },
+      "csfdRules": {
+        "minRating": 66,
+        "minCount": 5000
+      },
+      "finalSize": 160,
+      "type": "movie"
+    },
+    {
+      "id": "scifi_cyberpunk",
+      "name": "Sci-Fi & cyberpunk kultovky",
+      "source": {
+        "path": "/movies/collected/all"
+      },
+      "filters": {
+        "years": "1980-2005",
+        "genres": "science-fiction,thriller"
+      },
+      "csfdRules": {
+        "minRating": 70,
+        "minCount": 3500
+      },
+      "finalSize": 140,
+      "dupRules": {
+        "hardBlockTop": 55,
+        "penaltyPerHit": 90
+      },
+      "type": "movie"
+    },
+    {
+      "id": "crime_noir",
+      "name": "Krimi klasiky & neo-noir",
+      "source": {
+        "path": "/movies/played/all"
+      },
+      "filters": {
+        "years": "1975-2005",
+        "genres": "crime,thriller"
+      },
+      "csfdRules": {
+        "minRating": 74,
+        "minCount": 6000
+      },
+      "finalSize": 150,
+      "dupRules": {
+        "hardBlockTop": 55,
+        "penaltyPerHit": 100
+      },
+      "type": "movie"
+    },
+    {
+      "id": "heist_con",
+      "name": "Loupeže & podfuky (heist)",
+      "source": {
+        "path": "/movies/popular"
+      },
+      "filters": {
+        "years": "1970-2015",
+        "genres": "crime,thriller"
+      },
+      "csfdRules": {
+        "minRating": 70,
+        "minCount": 2500
+      },
+      "finalSize": 130,
+      "type": "movie"
+    },
+    {
+      "id": "revenge_vigilante",
+      "name": "Pomsta & vigilante",
+      "source": {
+        "path": "/movies/popular"
+      },
+      "filters": {
+        "years": "1970-2015",
+        "genres": "action,thriller"
+      },
+      "csfdRules": {
+        "minRating": 66,
+        "minCount": 2000
+      },
+      "finalSize": 130,
+      "type": "movie"
+    },
+    {
+      "id": "underseen_gems",
+      "name": "Skryté perly (top ČSFD, méně známé)",
+      "source": {
+        "path": "/movies/collected/all"
+      },
+      "filters": {
+        "years": "1980-2015",
+        "genres": "action,thriller,crime,science-fiction"
+      },
+      "candidatePages": 10,
+      "pageLimit": 100,
+      "csfdRules": {
+        "minRating": 78,
+        "minCount": 800,
+        "maxCount": 60000
+      },
+      "finalSize": 140,
+      "dupRules": {
+        "hardBlockTop": 70,
+        "penaltyPerHit": 140
+      },
+      "type": "movie"
+    },
+    {
+      "id": "trending_now",
+      "name": "Trendy teď (Trakt → ČSFD pořadí)",
+      "source": {
+        "path": "/movies/trending"
+      },
+      "filters": {},
+      "csfdRules": {
+        "minCount": 800
+      },
+      "finalSize": 120,
+      "dupRules": {
+        "hardBlockTop": 25,
+        "penaltyPerHit": 50
+      },
+      "type": "movie"
+    }
+  ],
+  "smartPicks": {
+    "enabled": true,
+    "defaultSize": 10,
+    "profiles": [
+      {
+        "id": "sp_dad_movies",
+        "name": "Smart Picks – Táta (filmy)",
+        "type": "movie",
+        "size": 10,
+        "fromTrakt": [
+          "/movies/trending",
+          "/movies/popular",
+          "/movies/recommended",
+          "/movies/anticipated",
+          "/movies/boxoffice",
+          "/movies/watched/all",
+          "/movies/collected/all",
+          "/movies/played/all",
+          "/movies/collected/weekly",
+          "/movies/watched/weekly"
+        ],
+        "fromLists": [],
+        "filters": {
+          "years": "1983-2027",
+          "genres": "action,adventure,comedy,crime,science-fiction"
+        },
+        "sources": {
+          "traktPaths": [
+            "/movies/trending",
+            "/movies/popular",
+            "/movies/recommended",
+            "/movies/anticipated",
+            "/movies/boxoffice",
+            "/movies/watched/all",
+            "/movies/collected/all",
+            "/movies/played/all",
+            "/movies/collected/weekly",
+            "/movies/watched/weekly"
+          ],
+          "listIds": []
+        },
+        "years": "1983-2027",
+        "includeGenres": [
+          "action",
+          "adventure",
+          "comedy",
+          "crime",
+          "science-fiction"
+        ],
+        "excludeGenres": []
+      },
+      {
+        "id": "sp_mom_movies",
+        "name": "Smart Picks – Máma (filmy)",
+        "type": "movie",
+        "size": 10,
+        "fromTrakt": [
+          "/movies/popular"
+        ],
+        "fromLists": [],
+        "filters": {
+          "years": "1990-2026",
+          "genres": "drama,romance,comedy"
+        },
+        "csfdRules": {
+          "minRating": 60,
+          "minCount": 300
+        },
+        "sources": {
+          "traktPaths": [
+            "/movies/popular"
+          ],
+          "listIds": []
+        },
+        "years": "1990-2026",
+        "includeGenres": [
+          "drama",
+          "romance",
+          "comedy"
+        ],
+        "excludeGenres": []
+      },
+      {
+        "id": "sp_kids_movies",
+        "name": "Smart Picks – Děti (filmy)",
+        "type": "movie",
+        "size": 10,
+        "fromTrakt": [
+          "/movies/trending"
+        ],
+        "fromLists": [],
+        "filters": {
+          "years": "1980-2026",
+          "genres": "animation,family,adventure,comedy"
+        },
+        "csfdRules": {
+          "minRating": 50,
+          "minCount": 100
+        },
+        "sources": {
+          "traktPaths": [
+            "/movies/trending"
+          ],
+          "listIds": []
+        },
+        "years": "1980-2026",
+        "includeGenres": [
+          "animation",
+          "family",
+          "adventure",
+          "comedy"
+        ],
+        "excludeGenres": []
+      },
+      {
+        "id": "sp_dad_series",
+        "name": "Smart Picks – Táta (seriály)",
+        "type": "series",
+        "size": 10,
+        "fromTrakt": [
+          "/shows/trending",
+          "/shows/popular"
+        ],
+        "fromLists": [
+          "series_mix"
+        ],
+        "filters": {
+          "years": "1995-2026",
+          "genres": "crime,thriller,drama,science-fiction"
+        },
+        "sources": {
+          "traktPaths": [
+            "/shows/trending",
+            "/shows/popular"
+          ],
+          "listIds": [
+            "series_mix"
+          ]
+        },
+        "years": "1995-2026",
+        "includeGenres": [
+          "crime",
+          "thriller",
+          "drama",
+          "science-fiction"
+        ],
+        "excludeGenres": []
+      },
+      {
+        "id": "sp_mom_series",
+        "name": "Smart Picks – Máma (seriály)",
+        "type": "series",
+        "size": 10,
+        "fromTrakt": [
+          "/shows/popular"
+        ],
+        "fromLists": [],
+        "filters": {
+          "years": "2000-2026",
+          "genres": "drama,romance,comedy"
+        },
+        "sources": {
+          "traktPaths": [
+            "/shows/popular"
+          ],
+          "listIds": []
+        },
+        "years": "2000-2026",
+        "includeGenres": [
+          "drama",
+          "romance",
+          "comedy"
+        ],
+        "excludeGenres": []
+      },
+      {
+        "id": "sp_kids_series",
+        "name": "Smart Picks – Děti (seriály)",
+        "type": "series",
+        "size": 10,
+        "fromTrakt": [
+          "/shows/trending"
+        ],
+        "fromLists": [],
+        "filters": {
+          "years": "1990-2026",
+          "genres": "animation,family,adventure,comedy"
+        },
+        "sources": {
+          "traktPaths": [
+            "/shows/trending"
+          ],
+          "listIds": []
+        },
+        "years": "1990-2026",
+        "includeGenres": [
+          "animation",
+          "family",
+          "adventure",
+          "comedy"
+        ],
+        "excludeGenres": []
+      }
+    ]
+  }
+}

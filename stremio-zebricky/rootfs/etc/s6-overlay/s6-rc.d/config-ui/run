@@ -1,0 +1,8 @@
+#!/command/with-contenv sh
+set -e
+
+export CONFIG_UI_HOST="${CONFIG_UI_HOST:-0.0.0.0}"
+export CONFIG_UI_PORT="${CONFIG_UI_PORT:-7788}"
+
+echo "[config-ui] starting on ${CONFIG_UI_HOST}:${CONFIG_UI_PORT}"
+exec node /app/tools/config-ui/server.js

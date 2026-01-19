@@ -1,0 +1,185 @@
+{
+  "id": "sp_mom_movies",
+  "name": "Smart Picks – Máma (filmy)",
+  "type": "movie",
+  "generatedAt": "2026-01-16T14:29:23.701Z",
+  "items": [
+    {
+      "imdb": "tt31121295",
+      "name": "V utajení",
+      "year": 2025,
+      "genres": [
+        "Komedie",
+        "Krimi"
+      ],
+      "releaseInfo": "2025 • ČSFD: 70% (1.3k)",
+      "poster": "https://images.metahub.space/poster/small/tt31121295/img?src=cinemeta",
+      "background": "https://images.metahub.space/background/medium/tt31121295/img?src=cinemeta",
+      "imdbRating": "6.7",
+      "runtime": "99 min",
+      "csfdId": 1661522,
+      "description": "V utajení je akční komedie, v níž Bryce Dallas Howardová hraje Kat, učitelku improvizace, která má pochyby, jestli nepropásla svou šanci na úspěch. Když jí policajt v utajení (Sean Bean) nabídne životní roli, najme dva své studenty (Orlando Bloom a Nick Mohammed) a společně se infiltrují do londýnského podsvětí v převleku za nebezpečné zločince.(Prime Video)\n\nČSFD: 70% (1.3k)",
+      "csfdRating": 70,
+      "csfdRatingCount": 1298
+    },
+    {
+      "imdb": "tt32159989",
+      "name": "Obvinění",
+      "year": 2025,
+      "genres": [
+        "Drama",
+        "Thriller"
+      ],
+      "releaseInfo": "2025 • ČSFD: 53% (671)",
+      "poster": "https://images.metahub.space/poster/small/tt32159989/img?src=cinemeta",
+      "background": "https://images.metahub.space/background/medium/tt32159989/img?src=cinemeta",
+      "imdbRating": "5.9",
+      "runtime": "139 min",
+      "csfdId": 1583736,
+      "description": "Film Obvinění od vizionářského režiséra Luca Guadagnina je strhující psychologické drama o vysokoškolské profesorce (Julia Roberts), která se ocitá na osobní i profesní křižovatce, když její hvězdná studentka (Ayo Edebiri) obviní jednoho z jejích kolegů (Andrew Garfield) a její vlastní temné tajemství z minulosti hrozí, že vyjde najevo.(Falcon)\n\nČSFD: 53% (671)",
+      "csfdRating": 53,
+      "csfdRatingCount": 671
+    },
+    {
+      "imdb": "tt23157384",
+      "name": "Kufr plný peněz",
+      "year": 2024,
+      "genres": [
+        "Krimi",
+        "Thriller",
+        "Drama"
+      ],
+      "releaseInfo": "2024 • ČSFD: 53% (205)",
+      "poster": "https://images.metahub.space/poster/small/tt23157384/img?src=cinemeta",
+      "background": "https://images.metahub.space/background/medium/tt23157384/img?src=cinemeta",
+      "imdbRating": "6.0",
+      "runtime": "100 min",
+      "csfdId": 1489331,
+      "description": "Poté, co Barbara (Eve Connolly) ukradne kufřík z nepovedeného drogového obchodu, ocitá se ve smrtící hře na kočku a myš. Děj filmu je chytře vystavěn a nabízí několik možných konců v závislosti na Barbařiných rozhodnutích...(unique)\n\nČSFD: 53% (205)",
+      "csfdRating": 53,
+      "csfdRatingCount": 205
+    },
+    {
+      "imdb": "tt23558084",
+      "name": "Špatný vliv",
+      "year": 2025,
+      "genres": [
+        "Romantický",
+        "Thriller"
+      ],
+      "releaseInfo": "2025 • ČSFD: 39% (437)",
+      "poster": "https://images.metahub.space/poster/small/tt23558084/img?src=cinemeta",
+      "background": "https://images.metahub.space/background/medium/tt23558084/img?src=cinemeta",
+      "imdbRating": "4.8",
+      "runtime": "106 min",
+      "csfdId": 1580132,
+      "description": "Mladík se dostane z vězení výměnou za to, že ochrání holku z bohaté rodiny před nebezpečným stalkerem. Přitom se s ní ale sblíží a začne to mezi nimi jiskřit.(Netflix)\n\nČSFD: 39% (437)",
+      "csfdRating": 39,
+      "csfdRatingCount": 437
+    },
+    {
+      "imdb": "tt31514146",
+      "name": "I Swear",
+      "year": 2025,
+      "genres": [
+        "Drama"
+      ],
+      "releaseInfo": "2025 • ČSFD: 84% (35)",
+      "poster": "https://images.metahub.space/poster/small/tt31514146/img?src=cinemeta",
+      "background": "https://images.metahub.space/background/medium/tt31514146/img?src=cinemeta",
+      "imdbRating": "8.5",
+      "runtime": "121 min",
+      "csfdId": 1703542,
+      "description": "ČSFD: 84% (35)",
+      "csfdRating": 84,
+      "csfdRatingCount": 35
+    },
+    {
+      "imdb": "tt27996020",
+      "name": "Jolly LLB 3",
+      "year": 2025,
+      "genres": [
+        "Akční"
+      ],
+      "releaseInfo": 2025,
+      "poster": "https://images.metahub.space/poster/small/tt27996020/img?src=cinemeta",
+      "background": "https://images.metahub.space/background/medium/tt27996020/img?src=cinemeta",
+      "runtime": "156 min",
+      "csfdId": 1730163,
+      "csfdRating": null,
+      "csfdRatingCount": 2
+    },
+    {
+      "imdb": "tt17492148",
+      "name": "Psycho Therapy: The Shallow Tale of a Writer Who Decided to Write About a Serial Killer",
+      "year": 2025,
+      "genres": [
+        "comedy",
+        "crime"
+      ],
+      "releaseInfo": "2025",
+      "poster": "https://images.metahub.space/poster/small/tt17492148/img?src=cinemeta",
+      "background": "https://images.metahub.space/background/medium/tt17492148/img?src=cinemeta",
+      "runtime": "102 min",
+      "csfdId": null,
+      "description": "A struggling writer in the midst of a divorce befriends a retired serial killer who incidentally becomes his marriage counselor by day, and killing counselor for his next book by night."
+    },
+    {
+      "imdb": "tt12908150",
+      "name": "Chuckův život",
+      "year": 2024,
+      "genres": [
+        "Drama",
+        "Fantasy",
+        "Sci-Fi"
+      ],
+      "releaseInfo": "2024 • ČSFD: 74% (983)",
+      "poster": "https://images.metahub.space/poster/small/tt12908150/img?src=cinemeta",
+      "background": "https://images.metahub.space/background/medium/tt12908150/img?src=cinemeta",
+      "imdbRating": "7.3",
+      "runtime": "111 min",
+      "csfdId": 1358635,
+      "description": "V tomto nevšedním příběhu obyčejného muže Charles „Chuck“ Krantz zažívá zázrak lásky, zlomené srdce ze ztráty a množství věcí, které se skrývá v každém z nás.(Filmbox)\n\nČSFD: 74% (983)",
+      "csfdRating": 74,
+      "csfdRatingCount": 983
+    },
+    {
+      "imdb": "tt22478818",
+      "name": "Vilém Tell",
+      "year": 2024,
+      "genres": [
+        "Akční",
+        "Drama",
+        "Životopisný",
+        "Historický"
+      ],
+      "releaseInfo": "2024 • ČSFD: 52% (503)",
+      "poster": "https://images.metahub.space/poster/small/tt22478818/img?src=cinemeta",
+      "background": "https://images.metahub.space/background/medium/tt22478818/img?src=cinemeta",
+      "imdbRating": "5.7",
+      "runtime": "133 min",
+      "csfdId": 1505833,
+      "description": "Po své účasti v křížové výpravě do Svaté země Vilém Tell přísahal, že se již nikdy nedopustí násilí. Postupnému útlaku švýcarských kantonů ze strany rakouské habsburské dynastie ale nedokáže nečinně přihlížet. Aby zastavil další krveprolévání a útlak, rozhodne se přidat k boji za nezávislost. Rakouský místodržící Gessler je odhodlaný toto povstání potlačit za každou cenu. Věří, že se tak vetře do přízně rakouského krále a získá ruku jeho dcery. Gessler ví, že Vilém Tell je tím, kdo povstalce vede proti králi. Aby ukázal svou moc a zničil povstání hned v zárodku, rozhodne se Tella veřejně zostudit a přinutit ho poníženě pokleknout před rakouskou korunou. Lovec Tell je známý svou přesnou střelbou z kuše, Gessler ho tedy donutí, aby před zraky všech pozvedl svou zbraň, namířil ji proti svému synovi a sestřelil jablko z jeho hlavy. Tell navzdory Gesslerovu očekávání uspěje a jablko přesně zasáhne. To, že byl k tomuto ohavnému činu donucen, ale umocní jeho nenávist vůči guvernérovi a rozhodne se pomstít. Toto nevydařené ponížení, které mělo podpořit potlačení povstání, nejen zvýší Tellův odpor k habsburské nadvládě, ale Gessler si jím také vysloužil pohrdání ze strany princezny, o jejíž ruku tolik usiloval. Tak začala vzpoura, pro jejíž začátek a intenzitu byl důležitý jeden muž, jedna kuše a jedno jablko.(CinemArt)\n\nČSFD: 52% (503)",
+      "csfdRating": 52,
+      "csfdRatingCount": 503
+    },
+    {
+      "imdb": "tt23476986",
+      "name": "G20",
+      "year": 2025,
+      "genres": [
+        "Akční",
+        "Thriller"
+      ],
+      "releaseInfo": "2025 • ČSFD: 33% (460)",
+      "poster": "https://images.metahub.space/poster/small/tt23476986/img?src=cinemeta",
+      "background": "https://images.metahub.space/background/medium/tt23476986/img?src=cinemeta",
+      "imdbRating": "5.1",
+      "runtime": "108 min",
+      "csfdId": 1634743,
+      "description": "Když se summit G20 ocitne v obležení, americká prezidentka Danielle Suttonová (držitelka Oscara® Viola Davisová) je cíl číslo jedna. Vyhne se sice zajetí, musí však následně přelstít útočníky, aby ochránila svou rodinu, bránila svou zemi a dostala do bezpečí světové vůdce v této napínavé jízdě nabité akcí.(Prime Video)\n\nČSFD: 33% (460)",
+      "csfdRating": 33,
+      "csfdRatingCount": 460
+    }
+  ]
+}

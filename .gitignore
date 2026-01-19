@@ -1,3 +1,7 @@
-﻿**/secrets.json
-**/secrets.*.json
-**/.env
+﻿**/node_modules/
+**/runtime/
+**/*.pid
+**/.cache/
+**/data/
+**/npm-debug.log*
+**/yarn-error.log*

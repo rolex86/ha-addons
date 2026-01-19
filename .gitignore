@@ -1,7 +1,16 @@
-﻿**/node_modules/
+﻿# Secrets / env
+**/secrets.json
+**/secrets.*.json
+**/.env
+**/.env.*
+
+# Node / runtime
+**/node_modules/
 **/runtime/
 **/*.pid
 **/.cache/
-**/data/
 **/npm-debug.log*
 **/yarn-error.log*
+
+# Local HA-like data dirs (local dev)
+**/data/

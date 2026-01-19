@@ -1,0 +1,38 @@
+name: "Trakt Bridge (Stremio only)"
+description: "Sleduje vybrané media_player entity v HA (jen Stremio) a zapisuje watched do Trakt podle IMDb z entity_picture."
+version: "0.4.0"
+slug: "trakt_bridge_stremio"
+init: false
+startup: services
+
+arch:
+  - aarch64
+  - amd64
+  - armhf
+  - armv7
+  - i386
+
+ports:
+  8787/tcp: 8787
+
+webui: "http://[HOST]:[PORT:8787]/"
+
+options:
+  trakt_client_id: ""
+  trakt_client_secret: ""
+  ha_token: ""
+  entities:
+    - media_player.shield_2
+  watched_threshold: 0.85
+  min_duration_seconds: 600
+  position_step_seconds: 30
+
+schema:
+  trakt_client_id: str
+  trakt_client_secret: password
+  ha_token: password
+  entities:
+    - str
+  watched_threshold: float
+  min_duration_seconds: int
+  position_step_seconds: int

@@ -1,0 +1,50 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Bump version: presence-ssh-mqtt",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}\\bump-version.ps1",
+        "-AddonPath",
+        "presence-ssh-mqtt"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "Bump version: stremio-zebricky",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}\\bump-version.ps1",
+        "-AddonPath",
+        "stremio-zebricky"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "Bump version: trakt_bridge_stremio",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}\\bump-version.ps1",
+        "-AddonPath",
+        "trakt_bridge_stremio"
+      ],
+      "problemMatcher": []
+    }
+  ]
+}

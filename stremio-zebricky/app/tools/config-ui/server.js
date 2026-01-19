@@ -38,8 +38,8 @@ const TRAKT_GENRES_TTL_MS = Number(
 // ---------------------------
 // UPDATE/RUNNER (enrich + rebuild)
 // ---------------------------
-// Nastav příkaz, který má udělat "celý proces aktualizace".
-// Příklad:
+// Set command that should run full update process.
+// Example:
 //   CONFIG_UI_UPDATE_CMD="node tools/update-lists.js"
 const UPDATE_CMD = String(
   process.env.CONFIG_UI_UPDATE_CMD || "node tools/update-lists.js",
@@ -96,7 +96,11 @@ function pushUpdateLine(line) {
   for (const res of updateState.clients) {
     try {
       res.write(
-        `data: ${JSON.stringify({ line: s, at: Date.now(), progress: updateState.progress })}\n\n`,
+        `data: ${JSON.stringify({
+          line: s,
+          at: Date.now(),
+          progress: updateState.progress,
+        })}\n\n`,
       );
     } catch {}
   }
@@ -121,10 +125,14 @@ function startUpdateProcess() {
   );
   pushUpdateLine(`CMD: ${UPDATE_CMD}`);
 
-  // IMPORTANT: run in /app (code), but ensure DATA_DIR=/data so scripts use persistent storage
+  // IMPORTANT:
+  // - run in /app (code)
+  // - ensure DATA_DIR=/data so scripts use persistent storage
+  // - detached:true => can kill the whole process group on STOP (Linux/HA)
   const child = spawn(UPDATE_CMD, {
     cwd: ROOT,
     shell: true,
+    detached: true,
     env: { ...process.env, DATA_DIR },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -145,11 +153,12 @@ function startUpdateProcess() {
     updateState.endedAt = Date.now();
     updateState.exitCode =
       code === null || code === undefined ? null : Number(code);
+
     pushUpdateLine(
       `== UPDATE END code=${updateState.exitCode} ${new Date(updateState.endedAt).toISOString()} ==`,
     );
 
-    // notify clients that it's done (optional)
+    // notify clients that it's done
     for (const res of updateState.clients) {
       try {
         res.write(
@@ -166,18 +175,29 @@ function stopUpdateProcess() {
   if (!updateState.running) return false;
   if (!updateState.pid) return false;
 
-  // kill the whole shell process
+  // Kill whole process group (Linux/HA): negative pid targets group
   try {
-    process.kill(updateState.pid, "SIGTERM");
+    process.kill(-updateState.pid, "SIGTERM");
     pushUpdateLine("== UPDATE STOP requested (SIGTERM) ==");
     return true;
   } catch (e) {
-    pushUpdateLine("== UPDATE STOP failed: " + String(e?.message || e) + " ==");
-    return false;
+    // Fallback: try killing just pid
+    try {
+      process.kill(updateState.pid, "SIGTERM");
+      pushUpdateLine("== UPDATE STOP requested (SIGTERM pid-only fallback) ==");
+      return true;
+    } catch (e2) {
+      pushUpdateLine(
+        "== UPDATE STOP failed: " + String(e2?.message || e2) + " ==",
+      );
+      return false;
+    }
   }
 }
 
-// --- helpers ---
+// ---------------------------
+// helpers
+// ---------------------------
 function sendJson(res, status, obj, headers = {}) {
   const body = JSON.stringify(obj, null, 2);
   res.writeHead(status, {
@@ -242,7 +262,9 @@ async function readBody(req) {
   });
 }
 
-// --- normalization + validation ---
+// ---------------------------
+// normalization + validation
+// ---------------------------
 function normalizeListsConfig(lists) {
   if (!lists || typeof lists !== "object") return lists;
 
@@ -328,7 +350,9 @@ function isValidSecrets(obj) {
   return null;
 }
 
-// --- Trakt genres (server-side) ---
+// ---------------------------
+// Trakt genres (server-side)
+// ---------------------------
 const traktGenresCache = {
   movie: { at: 0, data: null, err: "" },
   series: { at: 0, data: null, err: "" },
@@ -345,8 +369,7 @@ function normType(qType) {
 async function getTraktClientId() {
   const secretsFallback = { trakt: { client_id: "", client_secret: "" } };
   const secrets = await readJsonSafe(SECRETS_PATH, secretsFallback);
-  const clientId = String(secrets?.trakt?.client_id || "").trim();
-  return clientId;
+  return String(secrets?.trakt?.client_id || "").trim();
 }
 
 async function fetchTraktGenres(type) {
@@ -405,7 +428,6 @@ async function getGenresCached(type) {
     return { genres: bucket.data, cached: true, ttlMs: TRAKT_GENRES_TTL_MS };
   }
 
-  // refresh
   try {
     const genres = await fetchTraktGenres(type);
     bucket.data = genres;
@@ -414,7 +436,6 @@ async function getGenresCached(type) {
     return { genres, cached: false, ttlMs: TRAKT_GENRES_TTL_MS };
   } catch (e) {
     bucket.err = String(e?.message || e);
-    // fallback: pokud něco v cache máme (byť expirované), vrať to aspoň
     if (bucket.data && bucket.data.length) {
       return {
         genres: bucket.data,
@@ -428,7 +449,9 @@ async function getGenresCached(type) {
   }
 }
 
-// --- server handler ---
+// ---------------------------
+// server handler
+// ---------------------------
 async function handle(req, res) {
   const parsed = url.parse(req.url, true);
   const pathname = parsed.pathname || "/";
@@ -514,19 +537,34 @@ async function handle(req, res) {
       "access-control-allow-origin": "*",
     });
 
+    // Keep-alive ping (helps with proxies / long idle)
+    const keepAlive = setInterval(() => {
+      try {
+        res.write(":keep-alive\n\n");
+      } catch {}
+    }, 15000);
+
     // initial dump last ~200 lines
     const start = Math.max(0, updateState.lines.length - 200);
     for (let i = start; i < updateState.lines.length; i++) {
       res.write(
-        `data: ${JSON.stringify({ line: updateState.lines[i], at: Date.now(), progress: updateState.progress })}\n\n`,
+        `data: ${JSON.stringify({
+          line: updateState.lines[i],
+          at: Date.now(),
+          progress: updateState.progress,
+        })}\n\n`,
       );
     }
     res.write(
-      `event: status\ndata: ${JSON.stringify({ running: updateState.running, progress: updateState.progress })}\n\n`,
+      `event: status\ndata: ${JSON.stringify({
+        running: updateState.running,
+        progress: updateState.progress,
+      })}\n\n`,
     );
 
     updateState.clients.add(res);
     req.on("close", () => {
+      clearInterval(keepAlive);
       updateState.clients.delete(res);
     });
     return;
@@ -692,7 +730,7 @@ async function handle(req, res) {
     await writeJsonAtomic(LISTS_PATH, lists);
     await writeJsonAtomic(SECRETS_PATH, secrets);
 
-    // invalidujeme cache genres
+    // invalidate genres cache
     traktGenresCache.movie.at = 0;
     traktGenresCache.series.at = 0;
 
@@ -735,7 +773,9 @@ http
     console.log(`Config UI running on http://${shownHost}:${PORT}`);
     console.log(`Config path: ${CONFIG_DIR}`);
     console.log(
-      `Token protection: ${TOKEN ? "ENABLED" : "DISABLED (set CONFIG_UI_TOKEN for LAN safety)"}`,
+      `Token protection: ${
+        TOKEN ? "ENABLED" : "DISABLED (set CONFIG_UI_TOKEN for LAN safety)"
+      }`,
     );
     console.log(`Trakt genres cache TTL: ${TRAKT_GENRES_TTL_MS} ms`);
     console.log(`Update cmd: ${UPDATE_CMD}`);

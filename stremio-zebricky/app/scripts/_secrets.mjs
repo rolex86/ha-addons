@@ -5,21 +5,45 @@ import { fileURLToPath } from "node:url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const ROOT = path.join(__dirname, "..");
-const SECRETS_PATH = path.join(ROOT, "config", "secrets.json");
+// HA add-on persistent paths
+const DATA_DIR = process.env.DATA_DIR || "/data";
+const SECRETS_PATH_DATA = path.join(DATA_DIR, "config", "secrets.json");
 
-export async function loadSecrets() {
+// Optional dev fallback (repo-local)
+const ROOT = path.join(__dirname, "..");
+const SECRETS_PATH_APP = path.join(ROOT, "config", "secrets.json");
+
+async function readJsonIfExists(p) {
   try {
-    const raw = await fs.readFile(SECRETS_PATH, "utf8");
+    const raw = await fs.readFile(p, "utf8");
     return JSON.parse(raw);
   } catch {
-    return {};
+    return null;
   }
+}
+
+export async function loadSecrets() {
+  // 1) HA persistent
+  const fromData = await readJsonIfExists(SECRETS_PATH_DATA);
+  if (fromData && typeof fromData === "object") return fromData;
+
+  // 2) dev fallback
+  const fromApp = await readJsonIfExists(SECRETS_PATH_APP);
+  if (fromApp && typeof fromApp === "object") return fromApp;
+
+  return {};
 }
 
 export async function getTraktKeys() {
   const secrets = await loadSecrets();
-  const clientId = (process.env.TRAKT_CLIENT_ID || secrets?.trakt?.client_id || "").trim();
-  const clientSecret = (process.env.TRAKT_CLIENT_SECRET || secrets?.trakt?.client_secret || "").trim();
+
+  const clientId = String(
+    process.env.TRAKT_CLIENT_ID || secrets?.trakt?.client_id || "",
+  ).trim();
+
+  const clientSecret = String(
+    process.env.TRAKT_CLIENT_SECRET || secrets?.trakt?.client_secret || "",
+  ).trim();
+
   return { clientId, clientSecret };
 }

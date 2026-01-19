@@ -165,11 +165,33 @@
     western: "Western",
   };
 
+  function prettifySlug(slug) {
+    const s = String(slug || "")
+      .trim()
+      .toLowerCase();
+    if (!s) return "";
+    // "science-fiction" -> "Science Fiction"
+    return s
+      .split("-")
+      .filter(Boolean)
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+      .join(" ");
+  }
+
   function genreLabel(slug, fallbackName) {
     const s = String(slug || "")
       .trim()
       .toLowerCase();
-    return GENRE_CS[s] || String(fallbackName || s || "").trim();
+    if (!s) return "";
+
+    if (GENRE_CS[s]) return GENRE_CS[s];
+
+    const fb = String(fallbackName || "").trim();
+    // když Trakt name dává smysl a není to stejné jako slug, použij ho
+    if (fb && fb.toLowerCase() !== s) return fb;
+
+    // jinak aspoň “zlidšti” slug
+    return prettifySlug(s);
   }
 
   // =========================
@@ -871,8 +893,7 @@
   // =========================
   // SmartPicks normalization (IMPORTANT)
   // We always SAVE legacy format:
-  //   fromTrakt[], fromLists[], filters{years,genres}, + (optional csfdRules)
-  // UI can internally keep sources/include/exclude, but disk format stays stable.
+  //   fromTrakt[], fromLists[], filters{years,genres,genresExclude}, + (optional csfdRules)
   // =========================
   function ensureSmartPicksExists() {
     if (!state.lists.smartPicks || typeof state.lists.smartPicks !== "object") {
@@ -965,18 +986,23 @@
     out.years = years;
 
     // Genres:
-    // - legacy: filters.genres CSV
+    // - legacy: filters.genres CSV (include) + filters.genresExclude CSV (exclude)
     // - new-ish: includeGenres/excludeGenres arrays
     let include = Array.isArray(out.includeGenres) ? out.includeGenres : null;
     let exclude = Array.isArray(out.excludeGenres) ? out.excludeGenres : null;
 
-    if (!include) {
-      include = parseCsv(filters.genres || "");
+    if (!include) include = parseCsv(filters.genres || "");
+    else include = uniqLower(include);
+
+    if (!exclude) {
+      exclude = parseCsv(filters.genresExclude || filters.excludeGenres || "");
     } else {
-      include = uniqLower(include);
+      exclude = uniqLower(exclude);
     }
-    if (!exclude) exclude = [];
-    else exclude = uniqLower(exclude);
+
+    // safety: if something is both include+exclude -> keep include
+    const incSet = new Set(include);
+    exclude = (exclude || []).filter((g) => !incSet.has(g));
 
     out.includeGenres = include;
     out.excludeGenres = exclude;
@@ -988,9 +1014,13 @@
     if (years) out.filters.years = years;
     else delete out.filters.years;
 
-    const genresCsv = include.length ? include.join(",") : "";
-    if (genresCsv) out.filters.genres = genresCsv;
+    const incCsv = include.length ? include.join(",") : "";
+    if (incCsv) out.filters.genres = incCsv;
     else delete out.filters.genres;
+
+    const exCsv = exclude.length ? exclude.join(",") : "";
+    if (exCsv) out.filters.genresExclude = exCsv;
+    else delete out.filters.genresExclude;
 
     return out;
   }
@@ -1014,7 +1044,7 @@
     const sz = Number(uiProfile.size);
     out.size = Number.isFinite(sz) && sz >= 1 ? sz : Number(out.size) || 10;
 
-    // Sources (THIS IS THE KEY FIX)
+    // Sources
     const traktPaths = Array.isArray(uiProfile?.sources?.traktPaths)
       ? uiProfile.sources.traktPaths
           .map(safeStr)
@@ -1031,7 +1061,7 @@
     out.fromTrakt = traktPaths.slice();
     out.fromLists = listIds.slice();
 
-    // Filters: years + include genres as CSV (stable legacy)
+    // Filters: years + include/exclude genres as CSV (legacy stable)
     out.filters =
       out.filters && typeof out.filters === "object" ? { ...out.filters } : {};
     const years = safeStr(uiProfile.years).trim();
@@ -1041,18 +1071,29 @@
     const include = Array.isArray(uiProfile.includeGenres)
       ? uniqLower(uiProfile.includeGenres)
       : [];
-    const genresCsv = include.length ? include.join(",") : "";
-    if (genresCsv) out.filters.genres = genresCsv;
+
+    const excludeRaw = Array.isArray(uiProfile.excludeGenres)
+      ? uniqLower(uiProfile.excludeGenres)
+      : [];
+
+    // safety: exclude can't contain included
+    const incSet = new Set(include);
+    const exclude = excludeRaw.filter((g) => !incSet.has(g));
+
+    const incCsv = include.length ? include.join(",") : "";
+    if (incCsv) out.filters.genres = incCsv;
     else delete out.filters.genres;
 
-    // Remove fields that caused confusion/mismatch on disk (optional, but recommended)
-    // Keep file looking like your other profiles.
+    const exCsv = exclude.length ? exclude.join(",") : "";
+    if (exCsv) out.filters.genresExclude = exCsv;
+    else delete out.filters.genresExclude;
+
+    // Remove UI-only fields
     delete out.sources;
     delete out.years;
     delete out.includeGenres;
     delete out.excludeGenres;
 
-    // If filters ended empty -> keep it as {} (some profiles already have it)
     if (!out.filters || typeof out.filters !== "object") out.filters = {};
     if (Object.keys(out.filters).length === 0) out.filters = {};
 
@@ -1420,7 +1461,11 @@
       box.appendChild(btn);
     }
 
-    setSpIncludeExcludeToHidden(Array.from(setInc), Array.from(setExc));
+    // keep hidden normalized + safety (exclude can't contain include)
+    const incArr = Array.from(setInc);
+    const incSet = new Set(incArr);
+    const excArr = Array.from(setExc).filter((g) => !incSet.has(g));
+    setSpIncludeExcludeToHidden(incArr, excArr);
   }
 
   function clearSmartPickForm() {
@@ -1779,8 +1824,6 @@
       alert(e.message);
     }
   });
-
-  on("btnDemo", "click", () => loadDemoIntoUIOnly());
 
   on("btnRestartAddon", "click", async () => {
     try {

@@ -77,7 +77,11 @@ async function writeProgress(progress) {
 
   try {
     await fsp.mkdir(RUNTIME_DIR, { recursive: true });
-    await fsp.writeFile(PROGRESS_PATH, JSON.stringify(progress, null, 2), "utf8");
+    await fsp.writeFile(
+      PROGRESS_PATH,
+      JSON.stringify(progress, null, 2),
+      "utf8",
+    );
   } catch {
     // ignore
   }
@@ -86,14 +90,20 @@ async function writeProgress(progress) {
 function validateConfig(lists, secrets) {
   const err = (m) => new Error(m);
 
-  if (!lists || typeof lists !== "object") throw err("Chybí /data/config/lists.trakt.json nebo není validní JSON.");
-  if (!Array.isArray(lists.lists)) throw err("lists.trakt.json: chybí pole lists[].");
+  if (!lists || typeof lists !== "object")
+    throw err("Chybí /data/config/lists.trakt.json nebo není validní JSON.");
+  if (!Array.isArray(lists.lists))
+    throw err("lists.trakt.json: chybí pole lists[].");
 
-  if (!secrets || typeof secrets !== "object") throw err("Chybí /data/config/secrets.json nebo není validní JSON.");
-  if (!secrets.trakt || typeof secrets.trakt !== "object") throw err("secrets.json: chybí trakt objekt.");
+  if (!secrets || typeof secrets !== "object")
+    throw err("Chybí /data/config/secrets.json nebo není validní JSON.");
+  if (!secrets.trakt || typeof secrets.trakt !== "object")
+    throw err("secrets.json: chybí trakt objekt.");
 
-  if (!String(secrets.trakt.client_id || "").trim()) throw err("secrets.json: chybí trakt.client_id.");
-  if (!String(secrets.trakt.client_secret || "").trim()) throw err("secrets.json: chybí trakt.client_secret.");
+  if (!String(secrets.trakt.client_id || "").trim())
+    throw err("secrets.json: chybí trakt.client_id.");
+  if (!String(secrets.trakt.client_secret || "").trim())
+    throw err("secrets.json: chybí trakt.client_secret.");
 }
 
 function rel(p) {
@@ -133,7 +143,10 @@ async function snapshotListHashes() {
 
 function diffHashes(before, after) {
   const changed = [];
-  const allKeys = new Set([...Object.keys(before || {}), ...Object.keys(after || {})]);
+  const allKeys = new Set([
+    ...Object.keys(before || {}),
+    ...Object.keys(after || {}),
+  ]);
   for (const k of allKeys) {
     if ((before || {})[k] !== (after || {})[k]) changed.push(k);
   }
@@ -144,7 +157,13 @@ function idFromFilename(fn) {
   return String(fn || "").replace(/\.json$/i, "");
 }
 
-async function runNodeScript(scriptAbsPath, args = [], label = "", stepMeta = null, envExtra = null) {
+async function runNodeScript(
+  scriptAbsPath,
+  args = [],
+  label = "",
+  stepMeta = null,
+  envExtra = null,
+) {
   const nice = rel(scriptAbsPath);
   const cmd = `${process.execPath} ${nice}${args.length ? " " + args.join(" ") : ""}`;
 
@@ -172,7 +191,8 @@ async function runNodeScript(scriptAbsPath, args = [], label = "", stepMeta = nu
 
       const done = Number(m[1]);
       const total = Number(m[2]);
-      if (!Number.isFinite(done) || !Number.isFinite(total) || total <= 0) return null;
+      if (!Number.isFinite(done) || !Number.isFinite(total) || total <= 0)
+        return null;
 
       const idx = line.indexOf(m[0]);
       const head = idx > 0 ? line.slice(0, idx).trim() : "";
@@ -186,7 +206,13 @@ async function runNodeScript(scriptAbsPath, args = [], label = "", stepMeta = nu
       const lines = text.split(/\r?\n/).filter(Boolean);
 
       for (const line of lines) {
-        log(line);
+        // Pokud skript vypíše "PROGRESS {...}", necháme to bez prefixu,
+        // aby to config-ui server (pushUpdateLine) poznal přes startsWith("PROGRESS ").
+        if (line.startsWith("PROGRESS ")) {
+          process.stdout.write(line + "\n");
+        } else {
+          log(line);
+        }
 
         const p = maybeProgressFromLine(line);
         if (p) {
@@ -196,7 +222,7 @@ async function runNodeScript(scriptAbsPath, args = [], label = "", stepMeta = nu
             label: label || nice,
             line,
             progress: {
-              label: p.humanLabel || (label || nice),
+              label: p.humanLabel || label || nice,
               done: p.done,
               total: p.total,
             },
@@ -233,18 +259,25 @@ async function detectScripts() {
   const genListsCombined = path.join(SCRIPTS, "generate_lists_trakt_csfd.mjs");
   const genSmartPicks = path.join(SCRIPTS, "generate_smart_picks.mjs");
 
-  const enrichPosterCinemetaCsfd = path.join(SCRIPTS, "enrich_poster_cinemeta_text_csfd.mjs");
+  const enrichPosterCinemetaCsfd = path.join(
+    SCRIPTS,
+    "enrich_poster_cinemeta_text_csfd.mjs",
+  );
   const enrichCinemeta = path.join(SCRIPTS, "enrich_cinemeta.mjs");
   const enrichCsfdFirst = path.join(SCRIPTS, "enrich_csfd_first.mjs");
 
   return {
-    genListsCombined: (await fileExists(genListsCombined)) ? genListsCombined : null,
+    genListsCombined: (await fileExists(genListsCombined))
+      ? genListsCombined
+      : null,
     genSmartPicks: (await fileExists(genSmartPicks)) ? genSmartPicks : null,
-    enrichBest:
-      (await fileExists(enrichPosterCinemetaCsfd)) ? enrichPosterCinemetaCsfd :
-      (await fileExists(enrichCinemeta)) ? enrichCinemeta :
-      (await fileExists(enrichCsfdFirst)) ? enrichCsfdFirst :
-      null,
+    enrichBest: (await fileExists(enrichPosterCinemetaCsfd))
+      ? enrichPosterCinemetaCsfd
+      : (await fileExists(enrichCinemeta))
+        ? enrichCinemeta
+        : (await fileExists(enrichCsfdFirst))
+          ? enrichCsfdFirst
+          : null,
   };
 }
 
@@ -261,10 +294,21 @@ async function detectScripts() {
     validateConfig(listsCfg, secrets);
   } catch (e) {
     log(`ERROR: ${e.message}`);
-    log(`Tip: otevři Config UI, vyplň Trakt client_id/secret a dej "Uložit vše na disk".`);
+    log(
+      `Tip: otevři Config UI, vyplň Trakt client_id/secret a dej "Uložit vše na disk".`,
+    );
     process.exitCode = 2;
-    await writeProgress({ running: false, phase: "done", ok: false, code: 2, reason: "invalid config" });
-    log(`== UPDATE END code=${process.exitCode} ${new Date().toISOString()} ==`);
+    await writeProgress({
+      running: false,
+      phase: "done",
+      ok: false,
+      code: 2,
+      reason: "invalid config",
+      at: new Date().toISOString(),
+    });
+    log(
+      `== UPDATE END code=${process.exitCode} ${new Date().toISOString()} ==`,
+    );
     return;
   }
 
@@ -274,22 +318,40 @@ async function detectScripts() {
   const baseListIds = new Set(
     (Array.isArray(listsCfg?.lists) ? listsCfg.lists : [])
       .map((x) => String(x?.id || "").trim())
-      .filter(Boolean)
+      .filter(Boolean),
   );
 
   const smartPickIds = new Set(
-    (Array.isArray(listsCfg?.smartPicks?.profiles) ? listsCfg.smartPicks.profiles : [])
+    (Array.isArray(listsCfg?.smartPicks?.profiles)
+      ? listsCfg.smartPicks.profiles
+      : []
+    )
       .map((x) => String(x?.id || "").trim())
-      .filter(Boolean)
+      .filter(Boolean),
   );
 
   const scripts = await detectScripts();
 
-  if (!scripts.genListsCombined && !scripts.genSmartPicks && !scripts.enrichBest) {
-    log("Nenalezen žádný generator/enricher skript v scripts/. (Nic se nespustilo.)");
+  if (
+    !scripts.genListsCombined &&
+    !scripts.genSmartPicks &&
+    !scripts.enrichBest
+  ) {
+    log(
+      "Nenalezen žádný generator/enricher skript v scripts/. (Nic se nespustilo.)",
+    );
     process.exitCode = 3;
-    await writeProgress({ running: false, phase: "done", ok: false, code: 3, reason: "no steps detected" });
-    log(`== UPDATE END code=${process.exitCode} ${new Date().toISOString()} ==`);
+    await writeProgress({
+      running: false,
+      phase: "done",
+      ok: false,
+      code: 3,
+      reason: "no steps detected",
+      at: new Date().toISOString(),
+    });
+    log(
+      `== UPDATE END code=${process.exitCode} ${new Date().toISOString()} ==`,
+    );
     return;
   }
 
@@ -303,29 +365,43 @@ async function detectScripts() {
   // ----------------
   let baseChanged = [];
   if (scripts.genListsCombined) {
-    log(`--- STEP 1: Generuji listy (Trakt + CSFD): ${rel(scripts.genListsCombined)} ---`);
+    log(
+      `--- STEP 1: Generuji listy (Trakt + CSFD): ${rel(scripts.genListsCombined)} ---`,
+    );
 
     const out = await runNodeScript(
       scripts.genListsCombined,
       [],
       "Generuji listy (Trakt + CSFD)",
-      { step: 1, steps: 3 }
+      { step: 1, steps: 3 },
     );
 
     if (!out.ok) {
       process.exitCode = out.code || 1;
       log(`STEP FAILED (code=${out.code}): ${rel(scripts.genListsCombined)}`);
-      await writeProgress({ running: false, phase: "done", ok: false, code: process.exitCode, at: new Date().toISOString() });
-      log(`== UPDATE END code=${process.exitCode} ${new Date().toISOString()} ==`);
+      await writeProgress({
+        running: false,
+        phase: "done",
+        ok: false,
+        code: process.exitCode,
+        at: new Date().toISOString(),
+      });
+      log(
+        `== UPDATE END code=${process.exitCode} ${new Date().toISOString()} ==`,
+      );
       return;
     }
 
     const afterGen = await snapshotListHashes();
     const changedAllAfterGen = diffHashes(beforeAll, afterGen);
 
-    baseChanged = changedAllAfterGen.filter((fn) => baseListIds.has(idFromFilename(fn)));
+    baseChanged = changedAllAfterGen.filter((fn) =>
+      baseListIds.has(idFromFilename(fn)),
+    );
 
-    log(`Base list changes: ${baseChanged.length ? baseChanged.join(", ") : "(none)"}`);
+    log(
+      `Base list changes: ${baseChanged.length ? baseChanged.join(", ") : "(none)"}`,
+    );
   } else {
     log("--- STEP 1: (skip) generate_lists_trakt_csfd.mjs not found ---");
   }
@@ -340,14 +416,22 @@ async function detectScripts() {
       scripts.genSmartPicks,
       [],
       "Generuji SmartPicks",
-      { step: 2, steps: 3 }
+      { step: 2, steps: 3 },
     );
 
     if (!out.ok) {
       process.exitCode = out.code || 1;
       log(`STEP FAILED (code=${out.code}): ${rel(scripts.genSmartPicks)}`);
-      await writeProgress({ running: false, phase: "done", ok: false, code: process.exitCode, at: new Date().toISOString() });
-      log(`== UPDATE END code=${process.exitCode} ${new Date().toISOString()} ==`);
+      await writeProgress({
+        running: false,
+        phase: "done",
+        ok: false,
+        code: process.exitCode,
+        at: new Date().toISOString(),
+      });
+      log(
+        `== UPDATE END code=${process.exitCode} ${new Date().toISOString()} ==`,
+      );
       return;
     }
   } else {
@@ -380,7 +464,7 @@ async function detectScripts() {
     await fsp.writeFile(
       ENRICH_TARGETS_PATH,
       JSON.stringify({ listsDir: LISTS_DIR, files: targets }, null, 2),
-      "utf8"
+      "utf8",
     );
 
     log(`Enrich targets: ${targets.length ? targets.join(", ") : "(none)"}`);
@@ -393,14 +477,22 @@ async function detectScripts() {
         [],
         "Enrich",
         { step: 3, steps: 3 },
-        { ENRICH_TARGETS_PATH }
+        { ENRICH_TARGETS_PATH },
       );
 
       if (!out.ok) {
         process.exitCode = out.code || 1;
         log(`STEP FAILED (code=${out.code}): ${rel(scripts.enrichBest)}`);
-        await writeProgress({ running: false, phase: "done", ok: false, code: process.exitCode, at: new Date().toISOString() });
-        log(`== UPDATE END code=${process.exitCode} ${new Date().toISOString()} ==`);
+        await writeProgress({
+          running: false,
+          phase: "done",
+          ok: false,
+          code: process.exitCode,
+          at: new Date().toISOString(),
+        });
+        log(
+          `== UPDATE END code=${process.exitCode} ${new Date().toISOString()} ==`,
+        );
         return;
       }
     }
@@ -408,11 +500,24 @@ async function detectScripts() {
 
   process.exitCode = 0;
   log("OK: Update proběhl bez chyb.");
-  await writeProgress({ running: false, phase: "done", ok: true, code: 0, at: new Date().toISOString() });
+  await writeProgress({
+    running: false,
+    phase: "done",
+    ok: true,
+    code: 0,
+    at: new Date().toISOString(),
+  });
   log(`== UPDATE END code=0 ${new Date().toISOString()} ==`);
 })().catch(async (e) => {
   process.exitCode = 1;
   log(`FATAL: ${String(e?.message || e)}`);
-  await writeProgress({ running: false, phase: "done", ok: false, code: 1, at: new Date().toISOString(), error: String(e?.message || e) }).catch(() => {});
+  await writeProgress({
+    running: false,
+    phase: "done",
+    ok: false,
+    code: 1,
+    at: new Date().toISOString(),
+    error: String(e?.message || e),
+  }).catch(() => {});
   log(`== UPDATE END code=1 ${new Date().toISOString()} ==`);
 });

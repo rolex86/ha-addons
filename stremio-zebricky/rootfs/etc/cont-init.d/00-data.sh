@@ -3,29 +3,33 @@ set -e
 
 bashio::log.info "Preparing /data persistence..."
 
-# Create persistent dirs (podle tvé struktury)
-mkdir -p /data/config
-mkdir -p /data/lists
-mkdir -p /data/runtime
+# Ensure env for all scripts
+export DATA_DIR="/data"
 
-# Přesměrování /app/<dir> -> /data/<dir>
+# Create persistent dirs
+mkdir -p /data/config /data/lists /data/runtime
+
+# Redirect /app/<dir> -> /data/<dir>
 for d in "config" "lists" "runtime"; do
-  # pokud existuje reálná složka v /app, a /data je prázdné, zkopíruj ji (první start)
+  # migrate first-run content from image -> /data if /data empty
   if [ -d "/app/$d" ] && [ ! -L "/app/$d" ]; then
-    if [ "$(ls -A "/app/$d" 2>/dev/null || true)" != "" ] && [ "$(ls -A "/data/$d" 2>/dev/null || true)" = "" ]; then
+    if [ "$(ls -A "/app/$d" 2>/dev/null || true)" != "" ] && \
+       [ "$(ls -A "/data/$d" 2>/dev/null || true)" = "" ]; then
       bashio::log.info "Migrating /app/$d -> /data/$d"
       cp -a "/app/$d/." "/data/$d/" || true
     fi
-    rm -rf "/app/$d"
   fi
 
-  # vždycky vytvoř symlink
-  if [ ! -L "/app/$d" ]; then
+  # ensure /app/$d is a symlink
+  if [ -L "/app/$d" ]; then
+    :
+  else
+    rm -rf "/app/$d"
     ln -s "/data/$d" "/app/$d"
   fi
 done
 
-# Token pro Config UI z options
+# Token for Config UI from add-on options
 TOKEN="$(bashio::config 'config_ui_token' 2>/dev/null || true)"
 if [ -n "$TOKEN" ]; then
   export CONFIG_UI_TOKEN="$TOKEN"

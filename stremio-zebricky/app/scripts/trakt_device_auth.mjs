@@ -6,8 +6,10 @@ import { getTraktKeys } from "./_secrets.mjs";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const ROOT = path.join(__dirname, "..");
-const CACHE_DIR = path.join(ROOT, ".cache");
+// HA persistent root
+const DATA_DIR = process.env.DATA_DIR || "/data";
+const RUNTIME_DIR = path.join(DATA_DIR, "runtime");
+const CACHE_DIR = path.join(RUNTIME_DIR, "cache");
 const TOKEN_PATH = path.join(CACHE_DIR, "trakt_token.json");
 
 const TRAKT_BASE = "https://api.trakt.tv";
@@ -34,7 +36,8 @@ async function postJson(url, body) {
   }
 
   if (!res.ok) {
-    const msg = data?.error_description || data?.error || text || `HTTP ${res.status}`;
+    const msg =
+      data?.error_description || data?.error || text || `HTTP ${res.status}`;
     const err = new Error(msg);
     err.status = res.status;
     err.data = data;
@@ -45,8 +48,14 @@ async function postJson(url, body) {
 
 async function main() {
   const { clientId, clientSecret } = await getTraktKeys();
-  if (!clientId) throw new Error("Chybí TRAKT_CLIENT_ID (env nebo config/secrets.json).");
-  if (!clientSecret) throw new Error("Chybí TRAKT_CLIENT_SECRET (env nebo config/secrets.json).");
+  if (!clientId)
+    throw new Error(
+      "Chybí TRAKT_CLIENT_ID (env nebo /data/config/secrets.json).",
+    );
+  if (!clientSecret)
+    throw new Error(
+      "Chybí TRAKT_CLIENT_SECRET (env nebo /data/config/secrets.json).",
+    );
 
   console.log("Requesting device code…");
 
@@ -82,7 +91,7 @@ async function main() {
       tok.obtained_at = new Date().toISOString();
       await fs.writeFile(TOKEN_PATH, JSON.stringify(tok, null, 2), "utf8");
 
-      console.log("✅ Hotovo! Token uložen do:", TOKEN_PATH);
+      console.log("Hotovo! Token uložen do:", TOKEN_PATH);
       return;
     } catch (e) {
       const err = e?.data?.error || "";

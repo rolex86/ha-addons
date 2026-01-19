@@ -140,7 +140,7 @@ async function traktFetch(
   }
 }
 
-function normalizeCandidate(item, type) {
+function normalizeCandidate(item) {
   // Trakt response může být {movie:{...}} nebo {show:{...}} nebo přímo movie/show
   const obj = item?.movie || item?.show || item;
   const ids = obj?.ids || {};
@@ -165,7 +165,6 @@ function normalizeCandidate(item, type) {
     name: name || imdb,
     year: Number.isFinite(Number(year)) ? Number(year) : undefined,
     genres,
-    // releaseInfo vyplníme pro Stremio listy
     releaseInfo: Number.isFinite(Number(year)) ? String(year) : undefined,
   };
 }
@@ -181,7 +180,7 @@ function applyFilters(cands, profile) {
           .filter(Boolean)
       : parseGenresCsv(profile?.filters?.genres);
 
-  // exclude může být v legacy CSV (genresExclude / excludeGenres) nebo v novém poli excludeGenres
+  // exclude může být v legacy CSV (filters.genresExclude / filters.excludeGenres) nebo v novém poli excludeGenres
   const blockGenres =
     Array.isArray(profile?.excludeGenres) && profile.excludeGenres.length
       ? profile.excludeGenres
@@ -199,12 +198,12 @@ function applyFilters(cands, profile) {
       if (c.year < yr.min || c.year > yr.max) return false;
     }
 
-    // EXCLUDE: pokud se kandidat překrývá s blockGenres -> pryč
+    // EXCLUDE
     if (blockGenres.length) {
       if (overlapsAny(c.genres || [], blockGenres)) return false;
     }
 
-    // INCLUDE: chceme alespoň jeden shodný žánr
+    // INCLUDE
     if (wantGenres.length) {
       if (!overlapsAny(c.genres || [], wantGenres)) return false;
     }
@@ -233,9 +232,9 @@ async function loadLocalListItems(listId) {
             )
             .filter(Boolean)
         : [],
-
       releaseInfo: it.releaseInfo || (it.year ? String(it.year) : undefined),
-      // necháme už existující obohacení, pokud je:
+
+      // zachovej enrich data pokud už existují
       poster: it.poster,
       background: it.background,
       description: it.description,
@@ -250,10 +249,9 @@ function pickDaily(cands, profileId, size) {
   const seed = hashStrToUint32(`${todayKeyLocal()}::${profileId}`);
   const rnd = mulberry32(seed);
 
-  // vážený výběr: trochu preferuj “lepší” (pokud existuje csfdRating), ale pořád random
   const scored = cands.map((c) => {
     const base = Number.isFinite(c.csfdRating) ? c.csfdRating : 65;
-    const jitter = rnd() * 20; // random rozptyl
+    const jitter = rnd() * 20;
     const penalty = Number.isFinite(c.csfdRatingCount)
       ? Math.min(10, (c.csfdRatingCount / 100000) * 10)
       : 0;
@@ -281,9 +279,9 @@ function mergeDedupe(...arrays) {
       if (!c?.imdb) continue;
       if (!map.has(c.imdb)) map.set(c.imdb, c);
       else {
-        // když už existuje, zkus doplnit chybějící fields
         const cur = map.get(c.imdb);
-        map.set(c.imdb, { ...c, ...cur, ...c }); // preferuje “c”, ale zachová co už bylo
+        // preferuj "c", ale nech co už bylo (typicky enrich fields)
+        map.set(c.imdb, { ...cur, ...c });
       }
     }
   }
@@ -294,7 +292,6 @@ function stableSignature(obj) {
   return {
     id: obj?.id,
     type: obj?.type,
-    // pořadí je relevantní (daily picks)
     items: Array.isArray(obj?.items)
       ? obj.items.map((x) => x?.imdb).filter(Boolean)
       : [],
@@ -343,7 +340,10 @@ async function main() {
 
   for (const profile of profiles) {
     const pid = String(profile?.id || "").trim();
-    const ptype = String(profile?.type || "").trim();
+    const ptype = String(profile?.type || "")
+      .trim()
+      .toLowerCase();
+
     if (!pid) continue;
     if (ptype !== "movie" && ptype !== "series") continue;
 
@@ -351,12 +351,24 @@ async function main() {
       ? Number(profile.size)
       : defaultSize;
 
-    let fromTrakt = Array.isArray(profile.fromTrakt) ? profile.fromTrakt : [];
-    let fromLists = Array.isArray(profile.fromLists) ? profile.fromLists : [];
+    // legacy sources + optional "sources" fallback
+    let fromTrakt = Array.isArray(profile.fromTrakt)
+      ? profile.fromTrakt
+      : Array.isArray(profile?.sources?.traktPaths)
+        ? profile.sources.traktPaths
+        : [];
+
+    let fromLists = Array.isArray(profile.fromLists)
+      ? profile.fromLists
+      : Array.isArray(profile?.sources?.listIds)
+        ? profile.sources.listIds
+        : [];
 
     const hasAnyFilter =
       !!String(profile?.filters?.years || "").trim() ||
       !!String(profile?.filters?.genres || "").trim() ||
+      !!String(profile?.filters?.genresExclude || "").trim() || // IMPORTANT (exclude-only)
+      !!String(profile?.filters?.excludeGenres || "").trim() ||
       (Array.isArray(profile?.includeGenres) && profile.includeGenres.length) ||
       (Array.isArray(profile?.excludeGenres) && profile.excludeGenres.length);
 
@@ -405,7 +417,6 @@ async function main() {
         continue;
       }
 
-      // pages/limit per profile overrides, fallback defaults
       const candidatePages = Number.isFinite(Number(profile.candidatePages))
         ? Number(profile.candidatePages)
         : Number.isFinite(Number(defaults.candidatePages))
@@ -428,7 +439,7 @@ async function main() {
           await sleep(sleepMs);
 
           for (const row of Array.isArray(data) ? data : []) {
-            const cand = normalizeCandidate(row, ptype);
+            const cand = normalizeCandidate(row);
             if (cand) traktAll.push(cand);
           }
         } catch (e) {
@@ -457,7 +468,6 @@ async function main() {
         : null;
 
       merged = merged.filter((c) => {
-        // pokud rating/count neznáme, necháme projít (dofiltrované po enrich v dalších bězích)
         if (
           minRating !== null &&
           Number.isFinite(c.csfdRating) &&

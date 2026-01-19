@@ -31,7 +31,7 @@ function startAddonDetached() {
     cwd: ROOT,
     detached: true,
     stdio: "ignore",
-    env: process.env
+    env: process.env,
   });
   child.unref();
   return child.pid;
@@ -47,7 +47,7 @@ function startAddonDetached() {
   }
 
   // malá pauza aby se port uvolnil
-  await new Promise(r => setTimeout(r, 400));
+  await new Promise((r) => setTimeout(r, 400));
 
   const newPid = startAddonDetached();
   console.log("[restart] started new pid:", newPid);

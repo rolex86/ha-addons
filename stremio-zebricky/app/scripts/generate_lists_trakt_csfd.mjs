@@ -14,7 +14,6 @@ const CACHE_DIR = path.join(DATA_DIR, "runtime", "cache");
 
 const CSFD_MAP_PATH = path.join(CACHE_DIR, "csfd_map.json");
 
-
 const TRAKT_BASE = "https://api.trakt.tv";
 const DEFAULT_TIMEOUT_MS = 15000;
 
@@ -55,7 +54,10 @@ function stableListSignature(obj) {
 }
 
 function sameSignature(a, b) {
-  return JSON.stringify(stableListSignature(a)) === JSON.stringify(stableListSignature(b));
+  return (
+    JSON.stringify(stableListSignature(a)) ===
+    JSON.stringify(stableListSignature(b))
+  );
 }
 
 function buildUrl(pathname, params = {}) {
@@ -67,7 +69,11 @@ function buildUrl(pathname, params = {}) {
   return url.toString();
 }
 
-async function fetchWithTimeout(url, options = {}, timeoutMs = DEFAULT_TIMEOUT_MS) {
+async function fetchWithTimeout(
+  url,
+  options = {},
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+) {
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -77,7 +83,14 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = DEFAULT_TIMEOUT_M
   }
 }
 
-async function fetchTraktPage({ clientId, pathname, filters, page, limit, timeoutMs }) {
+async function fetchTraktPage({
+  clientId,
+  pathname,
+  filters,
+  page,
+  limit,
+  timeoutMs,
+}) {
   const params = { ...(filters ?? {}), page, limit };
   const url = buildUrl(pathname, params);
 
@@ -93,7 +106,7 @@ async function fetchTraktPage({ clientId, pathname, filters, page, limit, timeou
         "user-agent": "stremio-local-addon/0.0.6",
       },
     },
-    timeoutMs ?? DEFAULT_TIMEOUT_MS
+    timeoutMs ?? DEFAULT_TIMEOUT_MS,
   );
 
   if (!res.ok) {
@@ -103,8 +116,44 @@ async function fetchTraktPage({ clientId, pathname, filters, page, limit, timeou
   return res.json();
 }
 
+function parseCsv(csv) {
+  return String(csv || "")
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function uniqLower(list) {
+  return Array.from(
+    new Set(
+      (list || [])
+        .map((s) =>
+          String(s || "")
+            .trim()
+            .toLowerCase(),
+        )
+        .filter(Boolean),
+    ),
+  );
+}
+
+function hasAnyIntersection(list, set) {
+  if (!set || set.size === 0) return false;
+  for (const x of list || []) {
+    if (
+      set.has(
+        String(x || "")
+          .trim()
+          .toLowerCase(),
+      )
+    )
+      return true;
+  }
+  return false;
+}
+
 function normalizeTraktItem(raw, type) {
-  const obj = type === "series" ? raw?.show ?? raw : raw?.movie ?? raw;
+  const obj = type === "series" ? (raw?.show ?? raw) : (raw?.movie ?? raw);
 
   const ids = obj?.ids ?? {};
   const imdb = ids.imdb;
@@ -119,7 +168,10 @@ function normalizeTraktItem(raw, type) {
     (raw?.collector_count ?? 0) +
     (raw?.watchers ?? 0);
 
-  return { imdb, title, year, traktSignal };
+  // DŮLEŽITÉ: potřebujeme genres pro lokální exclude filtr
+  const genres = Array.isArray(obj?.genres) ? uniqLower(obj.genres) : [];
+
+  return { imdb, title, year, traktSignal, genres };
 }
 
 function formatCountK(n) {
@@ -131,7 +183,9 @@ function formatCountK(n) {
 
 function csfdRatingText(rating, ratingCount) {
   if (!Number.isFinite(rating)) return "";
-  const cnt = Number.isFinite(ratingCount) ? ` (${formatCountK(ratingCount)})` : "";
+  const cnt = Number.isFinite(ratingCount)
+    ? ` (${formatCountK(ratingCount)})`
+    : "";
   return `ČSFD: ${Math.round(rating)}%${cnt}`;
 }
 
@@ -163,7 +217,12 @@ async function findCsfdIdBySearch(title, year, sleepMs) {
   return movies[0]?.id || null;
 }
 
-async function getCsfdInfo({ imdb, title, year }, csfdMap, sleepMs, ttlDays = 30) {
+async function getCsfdInfo(
+  { imdb, title, year },
+  csfdMap,
+  sleepMs,
+  ttlDays = 30,
+) {
   const cached = csfdMap[imdb];
 
   if (cached?.last) {
@@ -171,7 +230,13 @@ async function getCsfdInfo({ imdb, title, year }, csfdMap, sleepMs, ttlDays = 30
     const ttlMs = ttlDays * 24 * 60 * 60 * 1000;
     if (ageMs < ttlMs && cached.csfdId !== undefined) {
       return cached.csfdId
-        ? { csfdId: cached.csfdId, rating: cached.rating, ratingCount: cached.ratingCount, name: cached.name, year: cached.year }
+        ? {
+            csfdId: cached.csfdId,
+            rating: cached.rating,
+            ratingCount: cached.ratingCount,
+            name: cached.name,
+            year: cached.year,
+          }
         : null;
     }
   }
@@ -195,11 +260,21 @@ async function getCsfdInfo({ imdb, title, year }, csfdMap, sleepMs, ttlDays = 30
     const name = m.title || title;
     const y = m.year || year;
 
-    csfdMap[imdb] = { csfdId: Number(csfdId), rating, ratingCount, name, year: y, last: Date.now() };
+    csfdMap[imdb] = {
+      csfdId: Number(csfdId),
+      rating,
+      ratingCount,
+      name,
+      year: y,
+      last: Date.now(),
+    };
 
     return { csfdId: Number(csfdId), rating, ratingCount, name, year: y };
   } catch {
-    csfdMap[imdb] = { csfdId: csfdId ? Number(csfdId) : null, last: Date.now() };
+    csfdMap[imdb] = {
+      csfdId: csfdId ? Number(csfdId) : null,
+      last: Date.now(),
+    };
     return null;
   }
 }
@@ -208,12 +283,26 @@ function pickDupRules(def, defaults) {
   const d = defaults?.dupRules ?? {};
   const r = def?.dupRules ?? {};
   return {
-    hardBlockTop: Number.isFinite(r.hardBlockTop) ? r.hardBlockTop : Number.isFinite(d.hardBlockTop) ? d.hardBlockTop : 45,
-    penaltyPerHit: Number.isFinite(r.penaltyPerHit) ? r.penaltyPerHit : Number.isFinite(d.penaltyPerHit) ? d.penaltyPerHit : 80,
+    hardBlockTop: Number.isFinite(r.hardBlockTop)
+      ? r.hardBlockTop
+      : Number.isFinite(d.hardBlockTop)
+        ? d.hardBlockTop
+        : 45,
+    penaltyPerHit: Number.isFinite(r.penaltyPerHit)
+      ? r.penaltyPerHit
+      : Number.isFinite(d.penaltyPerHit)
+        ? d.penaltyPerHit
+        : 80,
   };
 }
 
-async function generateOneList({ clientId, def, defaults, csfdMap, usedCountsByType }) {
+async function generateOneList({
+  clientId,
+  def,
+  defaults,
+  csfdMap,
+  usedCountsByType,
+}) {
   const listType = def.type || "movie";
 
   const candidatePages = def.candidatePages ?? defaults.candidatePages ?? 5;
@@ -227,10 +316,36 @@ async function generateOneList({ clientId, def, defaults, csfdMap, usedCountsByT
   const source = def.source;
   const dupRules = pickDupRules(def, defaults);
 
-  console.log(`\n=== GENERATING: ${def.id} (${def.name ?? ""}) type=${listType} ===`);
-  console.log(`source: ${source?.path} | pages=${candidatePages} | limit=${pageLimit} | final=${finalSize}`);
+  // Include genres (Trakt query) + Exclude genres (local filter)
+  const includeGenres = uniqLower(parseCsv(filters.genres || ""));
+  const excludeGenres = uniqLower(
+    parseCsv(
+      filters.genresExclude ||
+        filters.excludeGenres || // kompatibilita, kdyby ses rozhodl pojmenovat jinak
+        "",
+    ),
+  );
+  const excludeSet = new Set(excludeGenres);
+
+  // Do Trakt API NEposílej exclude klíče (Trakt je nezná)
+  const apiFilters = { ...(filters || {}) };
+  delete apiFilters.genresExclude;
+  delete apiFilters.excludeGenres;
+
+  console.log(
+    `\n=== GENERATING: ${def.id} (${def.name ?? ""}) type=${listType} ===`,
+  );
+  console.log(
+    `source: ${source?.path} | pages=${candidatePages} | limit=${pageLimit} | final=${finalSize}`,
+  );
   if (Object.keys(filters).length) console.log("filters:", filters);
-  console.log(`dupRules: hardBlockTop=${dupRules.hardBlockTop}, penaltyPerHit=${dupRules.penaltyPerHit}`);
+  if (includeGenres.length)
+    console.log("includeGenres:", includeGenres.join(","));
+  if (excludeGenres.length)
+    console.log("excludeGenres:", excludeGenres.join(","));
+  console.log(
+    `dupRules: hardBlockTop=${dupRules.hardBlockTop}, penaltyPerHit=${dupRules.penaltyPerHit}`,
+  );
 
   const candidates = new Map();
 
@@ -238,7 +353,7 @@ async function generateOneList({ clientId, def, defaults, csfdMap, usedCountsByT
     const data = await fetchTraktPage({
       clientId,
       pathname: source.path,
-      filters,
+      filters: apiFilters,
       page,
       limit: pageLimit,
       timeoutMs,
@@ -247,6 +362,11 @@ async function generateOneList({ clientId, def, defaults, csfdMap, usedCountsByT
     for (const raw of data) {
       const it = normalizeTraktItem(raw, listType);
       if (!it.imdb || !String(it.imdb).startsWith("tt")) continue;
+
+      // Local exclude: pokud item má některý zakázaný žánr, zahodíme ho hned
+      if (excludeSet.size && hasAnyIntersection(it.genres, excludeSet))
+        continue;
+
       if (!candidates.has(it.imdb)) candidates.set(it.imdb, it);
     }
 
@@ -259,18 +379,32 @@ async function generateOneList({ clientId, def, defaults, csfdMap, usedCountsByT
 
   for (const it of candidates.values()) {
     processed++;
-    if (processed % 25 === 0) console.log(`  progress ${processed}/${candidates.size}...`);
+    if (processed % 25 === 0)
+      console.log(`  progress ${processed}/${candidates.size}...`);
 
     if (listType === "movie") {
       const cs = await getCsfdInfo(it, csfdMap, sleepMs, ttlDays);
       if (!cs?.rating) continue;
 
       const rules = def.csfdRules || {};
-      if (Number.isFinite(rules.minRating) && cs.rating < rules.minRating) continue;
-      if (Number.isFinite(rules.minCount) && (cs.ratingCount || 0) < rules.minCount) continue;
-      if (Number.isFinite(rules.maxCount) && (cs.ratingCount || 0) > rules.maxCount) continue;
+      if (Number.isFinite(rules.minRating) && cs.rating < rules.minRating)
+        continue;
+      if (
+        Number.isFinite(rules.minCount) &&
+        (cs.ratingCount || 0) < rules.minCount
+      )
+        continue;
+      if (
+        Number.isFinite(rules.maxCount) &&
+        (cs.ratingCount || 0) > rules.maxCount
+      )
+        continue;
 
-      const baseScore = computeBaseScoreMovie({ rating: cs.rating, ratingCount: cs.ratingCount, traktSignal: it.traktSignal });
+      const baseScore = computeBaseScoreMovie({
+        rating: cs.rating,
+        ratingCount: cs.ratingCount,
+        traktSignal: it.traktSignal,
+      });
 
       const usedCounts = usedCountsByType.get("movie");
       const hits = usedCounts.get(it.imdb) || 0;
@@ -285,10 +419,15 @@ async function generateOneList({ clientId, def, defaults, csfdMap, usedCountsByT
         csfdRatingCount: cs.ratingCount,
         adjustedScore,
         hits,
-        releaseInfo: cs.year ? `${cs.year} • ${csfdRatingText(cs.rating, cs.ratingCount)}` : csfdRatingText(cs.rating, cs.ratingCount),
+        releaseInfo: cs.year
+          ? `${cs.year} • ${csfdRatingText(cs.rating, cs.ratingCount)}`
+          : csfdRatingText(cs.rating, cs.ratingCount),
       });
     } else {
-      const score = computeScoreSeries({ year: it.year, traktSignal: it.traktSignal });
+      const score = computeScoreSeries({
+        year: it.year,
+        traktSignal: it.traktSignal,
+      });
 
       const usedCounts = usedCountsByType.get("series");
       const hits = usedCounts.get(it.imdb) || 0;
@@ -305,7 +444,9 @@ async function generateOneList({ clientId, def, defaults, csfdMap, usedCountsByT
     }
   }
 
-  enriched.sort((a, b) => (b.adjustedScore ?? -Infinity) - (a.adjustedScore ?? -Infinity));
+  enriched.sort(
+    (a, b) => (b.adjustedScore ?? -Infinity) - (a.adjustedScore ?? -Infinity),
+  );
 
   const usedCounts = usedCountsByType.get(listType);
   const picked = [];
@@ -369,23 +510,32 @@ async function generateOneList({ clientId, def, defaults, csfdMap, usedCountsByT
   }
 
   const dupPicked = picked.filter((x) => (x.hits || 0) > 0).length;
-  console.log(`✅ ${def.id}: candidates=${candidates.size}, kept=${picked.length}, dupPicked=${dupPicked}`);
+  console.log(
+    `✅ ${def.id}: candidates=${candidates.size}, kept=${picked.length}, dupPicked=${dupPicked}`,
+  );
 }
 
 async function main() {
   await ensureDirs();
 
   const { clientId } = await getTraktKeys();
-  if (!clientId) throw new Error("Chybí Trakt Client ID (nastav env nebo config/secrets.json).");
+  if (!clientId)
+    throw new Error(
+      "Chybí Trakt Client ID (nastav env nebo config/secrets.json).",
+    );
 
   console.log("TRAKT_CLIENT_ID set:", !!clientId);
   console.log("Config path:", CONFIG_PATH);
 
   const config = await readJsonSafe(CONFIG_PATH, null);
-  if (!config?.lists?.length) throw new Error(`Chybí nebo je prázdný config: ${CONFIG_PATH}`);
+  if (!config?.lists?.length)
+    throw new Error(`Chybí nebo je prázdný config: ${CONFIG_PATH}`);
 
   const defaults = config.defaults ?? {};
-  console.log("Loaded lists:", config.lists.map((x) => `${x.id}(${x.type || "movie"})`).join(", "));
+  console.log(
+    "Loaded lists:",
+    config.lists.map((x) => `${x.id}(${x.type || "movie"})`).join(", "),
+  );
 
   const csfdMap = await readJsonSafe(CSFD_MAP_PATH, {});
   console.log("CSFD cache entries:", Object.keys(csfdMap).length);
@@ -396,7 +546,13 @@ async function main() {
   ]);
 
   for (const def of config.lists) {
-    await generateOneList({ clientId, def, defaults, csfdMap, usedCountsByType });
+    await generateOneList({
+      clientId,
+      def,
+      defaults,
+      csfdMap,
+      usedCountsByType,
+    });
   }
 
   await fs.writeFile(CSFD_MAP_PATH, JSON.stringify(csfdMap, null, 2), "utf8");

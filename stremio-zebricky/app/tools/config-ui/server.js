@@ -31,7 +31,9 @@ const PORT = Number(process.env.CONFIG_UI_PORT || 7788);
 const TOKEN = (process.env.CONFIG_UI_TOKEN || "").trim();
 
 // Trakt genres cache TTL (ms)
-const TRAKT_GENRES_TTL_MS = Number(process.env.TRAKT_GENRES_TTL_MS || 24 * 60 * 60 * 1000); // 24h
+const TRAKT_GENRES_TTL_MS = Number(
+  process.env.TRAKT_GENRES_TTL_MS || 24 * 60 * 60 * 1000,
+); // 24h
 
 // ---------------------------
 // UPDATE/RUNNER (enrich + rebuild)
@@ -39,7 +41,9 @@ const TRAKT_GENRES_TTL_MS = Number(process.env.TRAKT_GENRES_TTL_MS || 24 * 60 * 
 // Nastav příkaz, který má udělat "celý proces aktualizace".
 // Příklad:
 //   CONFIG_UI_UPDATE_CMD="node tools/update-lists.js"
-const UPDATE_CMD = String(process.env.CONFIG_UI_UPDATE_CMD || "node tools/update-lists.js").trim();
+const UPDATE_CMD = String(
+  process.env.CONFIG_UI_UPDATE_CMD || "node tools/update-lists.js",
+).trim();
 
 const updateState = {
   running: false,
@@ -58,7 +62,8 @@ function pushUpdateLine(line) {
 
   // keep last N lines
   updateState.lines.push(s);
-  if (updateState.lines.length > 2500) updateState.lines.splice(0, updateState.lines.length - 2500);
+  if (updateState.lines.length > 2500)
+    updateState.lines.splice(0, updateState.lines.length - 2500);
 
   // Try to parse structured progress:
   // 1) "PROGRESS {"label":"xyz","done":20,"total":500}"
@@ -67,9 +72,13 @@ function pushUpdateLine(line) {
     try {
       const j = JSON.parse(raw);
       if (j && typeof j === "object") {
-        updateState.progress.label = String(j.label || updateState.progress.label || "");
-        if (Number.isFinite(Number(j.done))) updateState.progress.done = Number(j.done);
-        if (Number.isFinite(Number(j.total))) updateState.progress.total = Number(j.total);
+        updateState.progress.label = String(
+          j.label || updateState.progress.label || "",
+        );
+        if (Number.isFinite(Number(j.done)))
+          updateState.progress.done = Number(j.done);
+        if (Number.isFinite(Number(j.total)))
+          updateState.progress.total = Number(j.total);
       }
     } catch {}
   } else {
@@ -86,7 +95,9 @@ function pushUpdateLine(line) {
   // Broadcast to SSE clients
   for (const res of updateState.clients) {
     try {
-      res.write(`data: ${JSON.stringify({ line: s, at: Date.now(), progress: updateState.progress })}\n\n`);
+      res.write(
+        `data: ${JSON.stringify({ line: s, at: Date.now(), progress: updateState.progress })}\n\n`,
+      );
     } catch {}
   }
 }
@@ -105,7 +116,9 @@ function startUpdateProcess() {
   updateState.pid = null;
   updateState.progress = { label: "", done: 0, total: 0 };
 
-  pushUpdateLine(`== UPDATE START ${new Date(updateState.startedAt).toISOString()} ==`);
+  pushUpdateLine(
+    `== UPDATE START ${new Date(updateState.startedAt).toISOString()} ==`,
+  );
   pushUpdateLine(`CMD: ${UPDATE_CMD}`);
 
   // IMPORTANT: run in /app (code), but ensure DATA_DIR=/data so scripts use persistent storage
@@ -130,13 +143,18 @@ function startUpdateProcess() {
   child.on("close", (code) => {
     updateState.running = false;
     updateState.endedAt = Date.now();
-    updateState.exitCode = code === null || code === undefined ? null : Number(code);
-    pushUpdateLine(`== UPDATE END code=${updateState.exitCode} ${new Date(updateState.endedAt).toISOString()} ==`);
+    updateState.exitCode =
+      code === null || code === undefined ? null : Number(code);
+    pushUpdateLine(
+      `== UPDATE END code=${updateState.exitCode} ${new Date(updateState.endedAt).toISOString()} ==`,
+    );
 
     // notify clients that it's done (optional)
     for (const res of updateState.clients) {
       try {
-        res.write(`event: done\ndata: ${JSON.stringify({ ok: code === 0, code })}\n\n`);
+        res.write(
+          `event: done\ndata: ${JSON.stringify({ ok: code === 0, code })}\n\n`,
+        );
       } catch {}
     }
   });
@@ -228,20 +246,25 @@ async function readBody(req) {
 function normalizeListsConfig(lists) {
   if (!lists || typeof lists !== "object") return lists;
 
-  if (!lists.defaults || typeof lists.defaults !== "object") lists.defaults = {};
-  if (!lists.defaults.dupRules || typeof lists.defaults.dupRules !== "object") lists.defaults.dupRules = {};
+  if (!lists.defaults || typeof lists.defaults !== "object")
+    lists.defaults = {};
+  if (!lists.defaults.dupRules || typeof lists.defaults.dupRules !== "object")
+    lists.defaults.dupRules = {};
   if (!Array.isArray(lists.lists)) lists.lists = [];
   // smartPicks is optional
-  if (lists.smartPicks && typeof lists.smartPicks !== "object") lists.smartPicks = null;
+  if (lists.smartPicks && typeof lists.smartPicks !== "object")
+    lists.smartPicks = null;
 
   for (const l of lists.lists) {
     if (!l || typeof l !== "object") continue;
 
     // normalize source.path
     if (!l.source || typeof l.source !== "object") l.source = { path: "" };
-    if (typeof l.source.path !== "string") l.source.path = String(l.source.path || "");
+    if (typeof l.source.path !== "string")
+      l.source.path = String(l.source.path || "");
     l.source.path = l.source.path.trim();
-    if (l.source.path && !l.source.path.startsWith("/")) l.source.path = "/" + l.source.path;
+    if (l.source.path && !l.source.path.startsWith("/"))
+      l.source.path = "/" + l.source.path;
 
     // normalize type
     const rawType = (l.type ?? "").toString().trim().toLowerCase();
@@ -275,25 +298,33 @@ function normalizeListsConfig(lists) {
 
 function isValidListsConfig(obj) {
   if (!obj || typeof obj !== "object") return "Config není objekt.";
-  if (!obj.defaults || typeof obj.defaults !== "object") return "Chybí defaults.";
+  if (!obj.defaults || typeof obj.defaults !== "object")
+    return "Chybí defaults.";
   if (!Array.isArray(obj.lists)) return "Chybí lists[].";
 
   for (const l of obj.lists) {
     if (!l || typeof l !== "object") return "List není objekt.";
     if (!l.id || typeof l.id !== "string") return "List musí mít id.";
-    if (!l.name || typeof l.name !== "string") return `List ${l.id || "(unknown)"}: chybí name.`;
-    if (!l.type || !["movie", "series"].includes(l.type)) return `List ${l.id}: type musí být movie/series.`;
-    if (!l.source || typeof l.source !== "object" || !l.source.path) return `List ${l.id}: chybí source.path.`;
-    if (l.filters && typeof l.filters !== "object") return `List ${l.id}: filters musí být objekt.`;
+    if (!l.name || typeof l.name !== "string")
+      return `List ${l.id || "(unknown)"}: chybí name.`;
+    if (!l.type || !["movie", "series"].includes(l.type))
+      return `List ${l.id}: type musí být movie/series.`;
+    if (!l.source || typeof l.source !== "object" || !l.source.path)
+      return `List ${l.id}: chybí source.path.`;
+    if (l.filters && typeof l.filters !== "object")
+      return `List ${l.id}: filters musí být objekt.`;
   }
   return null;
 }
 
 function isValidSecrets(obj) {
   if (!obj || typeof obj !== "object") return "Secrets není objekt.";
-  if (!obj.trakt || typeof obj.trakt !== "object") return "Chybí secrets.trakt.";
-  if (typeof obj.trakt.client_id !== "string") return "secrets.trakt.client_id musí být string.";
-  if (typeof obj.trakt.client_secret !== "string") return "secrets.trakt.client_secret musí být string.";
+  if (!obj.trakt || typeof obj.trakt !== "object")
+    return "Chybí secrets.trakt.";
+  if (typeof obj.trakt.client_id !== "string")
+    return "secrets.trakt.client_id musí být string.";
+  if (typeof obj.trakt.client_secret !== "string")
+    return "secrets.trakt.client_secret musí být string.";
   return null;
 }
 
@@ -304,7 +335,9 @@ const traktGenresCache = {
 };
 
 function normType(qType) {
-  const t = String(qType || "").trim().toLowerCase();
+  const t = String(qType || "")
+    .trim()
+    .toLowerCase();
   if (t === "show" || t === "shows" || t === "series") return "series";
   return "movie";
 }
@@ -340,7 +373,9 @@ async function fetchTraktGenres(type) {
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    const e = new Error(`Trakt genres error ${res.status}: ${text || res.statusText}`);
+    const e = new Error(
+      `Trakt genres error ${res.status}: ${text || res.statusText}`,
+    );
     e.code = "TRAKT_HTTP";
     throw e;
   }
@@ -350,7 +385,9 @@ async function fetchTraktGenres(type) {
 
   const cleaned = genres
     .map((g) => ({
-      slug: String(g?.slug || "").trim().toLowerCase(),
+      slug: String(g?.slug || "")
+        .trim()
+        .toLowerCase(),
       name: String(g?.name || g?.slug || "").trim(),
     }))
     .filter((g) => g.slug);
@@ -360,7 +397,8 @@ async function fetchTraktGenres(type) {
 }
 
 async function getGenresCached(type) {
-  const bucket = type === "series" ? traktGenresCache.series : traktGenresCache.movie;
+  const bucket =
+    type === "series" ? traktGenresCache.series : traktGenresCache.movie;
   const now = Date.now();
 
   if (bucket.data && now - bucket.at < TRAKT_GENRES_TTL_MS) {
@@ -378,7 +416,13 @@ async function getGenresCached(type) {
     bucket.err = String(e?.message || e);
     // fallback: pokud něco v cache máme (byť expirované), vrať to aspoň
     if (bucket.data && bucket.data.length) {
-      return { genres: bucket.data, cached: true, stale: true, error: bucket.err, ttlMs: TRAKT_GENRES_TTL_MS };
+      return {
+        genres: bucket.data,
+        cached: true,
+        stale: true,
+        error: bucket.err,
+        ttlMs: TRAKT_GENRES_TTL_MS,
+      };
     }
     throw e;
   }
@@ -401,13 +445,18 @@ async function handle(req, res) {
   }
 
   // Static UI
-  if (req.method === "GET" && (pathname === "/" || pathname === "/index.html")) {
+  if (
+    req.method === "GET" &&
+    (pathname === "/" || pathname === "/index.html")
+  ) {
     const html = await fs.readFile(INDEX_PATH, "utf8");
     return sendHtml(res, 200, html);
   }
   if (req.method === "GET" && pathname === "/client.js") {
     const js = await fs.readFile(CLIENT_PATH, "utf8");
-    return sendText(res, 200, js, { "content-type": "application/javascript; charset=utf-8" });
+    return sendText(res, 200, js, {
+      "content-type": "application/javascript; charset=utf-8",
+    });
   }
 
   // Token gate for API
@@ -416,15 +465,23 @@ async function handle(req, res) {
       return sendJson(
         res,
         401,
-        { error: "Unauthorized. Set correct token (CONFIG_UI_TOKEN / input field)." },
-        { "access-control-allow-origin": "*" }
+        {
+          error:
+            "Unauthorized. Set correct token (CONFIG_UI_TOKEN / input field).",
+        },
+        { "access-control-allow-origin": "*" },
       );
     }
   }
 
   // Health
   if (req.method === "GET" && pathname === "/api/health") {
-    return sendJson(res, 200, { ok: true }, { "access-control-allow-origin": "*" });
+    return sendJson(
+      res,
+      200,
+      { ok: true },
+      { "access-control-allow-origin": "*" },
+    );
   }
 
   // UPDATE: status
@@ -440,9 +497,11 @@ async function handle(req, res) {
         exitCode: updateState.exitCode,
         pid: updateState.pid,
         progress: updateState.progress,
-        lastLine: updateState.lines.length ? updateState.lines[updateState.lines.length - 1] : "",
+        lastLine: updateState.lines.length
+          ? updateState.lines[updateState.lines.length - 1]
+          : "",
       },
-      { "access-control-allow-origin": "*" }
+      { "access-control-allow-origin": "*" },
     );
   }
 
@@ -458,9 +517,13 @@ async function handle(req, res) {
     // initial dump last ~200 lines
     const start = Math.max(0, updateState.lines.length - 200);
     for (let i = start; i < updateState.lines.length; i++) {
-      res.write(`data: ${JSON.stringify({ line: updateState.lines[i], at: Date.now(), progress: updateState.progress })}\n\n`);
+      res.write(
+        `data: ${JSON.stringify({ line: updateState.lines[i], at: Date.now(), progress: updateState.progress })}\n\n`,
+      );
     }
-    res.write(`event: status\ndata: ${JSON.stringify({ running: updateState.running, progress: updateState.progress })}\n\n`);
+    res.write(
+      `event: status\ndata: ${JSON.stringify({ running: updateState.running, progress: updateState.progress })}\n\n`,
+    );
 
     updateState.clients.add(res);
     req.on("close", () => {
@@ -473,18 +536,33 @@ async function handle(req, res) {
   if (req.method === "POST" && pathname === "/api/run-update") {
     try {
       const out = startUpdateProcess();
-      return sendJson(res, 200, { ok: true, ...out }, { "access-control-allow-origin": "*" });
+      return sendJson(
+        res,
+        200,
+        { ok: true, ...out },
+        { "access-control-allow-origin": "*" },
+      );
     } catch (e) {
       const msg = String(e?.message || e);
       const status = e?.code === "ALREADY_RUNNING" ? 409 : 500;
-      return sendJson(res, status, { ok: false, error: msg }, { "access-control-allow-origin": "*" });
+      return sendJson(
+        res,
+        status,
+        { ok: false, error: msg },
+        { "access-control-allow-origin": "*" },
+      );
     }
   }
 
   // UPDATE: stop
   if (req.method === "POST" && pathname === "/api/stop-update") {
     const ok = stopUpdateProcess();
-    return sendJson(res, 200, { ok: true, stopped: ok }, { "access-control-allow-origin": "*" });
+    return sendJson(
+      res,
+      200,
+      { ok: true, stopped: ok },
+      { "access-control-allow-origin": "*" },
+    );
   }
 
   // Trakt genres (server-side proxy)
@@ -492,20 +570,44 @@ async function handle(req, res) {
     const type = normType(parsed?.query?.type);
     try {
       const out = await getGenresCached(type);
-      return sendJson(res, 200, { ok: true, type, ...out }, { "access-control-allow-origin": "*" });
+      return sendJson(
+        res,
+        200,
+        { ok: true, type, ...out },
+        { "access-control-allow-origin": "*" },
+      );
     } catch (e) {
-      return sendJson(res, 500, { ok: false, error: String(e?.message || e), type }, { "access-control-allow-origin": "*" });
+      return sendJson(
+        res,
+        500,
+        { ok: false, error: String(e?.message || e), type },
+        { "access-control-allow-origin": "*" },
+      );
     }
   }
 
   // Restart addon server (no PM2; uses node tools/restart-addon.js)
   if (req.method === "POST" && pathname === "/api/restart-addon") {
-    exec("node tools/restart-addon.js", { cwd: ROOT, env: { ...process.env, DATA_DIR } }, (err, stdout, stderr) => {
-      if (err) {
-        return sendJson(res, 500, { error: String(err.message || err), stdout, stderr }, { "access-control-allow-origin": "*" });
-      }
-      return sendJson(res, 200, { ok: true, stdout, stderr }, { "access-control-allow-origin": "*" });
-    });
+    exec(
+      "node tools/restart-addon.js",
+      { cwd: ROOT, env: { ...process.env, DATA_DIR } },
+      (err, stdout, stderr) => {
+        if (err) {
+          return sendJson(
+            res,
+            500,
+            { error: String(err.message || err), stdout, stderr },
+            { "access-control-allow-origin": "*" },
+          );
+        }
+        return sendJson(
+          res,
+          200,
+          { ok: true, stdout, stderr },
+          { "access-control-allow-origin": "*" },
+        );
+      },
+    );
     return;
   }
 
@@ -533,11 +635,19 @@ async function handle(req, res) {
     // normalize on read
     lists = normalizeListsConfig(lists);
     if (!secrets || typeof secrets !== "object") secrets = secretsFallback;
-    if (!secrets.trakt || typeof secrets.trakt !== "object") secrets.trakt = secretsFallback.trakt;
-    if (typeof secrets.trakt.client_id !== "string") secrets.trakt.client_id = String(secrets.trakt.client_id || "");
-    if (typeof secrets.trakt.client_secret !== "string") secrets.trakt.client_secret = String(secrets.trakt.client_secret || "");
+    if (!secrets.trakt || typeof secrets.trakt !== "object")
+      secrets.trakt = secretsFallback.trakt;
+    if (typeof secrets.trakt.client_id !== "string")
+      secrets.trakt.client_id = String(secrets.trakt.client_id || "");
+    if (typeof secrets.trakt.client_secret !== "string")
+      secrets.trakt.client_secret = String(secrets.trakt.client_secret || "");
 
-    return sendJson(res, 200, { lists, secrets }, { "access-control-allow-origin": "*" });
+    return sendJson(
+      res,
+      200,
+      { lists, secrets },
+      { "access-control-allow-origin": "*" },
+    );
   }
 
   // POST config (save both lists + secrets)
@@ -547,7 +657,12 @@ async function handle(req, res) {
     try {
       body = raw ? JSON.parse(raw) : null;
     } catch {
-      return sendJson(res, 400, { error: "Invalid JSON" }, { "access-control-allow-origin": "*" });
+      return sendJson(
+        res,
+        400,
+        { error: "Invalid JSON" },
+        { "access-control-allow-origin": "*" },
+      );
     }
 
     let lists = body?.lists;
@@ -556,10 +671,22 @@ async function handle(req, res) {
     lists = normalizeListsConfig(lists);
 
     const listsErr = isValidListsConfig(lists);
-    if (listsErr) return sendJson(res, 400, { error: listsErr }, { "access-control-allow-origin": "*" });
+    if (listsErr)
+      return sendJson(
+        res,
+        400,
+        { error: listsErr },
+        { "access-control-allow-origin": "*" },
+      );
 
     const secErr = isValidSecrets(secrets);
-    if (secErr) return sendJson(res, 400, { error: secErr }, { "access-control-allow-origin": "*" });
+    if (secErr)
+      return sendJson(
+        res,
+        400,
+        { error: secErr },
+        { "access-control-allow-origin": "*" },
+      );
 
     await fs.mkdir(CONFIG_DIR, { recursive: true });
     await writeJsonAtomic(LISTS_PATH, lists);
@@ -579,25 +706,37 @@ async function handle(req, res) {
           secrets: SECRETS_PATH,
         },
       },
-      { "access-control-allow-origin": "*" }
+      { "access-control-allow-origin": "*" },
     );
   }
 
-  return sendJson(res, 404, { error: "Not found" }, { "access-control-allow-origin": "*" });
+  return sendJson(
+    res,
+    404,
+    { error: "Not found" },
+    { "access-control-allow-origin": "*" },
+  );
 }
 
 http
   .createServer((req, res) => {
     handle(req, res).catch((e) => {
       console.error("CONFIG-UI ERROR:", e);
-      sendJson(res, 500, { error: String(e?.message || e) }, { "access-control-allow-origin": "*" });
+      sendJson(
+        res,
+        500,
+        { error: String(e?.message || e) },
+        { "access-control-allow-origin": "*" },
+      );
     });
   })
   .listen(PORT, HOST, () => {
     const shownHost = HOST === "0.0.0.0" ? "localhost" : HOST;
     console.log(`Config UI running on http://${shownHost}:${PORT}`);
     console.log(`Config path: ${CONFIG_DIR}`);
-    console.log(`Token protection: ${TOKEN ? "ENABLED" : "DISABLED (set CONFIG_UI_TOKEN for LAN safety)"}`);
+    console.log(
+      `Token protection: ${TOKEN ? "ENABLED" : "DISABLED (set CONFIG_UI_TOKEN for LAN safety)"}`,
+    );
     console.log(`Trakt genres cache TTL: ${TRAKT_GENRES_TTL_MS} ms`);
     console.log(`Update cmd: ${UPDATE_CMD}`);
     console.log(`DATA_DIR: ${DATA_DIR}`);

@@ -1,0 +1,5 @@
+#!/usr/bin/with-contenv bash
+set -e
+
+echo "[unifi-ssh-presence] starting..."
+exec python3 -u -X faulthandler /usr/bin/unifi_ssh_presence.py 2>&1

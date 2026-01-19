@@ -1,0 +1,96 @@
+name: "UniFi SSH Presence (MQTT)"
+slug: "unifi_ssh_presence"
+description: "Presence bez UniFi Controlleru: SSH polling UniFi AP a MQTT autodiscovery device_tracker"
+version: "0.3.0"
+url: "https://example.local/unifi_ssh_presence"
+arch:
+  - aarch64
+  - amd64
+  - armv7
+  - armhf
+  - i386
+
+init: false
+startup: services
+boot: auto
+homeassistant_api: false
+hassio_api: false
+host_network: false
+ingress: false
+
+options:
+  mqtt:
+    host: "core-mosquitto"
+    port: 1883
+    username: ""
+    password: ""
+    discovery_prefix: "homeassistant"
+    base_topic: "unifi_presence"
+    client_id: "unifi_ssh_presence"
+
+  poll_interval_sec: 90
+  away_after_misses: 3
+
+  ssh:
+    username: "unifiap"
+    password: ""
+    port: 22
+    connect_timeout_sec: 8
+    cmd_timeout_sec: 12
+    known_hosts_strict: false
+
+  aps:
+    - name: "ap_1_patro"
+      host: "192.168.0.103"
+    - name: "ap_2_patro"
+      host: "192.168.0.106"
+
+  # Learn mode: sbírá "neznámé" (ne-whitelist) klienty do /data/seen_devices.json
+  # a do logu zapisuje jen při změně (nový MAC / poprvé IPv4).
+  learn_mode: true
+  learn_max_entries: 50
+
+  # Whitelist zařízení, která se budou publikovat jako device_tracker
+  devices:
+    - mac: "b8:db:38:79:92:20"
+      name: "Fifa telefon Pixel 8 pro addon"
+      allow_randomized: false
+    - mac: "d4:5e:89:65:cb:01"
+      name: "Peta telefon Moto g84 addon"
+      allow_randomized: false
+
+schema:
+  mqtt:
+    host: str
+    port: int
+    username: str?
+    password: password?
+    discovery_prefix: str
+    base_topic: str
+    client_id: str
+
+  poll_interval_sec: int
+  away_after_misses: int
+
+  ssh:
+    username: str
+    password: password
+    port: int
+    connect_timeout_sec: int
+    cmd_timeout_sec: int
+    known_hosts_strict: bool
+
+  aps:
+    - name: str
+      host: str
+
+  learn_mode: bool
+  learn_max_entries: int
+
+  devices:
+    - mac: str
+      name: str
+      allow_randomized: bool?
+
+ports: {}
+log_level: info

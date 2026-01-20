@@ -1,6 +1,9 @@
 ARG BUILD_FROM
 FROM ${BUILD_FROM}
 
+ARG BUILD_VERSION
+ENV ADDON_VERSION=$BUILD_VERSION
+
 RUN apk add --no-cache \
   bash coreutils jq curl \
   nodejs npm

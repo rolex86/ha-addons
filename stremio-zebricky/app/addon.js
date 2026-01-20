@@ -5,7 +5,13 @@ const path = require("path");
 
 const PAGE_SIZE = 100;
 
-const ROOT = __dirname;
+// Prefer version injected by HA build (Dockerfile: ARG BUILD_VERSION + ENV ADDON_VERSION)
+// Fallbacks cover other runtimes / local runs.
+const ADDON_VERSION =
+  process.env.ADDON_VERSION ||
+  process.env.BUILD_VERSION ||
+  process.env.npm_package_version ||
+  "0.0.0";
 
 // HA add-on persistent storage (default /data)
 const DATA_DIR = process.env.DATA_DIR || "/data";
@@ -139,9 +145,13 @@ if (!configCache?.lists?.length) {
   throw new Error(`Config is missing/empty: ${CONFIG_PATH}`);
 }
 
+console.log(
+  `[boot] version=${ADDON_VERSION} DATA_DIR=${DATA_DIR} CONFIG_PATH=${CONFIG_PATH} LIST_DIR=${LIST_DIR}`,
+);
+
 const manifest = {
   id: "org.vlastni.zebricky.cz",
-  version: "0.0.6",
+  version: ADDON_VERSION,
   name: "Vlastní žebříčky",
   description: "Katalogy generované z configu + CZ meta pro filmy.",
   website:

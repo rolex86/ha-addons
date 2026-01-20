@@ -1055,6 +1055,24 @@
           font-size: 14px;
         }
       }
+      /* ===========================
+   Sticky topbar: jen desktop
+   (vypne sticky na mobilu včetně landscape)
+   =========================== */
+
+      /* default: není sticky */
+      .topbar {
+        position: static;
+        top: auto;
+      }
+
+      /* sticky až od větší šířky */
+      @media (min-width: 900px) {
+        .topbar {
+          position: sticky;
+          top: 12px;
+        }
+      }
     </style>
   </head>
 

@@ -1,6 +1,6 @@
-<h1>Stremio – Vlastní žebříčky (CZ Classics) – Home Assistant Add-on</h1>
+<h1>Stremio – Vlastní žebříčky – Home Assistant Add-on</h1>
 
-<p>Tenhle add-on spouští můj lokální Stremio addon „Vlastní žebříčky (CZ Classics)“ přímo v Home Assistantu. Vzniklo to proto, že na Raspberry Pi to bylo na hraně výkonu a občas padalo, zatímco HA běží na silnějším železe.</p>
+<p>Stremio addon „Vlastní žebříčky“ pro Home Assistant. Vzniklo to proto, že mě nebavilo pořád dokola koukat na ty stejné nabídky filmů a seriálů z Cinemeta a chtěl jsem mít možnost si to definovat jednoduše sám + pomocí Smart pick seznamů mít každý večer na výběr z jiných nabídek na co koukat</p>
 
 <p>Add-on má dvě části:</p>
 <ul>

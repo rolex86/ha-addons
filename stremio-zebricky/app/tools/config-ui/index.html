@@ -28,7 +28,23 @@
         --sans:
           ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial,
           "Noto Sans", "Liberation Sans", sans-serif;
+
+        /* ===========================
+           FORM READABILITY IMPROVEMENTS
+           =========================== */
+        --card-bg: rgba(255, 255, 255, 0.035); /* sjednocenější pozadí karet */
+        --field-bg: rgba(255, 255, 255, 0.06); /* input surface: viditelnější */
+        --field-bg-hover: rgba(255, 255, 255, 0.075);
+        --field-bg-focus: rgba(255, 255, 255, 0.09);
+
+        --field-border: rgba(255, 255, 255, 0.16);
+        --field-border-hover: rgba(255, 255, 255, 0.22);
+        --field-border-focus: rgba(45, 140, 255, 0.55);
+
+        --ring: 0 0 0 3px rgba(45, 140, 255, 0.22);
+        --placeholder: rgba(233, 238, 247, 0.55);
       }
+
       * {
         box-sizing: border-box;
       }
@@ -64,6 +80,11 @@
           20% 0%,
           80% 10%;
         background-attachment: fixed;
+      }
+
+      /* iOS: zabraň “text autosize” randomu a zoomu při fokusu */
+      html {
+        -webkit-text-size-adjust: 100%;
       }
 
       .wrap {
@@ -148,11 +169,12 @@
         }
       }
 
+      /* Card: lehce sjednocenější, aby inputy víc vystoupily */
       .card {
         background: linear-gradient(
           180deg,
-          rgba(255, 255, 255, 0.04),
-          rgba(255, 255, 255, 0.02)
+          rgba(255, 255, 255, 0.05),
+          rgba(255, 255, 255, 0.03)
         );
         border: 1px solid var(--border);
         border-radius: var(--radius);
@@ -204,17 +226,102 @@
       select,
       textarea {
         width: 100%;
-        padding: 10px 12px;
+        padding: 11px 12px;
         border-radius: 12px;
-        border: 1px solid var(--border2);
+        border: 1px solid var(--field-border);
         outline: none;
-        background: rgba(0, 0, 0, 0.22);
+        background: var(--field-bg);
         color: var(--text);
-        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.06),
+          0 1px 0 rgba(0, 0, 0, 0.25);
+        transition:
+          background 0.15s ease,
+          border-color 0.15s ease,
+          box-shadow 0.15s ease,
+          transform 0.15s ease;
       }
       textarea {
         min-height: 90px;
         resize: vertical;
+      }
+
+      /* placeholder – viditelný, ale odlišený */
+      input::placeholder,
+      textarea::placeholder {
+        color: var(--placeholder);
+      }
+
+      /* hover – lehce zvednout čitelnost a “klikatelnost” */
+      input:not([type="checkbox"]):not([type="range"]):hover,
+      select:hover,
+      textarea:hover {
+        background: var(--field-bg-hover);
+        border-color: var(--field-border-hover);
+      }
+
+      /* focus – jasný ring + ještě o chlup světlejší plocha */
+      input:focus,
+      select:focus,
+      textarea:focus {
+        background: var(--field-bg-focus);
+        border-color: var(--field-border-focus);
+        box-shadow: var(--ring);
+      }
+      /* preferuj focus-visible (ať ring neskáče po klikání myší všude) */
+      input:focus:not(:focus-visible),
+      select:focus:not(:focus-visible),
+      textarea:focus:not(:focus-visible) {
+        box-shadow: none;
+      }
+      input:focus-visible,
+      select:focus-visible,
+      textarea:focus-visible {
+        box-shadow: var(--ring);
+      }
+
+      /* disabled – jasné, že nejde editovat */
+      input:disabled,
+      select:disabled,
+      textarea:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+
+      /* select šipka – ať nepůsobí “mrtvě” */
+      select {
+        appearance: none;
+        background-image:
+          linear-gradient(
+            45deg,
+            transparent 50%,
+            rgba(233, 238, 247, 0.65) 50%
+          ),
+          linear-gradient(
+            135deg,
+            rgba(233, 238, 247, 0.65) 50%,
+            transparent 50%
+          );
+        background-position:
+          calc(100% - 18px) 50%,
+          calc(100% - 12px) 50%;
+        background-size:
+          6px 6px,
+          6px 6px;
+        background-repeat: no-repeat;
+        padding-right: 34px;
+      }
+
+      /* Chrome autofill – ať nezelená / nerozbije dark UI */
+      input:-webkit-autofill,
+      textarea:-webkit-autofill,
+      select:-webkit-autofill {
+        -webkit-text-fill-color: var(--text);
+        transition: background-color 9999s ease-out 0s;
+        box-shadow:
+          0 0 0px 1000px rgba(255, 255, 255, 0.06) inset,
+          inset 0 1px 0 rgba(255, 255, 255, 0.06);
+        border: 1px solid var(--field-border);
       }
 
       .row2 {
@@ -515,7 +622,7 @@
       .section {
         border: 1px solid var(--border2);
         border-radius: 14px;
-        background: rgba(0, 0, 0, 0.12);
+        background: rgba(0, 0, 0, 0.16); /* upraveno pro čitelnost */
         overflow: hidden;
         margin-bottom: 14px;
         position: relative;
@@ -830,8 +937,8 @@
       }
 
       /* ===========================
-   Mobile UX improvements
-   =========================== */
+         Mobile UX improvements
+         =========================== */
 
       @media (max-width: 700px) {
         .topbar {
@@ -947,19 +1054,6 @@
           padding: 12px 10px;
           font-size: 14px;
         }
-      }
-
-      /* iOS: zabraň “text autosize” randomu a zoomu při fokusu */
-      html {
-        -webkit-text-size-adjust: 100%;
-      }
-
-      /* lepší fokus (i na mobilu) */
-      input:focus,
-      select:focus,
-      textarea:focus {
-        border-color: rgba(45, 140, 255, 0.55);
-        box-shadow: 0 0 0 3px rgba(45, 140, 255, 0.18);
       }
     </style>
   </head>

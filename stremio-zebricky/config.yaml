@@ -2,7 +2,7 @@ name: "Stremio - Vlastní žebříčky (CZ Classics)"
 slug: stremio_zebricky
 description: "Stremio addon server (7000) + Config UI (7788) s persistencí do /data."
 version: "0.0.10"
-url: "https://example.local/org.vlastni.zebricky.cz"
+url: "https://github.com/rolex86/ha-addons/tree/master/stremio-zebricky#readme"
 
 arch:
   - aarch64

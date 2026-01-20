@@ -6,8 +6,12 @@ const path = require("path");
 const PAGE_SIZE = 100;
 
 const ROOT = __dirname;
-const LIST_DIR = path.join(ROOT, "lists");
-const CONFIG_PATH = path.join(ROOT, "config", "lists.trakt.json");
+
+// HA add-on persistent storage (default /data)
+const DATA_DIR = process.env.DATA_DIR || "/data";
+
+const LIST_DIR = path.join(DATA_DIR, "lists");
+const CONFIG_PATH = path.join(DATA_DIR, "config", "lists.trakt.json");
 
 const META_PREFIX = "cztt:"; // jen pro MOVIES
 const CACHE_TTL_MS = Number(process.env.LISTS_CACHE_TTL_MS || 60_000);

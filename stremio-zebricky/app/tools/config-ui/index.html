@@ -39,19 +39,31 @@
       body {
         margin: 0;
         font-family: var(--sans);
-        background:
-          radial-gradient(
-            900px 600px at 20% 0%,
-            rgba(45, 140, 255, 0.16),
-            transparent 55%
-          ),
-          radial-gradient(
-            900px 600px at 80% 10%,
-            rgba(34, 197, 94, 0.1),
-            transparent 60%
-          ),
-          var(--bg);
         color: var(--text);
+        background-color: var(--bg);
+
+        background-image:
+          radial-gradient(
+            1100px 800px at 20% 0%,
+            rgba(45, 140, 255, 0.18) 0%,
+            rgba(45, 140, 255, 0.1) 28%,
+            rgba(45, 140, 255, 0.05) 50%,
+            rgba(45, 140, 255, 0) 78%
+          ),
+          radial-gradient(
+            1100px 800px at 80% 10%,
+            rgba(34, 197, 94, 0.14) 0%,
+            rgba(34, 197, 94, 0.08) 30%,
+            rgba(34, 197, 94, 0.04) 52%,
+            rgba(34, 197, 94, 0) 80%
+          );
+
+        /* TADY je ta klíčová část */
+        background-repeat: no-repeat, no-repeat;
+        background-position:
+          20% 0%,
+          80% 10%;
+        background-attachment: fixed;
       }
 
       .wrap {
@@ -171,14 +183,11 @@
         top: 0;
         bottom: 0;
         width: 4px;
-        background: rgba(255, 255, 255, 0.12);
       }
       .cardAccent.blue::before {
         background: rgba(45, 140, 255, 0.65);
       }
-      .cardAccent.green::before {
-        background: rgba(34, 197, 94, 0.6);
-      }
+
       .cardAccent.purple::before {
         background: rgba(167, 139, 250, 0.6);
       }
@@ -518,14 +527,17 @@
         top: 0;
         bottom: 0;
         width: 4px;
-        background: rgba(255, 255, 255, 0.12);
       }
       .section.sectionUpdate::before {
-        background: rgba(45, 140, 255, 0.65);
+        background: rgba(245, 158, 11, 0.859);
       }
       .section.sectionLists::before {
         background: rgba(34, 197, 94, 0.6);
       }
+      .section.sectionSmart::before {
+        background: rgba(167, 139, 250, 0.6);
+      }
+
       .section.sectionSmart::before {
         background: rgba(167, 139, 250, 0.6);
       }
@@ -1054,162 +1066,182 @@
       <div class="grid">
         <!-- LEFT -->
         <div class="card cardAccent blue">
-          <h3>Defaults</h3>
-          <p class="sub">
-            Výchozí hodnoty pro generování (lze přepsat per-list).
-          </p>
-
-          <label class="small">candidatePages</label>
-          <input id="d_candidatePages" type="number" min="1" step="1" />
-          <details class="help">
+          <details class="section sectionDefaults" open>
             <summary>
-              <span>Co to ovlivňuje</span
-              ><span class="k">defaults.candidatePages</span>
+              <div class="sectionTitle">
+                <strong>Defaults</strong>
+                <span
+                  >Výchozí hodnoty pro generování (lze přepsat per-list)</span
+                >
+              </div>
+              <div class="sectionChevron">Rozbalit / sbalit</div>
             </summary>
-            <div class="helpBody">
-              Kolik stránek kandidátů se stáhne z Traktu pro každý list. Více
-              stránek = více kandidátů, ale delší běh a víc API requestů.
+
+            <div class="sectionBody">
+              <p class="sub">
+                Výchozí hodnoty pro generování (lze přepsat per-list).
+              </p>
+
+              <label class="small">candidatePages</label>
+              <input id="d_candidatePages" type="number" min="1" step="1" />
+              <details class="help">
+                <summary>
+                  <span>Co to ovlivňuje</span
+                  ><span class="k">defaults.candidatePages</span>
+                </summary>
+                <div class="helpBody">
+                  Kolik stránek kandidátů se stáhne z Traktu pro každý list.
+                  Více stránek = více kandidátů, ale delší běh a víc API
+                  requestů.
+                </div>
+              </details>
+
+              <label class="small">pageLimit</label>
+              <input id="d_pageLimit" type="number" min="1" step="1" />
+              <details class="help">
+                <summary>
+                  <span>Co to ovlivňuje</span
+                  ><span class="k">defaults.pageLimit</span>
+                </summary>
+                <div class="helpBody">
+                  Kolik položek se bere z jedné stránky Traktu (typicky 100).
+                  Nižší číslo = více stránek pro stejný počet kandidátů.
+                </div>
+              </details>
+
+              <label class="small">finalSize</label>
+              <input id="d_finalSize" type="number" min="1" step="1" />
+              <details class="help">
+                <summary>
+                  <span>Co to ovlivňuje</span
+                  ><span class="k">defaults.finalSize</span>
+                </summary>
+                <div class="helpBody">
+                  Kolik položek se nakonec uloží do jednoho listu
+                  (<code>/data/lists/&lt;id&gt;.json</code>). Vyšší = delší
+                  enrich, větší soubory.
+                </div>
+              </details>
+
+              <label class="small">sleepMs</label>
+              <input id="d_sleepMs" type="number" min="0" step="10" />
+              <details class="help">
+                <summary>
+                  <span>Co to ovlivňuje</span
+                  ><span class="k">defaults.sleepMs</span>
+                </summary>
+                <div class="helpBody">
+                  Pauza mezi requesty (Trakt/ČSFD/Cinemeta). Pomáhá proti rate
+                  limitům. Doporučení: 80–200 ms.
+                </div>
+              </details>
+
+              <label class="small">timeoutMs</label>
+              <input id="d_timeoutMs" type="number" min="1000" step="500" />
+              <details class="help">
+                <summary>
+                  <span>Co to ovlivňuje</span
+                  ><span class="k">defaults.timeoutMs</span>
+                </summary>
+                <div class="helpBody">
+                  Timeout pro HTTP requesty. Pokud padá síť / API je pomalé,
+                  zvedni to.
+                </div>
+              </details>
+
+              <label class="small">csfdCacheTtlDays</label>
+              <input id="d_csfdTtl" type="number" min="1" step="1" />
+              <details class="help">
+                <summary>
+                  <span>Co to ovlivňuje</span
+                  ><span class="k">defaults.csfdCacheTtlDays</span>
+                </summary>
+                <div class="helpBody">
+                  Jak dlouho se drží mapování a data z ČSFD v cache (aby se
+                  zbytečně nehledalo znovu).
+                </div>
+              </details>
+
+              <div class="divider"></div>
+
+              <h3>dupRules</h3>
+              <p class="sub">
+                Aby se ti napříč řádky neopakovaly stejné filmy.
+              </p>
+
+              <label class="small">dupRules.hardBlockTop</label>
+              <input id="d_hardTop" type="number" min="0" step="1" />
+              <details class="help">
+                <summary>
+                  <span>Co to ovlivňuje</span
+                  ><span class="k">dupRules.hardBlockTop</span>
+                </summary>
+                <div class="helpBody">
+                  Prvních N pozic v listu neobsadí položka, která už byla
+                  použita v jiném listu stejného typu. Když listy vycházejí moc
+                  podobně, zvedni to.
+                </div>
+              </details>
+
+              <label class="small">dupRules.penaltyPerHit</label>
+              <input id="d_penalty" type="number" min="0" step="1" />
+              <details class="help">
+                <summary>
+                  <span>Co to ovlivňuje</span
+                  ><span class="k">dupRules.penaltyPerHit</span>
+                </summary>
+                <div class="helpBody">
+                  Skóre penalizace za každé předchozí použití té samé položky.
+                  Vyšší = víc diverzity.
+                </div>
+              </details>
+
+              <div class="divider"></div>
+
+              <h3>Trakt secrets</h3>
+              <p class="sub">
+                Používá se pro Trakt API. Ukládá se do
+                <span class="mono">config/secrets.json</span>.
+              </p>
+
+              <label class="small">TRAKT Client ID</label>
+              <input id="traktId" type="text" placeholder="client_id" />
+              <details class="help">
+                <summary>
+                  <span>Kde to vzít</span
+                  ><span class="k">secrets.trakt.client_id</span>
+                </summary>
+                <div class="helpBody">
+                  V Trakt aplikaci (developer settings). Používá se pro veřejné
+                  API requesty (genres, trending, …).
+                </div>
+              </details>
+
+              <label class="small">TRAKT Client Secret</label>
+              <input
+                id="traktSecret"
+                type="password"
+                placeholder="client_secret"
+              />
+              <details class="help">
+                <summary>
+                  <span>Kde to vzít</span
+                  ><span class="k">secrets.trakt.client_secret</span>
+                </summary>
+                <div class="helpBody">
+                  Nutné pro device auth (pokud někde používáš token). Pro běžné
+                  čtení veřejných endpointů často stačí Client ID, ale necháváme
+                  i secret, aby se to nerozsypalo v jiných částech addonu.
+                </div>
+              </details>
+
+              <div class="divider"></div>
+              <p class="sub">
+                <strong>Tip:</strong> pokud jsi v LAN, nastav
+                <span class="mono">CONFIG_UI_TOKEN</span> (ochrana UI).
+              </p>
             </div>
           </details>
-
-          <label class="small">pageLimit</label>
-          <input id="d_pageLimit" type="number" min="1" step="1" />
-          <details class="help">
-            <summary>
-              <span>Co to ovlivňuje</span
-              ><span class="k">defaults.pageLimit</span>
-            </summary>
-            <div class="helpBody">
-              Kolik položek se bere z jedné stránky Traktu (typicky 100). Nižší
-              číslo = více stránek pro stejný počet kandidátů.
-            </div>
-          </details>
-
-          <label class="small">finalSize</label>
-          <input id="d_finalSize" type="number" min="1" step="1" />
-          <details class="help">
-            <summary>
-              <span>Co to ovlivňuje</span
-              ><span class="k">defaults.finalSize</span>
-            </summary>
-            <div class="helpBody">
-              Kolik položek se nakonec uloží do jednoho listu
-              (<code>/data/lists/&lt;id&gt;.json</code>). Vyšší = delší enrich,
-              větší soubory.
-            </div>
-          </details>
-
-          <label class="small">sleepMs</label>
-          <input id="d_sleepMs" type="number" min="0" step="10" />
-          <details class="help">
-            <summary>
-              <span>Co to ovlivňuje</span
-              ><span class="k">defaults.sleepMs</span>
-            </summary>
-            <div class="helpBody">
-              Pauza mezi requesty (Trakt/ČSFD/Cinemeta). Pomáhá proti rate
-              limitům. Doporučení: 80–200 ms.
-            </div>
-          </details>
-
-          <label class="small">timeoutMs</label>
-          <input id="d_timeoutMs" type="number" min="1000" step="500" />
-          <details class="help">
-            <summary>
-              <span>Co to ovlivňuje</span
-              ><span class="k">defaults.timeoutMs</span>
-            </summary>
-            <div class="helpBody">
-              Timeout pro HTTP requesty. Pokud padá síť / API je pomalé, zvedni
-              to.
-            </div>
-          </details>
-
-          <label class="small">csfdCacheTtlDays</label>
-          <input id="d_csfdTtl" type="number" min="1" step="1" />
-          <details class="help">
-            <summary>
-              <span>Co to ovlivňuje</span
-              ><span class="k">defaults.csfdCacheTtlDays</span>
-            </summary>
-            <div class="helpBody">
-              Jak dlouho se drží mapování a data z ČSFD v cache (aby se zbytečně
-              nehledalo znovu).
-            </div>
-          </details>
-
-          <div class="divider"></div>
-
-          <h3>dupRules</h3>
-          <p class="sub">Aby se ti napříč řádky neopakovaly stejné filmy.</p>
-
-          <label class="small">dupRules.hardBlockTop</label>
-          <input id="d_hardTop" type="number" min="0" step="1" />
-          <details class="help">
-            <summary>
-              <span>Co to ovlivňuje</span
-              ><span class="k">dupRules.hardBlockTop</span>
-            </summary>
-            <div class="helpBody">
-              Prvních N pozic v listu neobsadí položka, která už byla použita v
-              jiném listu stejného typu. Když listy vycházejí moc podobně,
-              zvedni to.
-            </div>
-          </details>
-
-          <label class="small">dupRules.penaltyPerHit</label>
-          <input id="d_penalty" type="number" min="0" step="1" />
-          <details class="help">
-            <summary>
-              <span>Co to ovlivňuje</span
-              ><span class="k">dupRules.penaltyPerHit</span>
-            </summary>
-            <div class="helpBody">
-              Skóre penalizace za každé předchozí použití té samé položky. Vyšší
-              = víc diverzity.
-            </div>
-          </details>
-
-          <div class="divider"></div>
-
-          <h3>Trakt secrets</h3>
-          <p class="sub">
-            Používá se pro Trakt API. Ukládá se do
-            <span class="mono">config/secrets.json</span>.
-          </p>
-
-          <label class="small">TRAKT Client ID</label>
-          <input id="traktId" type="text" placeholder="client_id" />
-          <details class="help">
-            <summary>
-              <span>Kde to vzít</span
-              ><span class="k">secrets.trakt.client_id</span>
-            </summary>
-            <div class="helpBody">
-              V Trakt aplikaci (developer settings). Používá se pro veřejné API
-              requesty (genres, trending, …).
-            </div>
-          </details>
-
-          <label class="small">TRAKT Client Secret</label>
-          <input id="traktSecret" type="password" placeholder="client_secret" />
-          <details class="help">
-            <summary>
-              <span>Kde to vzít</span
-              ><span class="k">secrets.trakt.client_secret</span>
-            </summary>
-            <div class="helpBody">
-              Nutné pro device auth (pokud někde používáš token). Pro běžné
-              čtení veřejných endpointů často stačí Client ID, ale necháváme i
-              secret, aby se to nerozsypalo v jiných částech addonu.
-            </div>
-          </details>
-
-          <div class="divider"></div>
-          <p class="sub">
-            <strong>Tip:</strong> pokud jsi v LAN, nastav
-            <span class="mono">CONFIG_UI_TOKEN</span> (ochrana UI).
-          </p>
         </div>
 
         <!-- RIGHT -->
@@ -1607,6 +1639,19 @@
                     step="1"
                     placeholder="nechat prázdné = defaults"
                   />
+                  <details class="help">
+                    <summary>
+                      <span>Co to ovlivňuje</span
+                      ><span class="k">lists[].candidatePages</span>
+                    </summary>
+                    <div class="helpBody">
+                      Přepíše <code>defaults.candidatePages</code> jen pro tento
+                      list. Kolik stránek kandidátů se stáhne z Traktu.
+                      <br /><br />
+                      <strong>Doporučení:</strong> 1–2 pro ladění; 3–6 pro
+                      “širší pool” (podle výkonu).
+                    </div>
+                  </details>
                 </div>
                 <div>
                   <label class="small">pageLimit</label>
@@ -1617,6 +1662,19 @@
                     step="1"
                     placeholder="nechat prázdné = defaults"
                   />
+                  <details class="help">
+                    <summary>
+                      <span>Co to ovlivňuje</span
+                      ><span class="k">lists[].pageLimit</span>
+                    </summary>
+                    <div class="helpBody">
+                      Přepíše <code>defaults.pageLimit</code> jen pro tento
+                      list. Kolik položek se bere z jedné stránky Traktu
+                      (typicky 100). <br /><br />
+                      <strong>Doporučení:</strong> nech 100; snižuj jen pro
+                      ladění / stabilitu.
+                    </div>
+                  </details>
                 </div>
               </div>
 
@@ -1630,6 +1688,19 @@
                     step="1"
                     placeholder="nechat prázdné = defaults"
                   />
+                  <details class="help">
+                    <summary>
+                      <span>Co to ovlivňuje</span
+                      ><span class="k">lists[].finalSize</span>
+                    </summary>
+                    <div class="helpBody">
+                      Přepíše <code>defaults.finalSize</code> jen pro tento
+                      list. Kolik položek se uloží do výstupu
+                      <code>/data/lists/&lt;id&gt;.json</code>. <br /><br />
+                      <strong>Doporučení:</strong> 30–80 běžně; 10–30 když chceš
+                      rychlý update; 100+ jen pokud víš, že enrich dáš výkonově.
+                    </div>
+                  </details>
                 </div>
                 <div>
                   <label class="small">sleepMs</label>
@@ -1640,6 +1711,19 @@
                     step="10"
                     placeholder="nechat prázdné = defaults"
                   />
+                  <details class="help">
+                    <summary>
+                      <span>Co to ovlivňuje</span
+                      ><span class="k">lists[].sleepMs</span>
+                    </summary>
+                    <div class="helpBody">
+                      Přepíše <code>defaults.sleepMs</code> jen pro tento list.
+                      Pauza mezi requesty (Trakt/ČSFD/Cinemeta) – pomáhá proti
+                      rate limitům. <br /><br />
+                      <strong>Doporučení:</strong> 80–200 ms; když vidíš 429 /
+                      throttling, zvedni.
+                    </div>
+                  </details>
                 </div>
               </div>
 
@@ -1653,6 +1737,18 @@
                     step="500"
                     placeholder="nechat prázdné = defaults"
                   />
+                  <details class="help">
+                    <summary>
+                      <span>Co to ovlivňuje</span
+                      ><span class="k">lists[].timeoutMs</span>
+                    </summary>
+                    <div class="helpBody">
+                      Přepíše <code>defaults.timeoutMs</code> jen pro tento
+                      list. Timeout pro HTTP requesty. <br /><br />
+                      <strong>Doporučení:</strong> 8000–15000 ms běžně; 20000+
+                      když máš slabší HW nebo pomalejší síť.
+                    </div>
+                  </details>
                 </div>
                 <div></div>
               </div>
@@ -1667,6 +1763,19 @@
                     step="1"
                     placeholder="nechat prázdné = defaults"
                   />
+                  <details class="help">
+                    <summary>
+                      <span>Co to ovlivňuje</span
+                      ><span class="k">lists[].dupRules.hardBlockTop</span>
+                    </summary>
+                    <div class="helpBody">
+                      Přepíše <code>dupRules.hardBlockTop</code> jen pro tento
+                      list. Prvních N pozic nebude obsazeno položkou, která už
+                      byla použitá v jiném listu stejného typu. <br /><br />
+                      <strong>Doporučení:</strong> 0–5 jemně; 8–15 když chceš
+                      výrazně větší diverzitu mezi listy.
+                    </div>
+                  </details>
                 </div>
                 <div>
                   <label class="small">dupRules.penaltyPerHit</label>
@@ -1677,6 +1786,19 @@
                     step="1"
                     placeholder="nechat prázdné = defaults"
                   />
+                  <details class="help">
+                    <summary>
+                      <span>Co to ovlivňuje</span
+                      ><span class="k">lists[].dupRules.penaltyPerHit</span>
+                    </summary>
+                    <div class="helpBody">
+                      Přepíše <code>dupRules.penaltyPerHit</code> jen pro tento
+                      list. Penalizace skóre za každé předchozí použití stejné
+                      položky. <br /><br />
+                      <strong>Doporučení:</strong> 1–5 lehce; 8–15 když se ti
+                      pořád opakují stejné top věci napříč listy.
+                    </div>
+                  </details>
                 </div>
               </div>
 
@@ -2117,5 +2239,12 @@
     </div>
 
     <script src="/client.js"></script>
+    <script>
+      // Na mobilu (max 700px) nech Defaults sbalené
+      if (window.matchMedia("(max-width: 700px)").matches) {
+        const d = document.querySelector(".section.sectionDefaults");
+        if (d) d.open = false;
+      }
+    </script>
   </body>
 </html>

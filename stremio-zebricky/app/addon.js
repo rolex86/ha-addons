@@ -42,23 +42,24 @@ function buildCatalogsFromConfig(cfg) {
     type: l.type || "movie",
     id: l.id,
     name: l.name,
-    extra: [{ name: "skip", isRequired: false }]
+    extra: [{ name: "skip", isRequired: false }],
   }));
 
   const sp = cfg.smartPicks;
   const profiles = Array.isArray(sp?.profiles) ? sp.profiles : [];
   const smart = (sp?.enabled ? profiles : [])
-    .filter(p => p?.id && p?.name && (p.type === "movie" || p.type === "series"))
-    .map(p => ({
+    .filter(
+      (p) => p?.id && p?.name && (p.type === "movie" || p.type === "series"),
+    )
+    .map((p) => ({
       type: p.type,
       id: p.id,
       name: p.name,
-      extra: [{ name: "skip", isRequired: false }]
+      extra: [{ name: "skip", isRequired: false }],
     }));
 
   return [...base, ...smart];
 }
-
 
 function getImdbFromPrefixedId(prefixed) {
   if (!prefixed || typeof prefixed !== "string") return null;
@@ -88,7 +89,11 @@ async function loadAllListsFromDisk() {
       newListsById.set(id, items);
 
       for (const it of items) {
-        if (it?.imdb && typeof it.imdb === "string" && it.imdb.startsWith("tt")) {
+        if (
+          it?.imdb &&
+          typeof it.imdb === "string" &&
+          it.imdb.startsWith("tt")
+        ) {
           newItemByImdb.set(it.imdb, it);
         }
       }
@@ -100,7 +105,9 @@ async function loadAllListsFromDisk() {
   listsById = newListsById;
   itemByImdb = newItemByImdb;
   listsLoadedAt = Date.now();
-  console.log(`[cache] Loaded lists=${listsById.size}, indexed items=${itemByImdb.size}`);
+  console.log(
+    `[cache] Loaded lists=${listsById.size}, indexed items=${itemByImdb.size}`,
+  );
 }
 
 async function ensureListsFresh(force = false) {
@@ -133,6 +140,8 @@ const manifest = {
   version: "0.0.6",
   name: "Vlastní žebříčky (CZ Classics)",
   description: "Katalogy generované z configu + CZ meta pro filmy.",
+  website:
+    "https://github.com/rolex86/ha-addons/tree/master/stremio-zebricky#readme",
   resources: [
     "catalog",
     { name: "meta", types: ["movie"], idPrefixes: [META_PREFIX] },
@@ -188,7 +197,8 @@ builder.defineCatalogHandler(async ({ type, id, extra = {} }) => {
 
 builder.defineMetaHandler(async ({ type, id }) => {
   if (type !== "movie") return { meta: null };
-  if (!id || typeof id !== "string" || !id.startsWith(META_PREFIX)) return { meta: null };
+  if (!id || typeof id !== "string" || !id.startsWith(META_PREFIX))
+    return { meta: null };
 
   await ensureListsFresh(false);
 

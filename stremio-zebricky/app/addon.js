@@ -138,7 +138,7 @@ if (!configCache?.lists?.length) {
 const manifest = {
   id: "org.vlastni.zebricky.cz",
   version: "0.0.6",
-  name: "Vlastní žebříčky (CZ Classics)",
+  name: "Vlastní žebříčky",
   description: "Katalogy generované z configu + CZ meta pro filmy.",
   website:
     "https://github.com/rolex86/ha-addons/tree/master/stremio-zebricky#readme",

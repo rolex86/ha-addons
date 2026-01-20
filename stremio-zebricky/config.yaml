@@ -17,7 +17,7 @@ init: false
 # Web UI button (v HA se zobrazí "Open Web UI") – míří na Config UI
 webui: "http://[HOST]:[PORT:7788]/"
 panel_icon: mdi:view-dashboard
-panel_title: "CZ Classics UI"
+panel_title: "Stremio - Vlastní žebříčky UI"
 
 ports:
   7000/tcp: 7000

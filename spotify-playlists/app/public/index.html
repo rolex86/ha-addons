@@ -17,6 +17,7 @@
       </div>
 
       <div class="grid2">
+        <!-- LEFT -->
         <div class="card">
           <h2>Status</h2>
 
@@ -59,26 +60,31 @@
           </div>
         </div>
 
+        <!-- RIGHT -->
         <div class="card">
-          <h2>Config (config.json)</h2>
-
           <div class="row configrow">
-            <div class="small">
-              Ukládá se do <code>/data/config.json</code>. Pro add-on to bude
-              stejné.
+            <div>
+              <h2>Recipes</h2>
+              <div class="small muted">
+                Ukládá se do <code>/data/config.json</code>.
+              </div>
             </div>
+
             <div class="btns">
+              <!-- oprav řádek s btnAdd -->
+              <button id="btnAdd" class="primary">Add</button>
+              <button id="btnSaveAll" class="primary">Save all</button>
               <button id="btnLoad">Load</button>
-              <button id="btnSave" class="primary">Save</button>
             </div>
           </div>
 
           <div class="hr"></div>
 
-          <textarea id="cfg"></textarea>
+          <!-- accordion list -->
+          <div id="recipeList" class="recipeAccordion"></div>
 
-          <div class="small info">
-            Pokud chceš Last.fm discovery: nastav v recipe
+          <div class="small info muted" style="margin-top: 10px">
+            Last.fm discovery: nastav v recipe
             <code>discovery.enabled=true</code> a doplň
             <code>LASTFM_API_KEY</code> v prostředí / add-on konfiguraci.
           </div>
@@ -86,268 +92,6 @@
       </div>
     </div>
 
-    <script>
-      const $ = (id) => document.getElementById(id);
-
-      let pollTimer = null;
-      let lastLogI = 0;
-      let currentRunId = null;
-
-      function setMsg(text, kind) {
-        const el = $("msg");
-        if (!text) {
-          el.style.display = "none";
-          return;
-        }
-        el.style.display = "";
-        el.textContent = text;
-        el.className = "msg " + (kind || "");
-      }
-
-      async function api(url, opts = {}) {
-        const r = await fetch(url, opts);
-        const ct = r.headers.get("content-type") || "";
-        const isJson = ct.includes("application/json");
-        const body = isJson
-          ? await r.json().catch(() => null)
-          : await r.text().catch(() => null);
-
-        if (!r.ok) {
-          const e = new Error("Request failed");
-          e.status = r.status;
-          e.body = body;
-          throw e;
-        }
-        return body;
-      }
-
-      function fmtTs(ts) {
-        if (!ts) return "-";
-        try {
-          return new Date(ts).toLocaleString();
-        } catch {
-          return String(ts);
-        }
-      }
-
-      function setRunPill(state) {
-        const el = $("runState");
-        if (state?.running) {
-          el.textContent = `running #${state.run_id}`;
-          el.className = "pill warn";
-          return;
-        }
-        if (state?.ok === false) {
-          el.textContent = "error";
-          el.className = "pill err";
-          return;
-        }
-        el.textContent = "idle";
-        el.className = "pill";
-      }
-
-      function appendLogLines(lines) {
-        const box = $("logBox");
-        for (const l of lines) {
-          const dt = new Date(l.ts).toLocaleTimeString();
-          box.textContent += `[${dt}] ${String(l.level || "info").toUpperCase()}: ${l.msg}\n`;
-        }
-        box.scrollTop = box.scrollHeight;
-      }
-
-      async function pollLogs() {
-        try {
-          const st = await api("/api/run/status");
-          const state = st?.state || {};
-          setRunPill(state);
-          currentRunId = state.run_id || currentRunId;
-
-          const qs = new URLSearchParams();
-          if (lastLogI) qs.set("since", String(lastLogI));
-          if (currentRunId) qs.set("run_id", String(currentRunId));
-
-          const lg = await api("/api/run/logs?" + qs.toString());
-          if (lg?.lines?.length) appendLogLines(lg.lines);
-          lastLogI = lg?.latest_i || lastLogI;
-        } catch (e) {
-          // silent
-        }
-      }
-
-      function startPolling() {
-        if (pollTimer) return;
-        pollTimer = setInterval(pollLogs, 800);
-        pollLogs();
-      }
-
-      async function loadStatus() {
-        const st = await api("/api/status");
-        $("stPort").textContent = st.port ?? "-";
-        $("stBase").textContent = st.base_url ?? "-";
-        $("stMarket").textContent = st.market ?? "-";
-        $("stAuth").textContent = st.auth?.has_refresh_token
-          ? `OK (refreshed ${fmtTs(st.auth.refreshed_at)})`
-          : "NOT AUTHORIZED";
-
-        $("stLastRun").textContent = st.last_run?.at
-          ? `${fmtTs(st.last_run.at)} • ok=${st.last_run.ok}`
-          : "-";
-
-        if (st.last_run?.ok === false && st.last_run?.error) {
-          $("stLastRun").textContent +=
-            ` • error=${JSON.stringify(st.last_run.error)}`;
-        }
-
-        setRunPill(st.run_state || {});
-      }
-
-      async function loadConfig() {
-        const r = await api("/api/config");
-        $("cfg").value = JSON.stringify(r.config || { recipes: [] }, null, 2);
-      }
-
-      async function saveConfig() {
-        let parsed;
-        try {
-          parsed = JSON.parse($("cfg").value || "{}");
-        } catch (e) {
-          setMsg("Config není validní JSON.", "err");
-          return;
-        }
-
-        await api("/api/config", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ config: parsed }),
-        });
-
-        setMsg("Config uložen.", "ok");
-      }
-
-      async function authStart() {
-        const r = await api("/api/auth/start", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: "{}",
-        });
-        if (r?.url) window.open(r.url, "_blank", "noopener,noreferrer");
-        setMsg(
-          "Otevřel jsem OAuth v novém okně. Po dokončení dej Reload.",
-          "ok",
-        );
-      }
-
-      async function runNow() {
-        return await api("/api/run", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: "{}",
-        });
-      }
-
-      $("btnReload").addEventListener("click", async () => {
-        try {
-          await loadStatus();
-          await loadConfig();
-          setMsg("Reload OK.", "ok");
-        } catch (e) {
-          setMsg(
-            `Reload failed: ${e.status || ""} ${JSON.stringify(e.body || e.message)}`,
-            "err",
-          );
-        }
-      });
-
-      $("btnLoad").addEventListener("click", async () => {
-        try {
-          await loadConfig();
-          setMsg("Config loaded.", "ok");
-        } catch (e) {
-          setMsg(
-            `Load failed: ${e.status || ""} ${JSON.stringify(e.body || e.message)}`,
-            "err",
-          );
-        }
-      });
-
-      $("btnSave").addEventListener("click", async () => {
-        try {
-          await saveConfig();
-        } catch (e) {
-          setMsg(
-            `Save failed: ${e.status || ""} ${JSON.stringify(e.body || e.message)}`,
-            "err",
-          );
-        }
-      });
-
-      $("btnAuth").addEventListener("click", async () => {
-        try {
-          await authStart();
-        } catch (e) {
-          setMsg(
-            `Auth start failed: ${e.status || ""} ${JSON.stringify(e.body || e.message)}`,
-            "err",
-          );
-        }
-      });
-
-      $("btnClearLogs").addEventListener("click", async () => {
-        try {
-          await api("/api/run/logs/clear", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: "{}",
-          });
-          $("logBox").textContent = "";
-          lastLogI = 0;
-          currentRunId = null;
-          setMsg("Logs cleared.", "ok");
-        } catch (e) {
-          setMsg(
-            `Clear logs failed: ${e.status || ""} ${JSON.stringify(e.body || e.message)}`,
-            "err",
-          );
-        }
-      });
-
-      $("btnRun").addEventListener("click", async () => {
-        try {
-          setMsg("", "");
-          $("logBox").textContent = "";
-          lastLogI = 0;
-
-          startPolling();
-
-          await runNow();
-
-          await pollLogs();
-          await loadStatus();
-
-          setMsg("Run finished. Viz logy výše.", "ok");
-        } catch (e) {
-          await pollLogs();
-          await loadStatus().catch(() => {});
-          setMsg(
-            `Run failed: ${e.status || ""} ${JSON.stringify(e.body || e.message)}`,
-            "err",
-          );
-        }
-      });
-
-      (async () => {
-        try {
-          await loadStatus();
-          await loadConfig();
-        } catch (e) {
-          setMsg(
-            `Init failed: ${e.status || ""} ${JSON.stringify(e.body || e.message)}`,
-            "err",
-          );
-        } finally {
-          startPolling();
-        }
-      })();
-    </script>
+    <script src="app.js"></script>
   </body>
 </html>

@@ -1,0 +1,32 @@
+# --- Node ---
+app/node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# --- Local runtime data (DO NOT COMMIT) ---
+data/
+*.sqlite
+*.sqlite-journal
+
+# Tokens/config produced during runtime (if ever created elsewhere)
+**/tokens.json
+**/options.json
+**/config.json
+**/history.sqlite
+
+# --- OS / IDE ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# --- Temporary / backups ---
+*.bak
+*.tmp
+*.swp
+*.log
+
+# --- HA build artifacts (optional) ---
+*.tar

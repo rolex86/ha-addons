@@ -25,6 +25,7 @@ function getOptions() {
         "http://homeassistant.local:7790",
     ),
     api_token: String(opts.api_token ?? process.env.API_TOKEN ?? ""),
+
     spotify_client_id: String(
       opts.spotify_client_id ?? process.env.SPOTIFY_CLIENT_ID ?? "",
     ),
@@ -35,6 +36,12 @@ function getOptions() {
       opts.spotify_redirect_uri ?? process.env.SPOTIFY_REDIRECT_URI ?? "",
     ),
     market: String(opts.market ?? process.env.SPOTIFY_MARKET ?? "CZ"),
+
+    // NEW:
+    lastfm_api_key: String(
+      opts.lastfm_api_key ?? process.env.LASTFM_API_KEY ?? "",
+    ),
+
     log_level: String(opts.log_level ?? process.env.LOG_LEVEL ?? "info"),
     history: {
       scope: String(opts.history?.scope ?? "per_recipe"),

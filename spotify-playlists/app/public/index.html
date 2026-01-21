@@ -3,53 +3,351 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Spotify Playlist Builder</title>
-    <link rel="stylesheet" href="/styles.css" />
+    <title>Spotify Playlists (HA add-on)</title>
+    <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <div class="wrap">
-      <h1>Spotify Playlist Builder</h1>
-
-      <div class="card">
-        <div class="row">
-          <div>
-            <h2>Status</h2>
-            <div id="status">Loading…</div>
-          </div>
-          <div class="right">
-            <button id="btnRun">Run now</button>
-            <button id="btnDry" disabled>Dry run (soon)</button>
-          </div>
+      <div class="card header-card">
+        <h1>Spotify Playlists</h1>
+        <div class="small">
+          UI pro konfiguraci “recipes” a ruční spuštění. Live logy běhu se
+          zobrazují níže.
         </div>
       </div>
 
-      <div class="card">
-        <h2>Spotify OAuth</h2>
-        <p>
-          Nejdřív vyplň v add-on options: <b>spotify_client_id</b>,
-          <b>spotify_client_secret</b>, <b>spotify_redirect_uri</b>. Pak klikni
-          authorize.
-        </p>
-        <button id="btnAuth">Authorize</button>
-        <div id="authInfo" class="muted"></div>
-      </div>
+      <div class="grid2">
+        <div class="card">
+          <h2>Status</h2>
 
-      <div class="card">
-        <div class="row">
-          <h2>Recipes</h2>
-          <button id="btnAdd">Add recipe</button>
+          <div class="btns">
+            <button id="btnReload">Reload</button>
+            <button id="btnAuth" class="primary">Authorize Spotify</button>
+            <button id="btnRun" class="primary">Run</button>
+            <button id="btnClearLogs" class="danger">Clear logs</button>
+          </div>
+
+          <div class="kv">
+            <div class="k">Port</div>
+            <div class="v" id="stPort">-</div>
+            <div class="k">Base URL</div>
+            <div class="v" id="stBase">-</div>
+            <div class="k">Market</div>
+            <div class="v" id="stMarket">-</div>
+            <div class="k">Auth</div>
+            <div class="v" id="stAuth">-</div>
+            <div class="k">Last run</div>
+            <div class="v" id="stLastRun">-</div>
+          </div>
+
+          <div class="hr"></div>
+
+          <div class="row runrow">
+            <span class="pill" id="runState">idle</span>
+            <span class="small">Live logs (polling)</span>
+          </div>
+
+          <pre id="logBox"></pre>
+
+          <div id="msg" class="msg" style="display: none"></div>
+
+          <div class="hr"></div>
+
+          <div class="small">
+            Tip: pokud dostaneš <code>429</code>, je to rate limit. Server má
+            retry/backoff a logy ukážou, co se děje.
+          </div>
         </div>
-        <div id="recipes"></div>
-        <div class="muted">Ukládá se do /data/config.json</div>
-      </div>
 
-      <div class="card">
-        <h2>History</h2>
-        <button id="btnClearHistory">Clear history</button>
-        <div class="muted">Pozor: smaže všechna “no-repeat” data.</div>
+        <div class="card">
+          <h2>Config (config.json)</h2>
+
+          <div class="row configrow">
+            <div class="small">
+              Ukládá se do <code>/data/config.json</code>. Pro add-on to bude
+              stejné.
+            </div>
+            <div class="btns">
+              <button id="btnLoad">Load</button>
+              <button id="btnSave" class="primary">Save</button>
+            </div>
+          </div>
+
+          <div class="hr"></div>
+
+          <textarea id="cfg"></textarea>
+
+          <div class="small info">
+            Pokud chceš Last.fm discovery: nastav v recipe
+            <code>discovery.enabled=true</code> a doplň
+            <code>LASTFM_API_KEY</code> v prostředí / add-on konfiguraci.
+          </div>
+        </div>
       </div>
     </div>
 
-    <script src="/app.js"></script>
+    <script>
+      const $ = (id) => document.getElementById(id);
+
+      let pollTimer = null;
+      let lastLogI = 0;
+      let currentRunId = null;
+
+      function setMsg(text, kind) {
+        const el = $("msg");
+        if (!text) {
+          el.style.display = "none";
+          return;
+        }
+        el.style.display = "";
+        el.textContent = text;
+        el.className = "msg " + (kind || "");
+      }
+
+      async function api(url, opts = {}) {
+        const r = await fetch(url, opts);
+        const ct = r.headers.get("content-type") || "";
+        const isJson = ct.includes("application/json");
+        const body = isJson
+          ? await r.json().catch(() => null)
+          : await r.text().catch(() => null);
+
+        if (!r.ok) {
+          const e = new Error("Request failed");
+          e.status = r.status;
+          e.body = body;
+          throw e;
+        }
+        return body;
+      }
+
+      function fmtTs(ts) {
+        if (!ts) return "-";
+        try {
+          return new Date(ts).toLocaleString();
+        } catch {
+          return String(ts);
+        }
+      }
+
+      function setRunPill(state) {
+        const el = $("runState");
+        if (state?.running) {
+          el.textContent = `running #${state.run_id}`;
+          el.className = "pill warn";
+          return;
+        }
+        if (state?.ok === false) {
+          el.textContent = "error";
+          el.className = "pill err";
+          return;
+        }
+        el.textContent = "idle";
+        el.className = "pill";
+      }
+
+      function appendLogLines(lines) {
+        const box = $("logBox");
+        for (const l of lines) {
+          const dt = new Date(l.ts).toLocaleTimeString();
+          box.textContent += `[${dt}] ${String(l.level || "info").toUpperCase()}: ${l.msg}\n`;
+        }
+        box.scrollTop = box.scrollHeight;
+      }
+
+      async function pollLogs() {
+        try {
+          const st = await api("/api/run/status");
+          const state = st?.state || {};
+          setRunPill(state);
+          currentRunId = state.run_id || currentRunId;
+
+          const qs = new URLSearchParams();
+          if (lastLogI) qs.set("since", String(lastLogI));
+          if (currentRunId) qs.set("run_id", String(currentRunId));
+
+          const lg = await api("/api/run/logs?" + qs.toString());
+          if (lg?.lines?.length) appendLogLines(lg.lines);
+          lastLogI = lg?.latest_i || lastLogI;
+        } catch (e) {
+          // silent
+        }
+      }
+
+      function startPolling() {
+        if (pollTimer) return;
+        pollTimer = setInterval(pollLogs, 800);
+        pollLogs();
+      }
+
+      async function loadStatus() {
+        const st = await api("/api/status");
+        $("stPort").textContent = st.port ?? "-";
+        $("stBase").textContent = st.base_url ?? "-";
+        $("stMarket").textContent = st.market ?? "-";
+        $("stAuth").textContent = st.auth?.has_refresh_token
+          ? `OK (refreshed ${fmtTs(st.auth.refreshed_at)})`
+          : "NOT AUTHORIZED";
+
+        $("stLastRun").textContent = st.last_run?.at
+          ? `${fmtTs(st.last_run.at)} • ok=${st.last_run.ok}`
+          : "-";
+
+        if (st.last_run?.ok === false && st.last_run?.error) {
+          $("stLastRun").textContent +=
+            ` • error=${JSON.stringify(st.last_run.error)}`;
+        }
+
+        setRunPill(st.run_state || {});
+      }
+
+      async function loadConfig() {
+        const r = await api("/api/config");
+        $("cfg").value = JSON.stringify(r.config || { recipes: [] }, null, 2);
+      }
+
+      async function saveConfig() {
+        let parsed;
+        try {
+          parsed = JSON.parse($("cfg").value || "{}");
+        } catch (e) {
+          setMsg("Config není validní JSON.", "err");
+          return;
+        }
+
+        await api("/api/config", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ config: parsed }),
+        });
+
+        setMsg("Config uložen.", "ok");
+      }
+
+      async function authStart() {
+        const r = await api("/api/auth/start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: "{}",
+        });
+        if (r?.url) window.open(r.url, "_blank", "noopener,noreferrer");
+        setMsg(
+          "Otevřel jsem OAuth v novém okně. Po dokončení dej Reload.",
+          "ok",
+        );
+      }
+
+      async function runNow() {
+        return await api("/api/run", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: "{}",
+        });
+      }
+
+      $("btnReload").addEventListener("click", async () => {
+        try {
+          await loadStatus();
+          await loadConfig();
+          setMsg("Reload OK.", "ok");
+        } catch (e) {
+          setMsg(
+            `Reload failed: ${e.status || ""} ${JSON.stringify(e.body || e.message)}`,
+            "err",
+          );
+        }
+      });
+
+      $("btnLoad").addEventListener("click", async () => {
+        try {
+          await loadConfig();
+          setMsg("Config loaded.", "ok");
+        } catch (e) {
+          setMsg(
+            `Load failed: ${e.status || ""} ${JSON.stringify(e.body || e.message)}`,
+            "err",
+          );
+        }
+      });
+
+      $("btnSave").addEventListener("click", async () => {
+        try {
+          await saveConfig();
+        } catch (e) {
+          setMsg(
+            `Save failed: ${e.status || ""} ${JSON.stringify(e.body || e.message)}`,
+            "err",
+          );
+        }
+      });
+
+      $("btnAuth").addEventListener("click", async () => {
+        try {
+          await authStart();
+        } catch (e) {
+          setMsg(
+            `Auth start failed: ${e.status || ""} ${JSON.stringify(e.body || e.message)}`,
+            "err",
+          );
+        }
+      });
+
+      $("btnClearLogs").addEventListener("click", async () => {
+        try {
+          await api("/api/run/logs/clear", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: "{}",
+          });
+          $("logBox").textContent = "";
+          lastLogI = 0;
+          currentRunId = null;
+          setMsg("Logs cleared.", "ok");
+        } catch (e) {
+          setMsg(
+            `Clear logs failed: ${e.status || ""} ${JSON.stringify(e.body || e.message)}`,
+            "err",
+          );
+        }
+      });
+
+      $("btnRun").addEventListener("click", async () => {
+        try {
+          setMsg("", "");
+          $("logBox").textContent = "";
+          lastLogI = 0;
+
+          startPolling();
+
+          await runNow();
+
+          await pollLogs();
+          await loadStatus();
+
+          setMsg("Run finished. Viz logy výše.", "ok");
+        } catch (e) {
+          await pollLogs();
+          await loadStatus().catch(() => {});
+          setMsg(
+            `Run failed: ${e.status || ""} ${JSON.stringify(e.body || e.message)}`,
+            "err",
+          );
+        }
+      });
+
+      (async () => {
+        try {
+          await loadStatus();
+          await loadConfig();
+        } catch (e) {
+          setMsg(
+            `Init failed: ${e.status || ""} ${JSON.stringify(e.body || e.message)}`,
+            "err",
+          );
+        } finally {
+          startPolling();
+        }
+      })();
+    </script>
   </body>
 </html>

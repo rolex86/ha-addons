@@ -476,3 +476,62 @@ button:focus-visible {
     justify-content: flex-start;
   }
 }
+
+/* -------- help (details) -------- */
+
+details.help {
+  margin-top: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 12px;
+  padding: 8px 10px;
+}
+
+details.help summary {
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  font-size: 12px;
+  color: rgba(210, 230, 255, 0.9);
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+details.help summary::-webkit-details-marker {
+  display: none;
+}
+
+details.help summary::before {
+  content: "▸";
+  display: inline-block;
+  margin-right: 8px;
+  opacity: 0.85;
+}
+
+details.help[open] summary::before {
+  content: "▾";
+}
+
+details.help .helpBody {
+  margin-top: 8px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.78);
+  line-height: 1.6;
+}
+
+details.help .helpBody code {
+  color: rgba(210, 230, 255, 0.95);
+}
+
+details.help .helpBody ul {
+  margin: 6px 0 0 18px;
+  padding: 0;
+}
+
+details.help .helpExample {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.18);
+}

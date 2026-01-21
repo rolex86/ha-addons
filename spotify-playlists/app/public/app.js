@@ -120,6 +120,366 @@ function getValueByPath(obj, path) {
   return cur;
 }
 
+/* ---------------- inline help ---------------- */
+
+function helpBlock(title, html) {
+  return `
+    <details class="help">
+      <summary>${escapeHtml(title || "Nápověda")}</summary>
+      <div class="helpBody">${html}</div>
+    </details>
+  `;
+}
+
+function helpFor(k) {
+  switch (k) {
+    case "name":
+      return helpBlock(
+        "Co je to?",
+        `
+          <div>Název recipe jen pro UI. Na generování nemá přímý vliv.</div>
+          <div class="helpExample"><strong>Příklad:</strong> <code>Daily playlist</code></div>
+        `,
+      );
+
+    case "target_playlist_id":
+      return helpBlock(
+        "Co sem dát?",
+        `
+          <div>Cílový playlist, který se při běhu přepíše (replace).</div>
+          <div>Můžeš zadat <strong>ID</strong> nebo celou <strong>URL</strong> (pokud backend umí URL parsovat).</div>
+          <div class="helpExample">
+            <strong>Příklad:</strong><br>
+            <code>https://open.spotify.com/playlist/4POAK6kCMZRU4AHadzOXv4</code><br>
+            nebo jen <code>4POAK6kCMZRU4AHadzOXv4</code>
+          </div>
+        `,
+      );
+
+    case "track_count":
+      return helpBlock(
+        "Co to ovlivňuje?",
+        `
+          <div>Kolik tracků má výsledný playlist po běhu.</div>
+          <div class="helpExample"><strong>Příklad:</strong> <code>30</code> pro daily, <code>50</code> pro větší mix</div>
+        `,
+      );
+
+    // Discovery
+    case "discovery.enabled":
+      return helpBlock(
+        "K čemu je Discovery?",
+        `
+          <div>Zapne Last.fm discovery. Bez toho se bere jen z fallback zdrojů (a případně Spotify Recommendations).</div>
+          <div>Vyžaduje <code>LASTFM_API_KEY</code> v options/env.</div>
+        `,
+      );
+
+    case "discovery.strategy":
+      return helpBlock(
+        "Strategie",
+        `
+          <div><code>deep_cuts</code> – vezme alba/singly a vybírá tracky (často “méně profláklé”).</div>
+          <div><code>recent_albums</code> – preferuje novější releasy (rychlejší “fresh”).</div>
+          <div><code>lastfm_toptracks</code> – vezme top tracky z Last.fm a dohledá je přes Spotify search.</div>
+          <div class="helpExample"><strong>Tip:</strong> Pro “unknown” typicky <code>deep_cuts</code> + popularity cap.</div>
+        `,
+      );
+
+    case "discovery.seed_top_artists_time_range":
+      return helpBlock(
+        "Seed top artists",
+        `
+          <div>Jaké období se použije pro Spotify “Top artists” (seed).</div>
+          <ul>
+            <li><code>short_term</code> – aktuálně</li>
+            <li><code>medium_term</code> – cca měsíce</li>
+            <li><code>long_term</code> – dlouhodobě</li>
+          </ul>
+        `,
+      );
+
+    case "discovery.seed_top_artists_limit":
+      return helpBlock(
+        "Kolik seed interpretů?",
+        `
+          <div>Více seedů = širší záběr, ale víc requestů a delší běh.</div>
+          <div class="helpExample"><strong>Příklad:</strong> <code>5</code> až <code>15</code></div>
+        `,
+      );
+
+    case "discovery.similar_per_seed":
+      return helpBlock(
+        "Podobní interpreti",
+        `
+          <div>Kolik similar artists se vezme z Last.fm pro každý seed.</div>
+          <div class="helpExample"><strong>Příklad:</strong> <code>30–80</code></div>
+        `,
+      );
+
+    case "discovery.take_artists":
+      return helpBlock(
+        "Limit poolu interpretů",
+        `
+          <div>Strop, kolik interpretů se vezme do “poolu” (aby runtime neutekl).</div>
+          <div class="helpExample"><strong>Příklad:</strong> <code>80–200</code></div>
+        `,
+      );
+
+    case "discovery.include_seed_artists":
+      return helpBlock(
+        "Zahrnout seed interprety?",
+        `
+          <div>Když <code>false</code>, seed interpreti se vynechají (méně “známé věci”).</div>
+          <div>Když <code>true</code>, seed interpreti se mohou dostat do výsledku.</div>
+        `,
+      );
+
+    case "discovery.tracks_per_artist":
+      return helpBlock(
+        "Kolik tracků na interpreta?",
+        `
+          <div>Kolik tracků se zkusí získat pro každého discovered interpreta.</div>
+          <div>Nižší = více interpretů, vyšší = víc tracků od stejných.</div>
+          <div class="helpExample"><strong>Příklad:</strong> <code>1–3</code></div>
+        `,
+      );
+
+    case "discovery.max_track_popularity":
+      return helpBlock(
+        "Popularity cap",
+        `
+          <div>Horní limit Spotify popularity (0–100). Vyšší = známější věci.</div>
+          <div class="helpExample"><strong>Příklad:</strong> <code>60</code> pro “méně profláklé”, <code>80</code> pro mix</div>
+        `,
+      );
+
+    case "discovery.min_track_popularity":
+      return helpBlock(
+        "Min popularity (volitelné)",
+        `
+          <div>Spodní limit popularity (0–100). Když necháš prázdné, nefiltruje se.</div>
+          <div class="helpExample"><strong>Příklad:</strong> <code>10</code> (vyhodí úplné “nuly”)</div>
+        `,
+      );
+
+    case "discovery.exclude_saved_tracks":
+      return helpBlock(
+        "Vyhodit Liked Songs?",
+        `
+          <div>Když <code>true</code>, odstraní tracky, které už máš v Liked Songs.</div>
+          <div>To je hlavní trik pro “unknown feeling”.</div>
+        `,
+      );
+
+    case "discovery.albums_per_artist":
+      return helpBlock(
+        "Alba na interpreta",
+        `
+          <div>Kolik alb/singlů na interpreta se prochází (hlavně pro album-based strategie).</div>
+          <div class="helpExample"><strong>Příklad:</strong> <code>2</code></div>
+        `,
+      );
+
+    case "discovery.albums_limit_fetch":
+      return helpBlock(
+        "Kolik alb vůbec stáhnout",
+        `
+          <div>Kolik alb/singlů se max stáhne ze Spotify pro interpreta před výběrem.</div>
+          <div class="helpExample"><strong>Příklad:</strong> <code>8</code> až <code>20</code></div>
+        `,
+      );
+
+    case "discovery.search_limit_per_track":
+      return helpBlock(
+        "Search limit (lastfm_toptracks)",
+        `
+          <div>Kolik výsledků Spotify search zkusí pro jeden track (bezpečnostní limit).</div>
+          <div class="helpExample"><strong>Příklad:</strong> <code>5</code></div>
+        `,
+      );
+
+    // Recommendations
+    case "recommendations.enabled":
+      return helpBlock(
+        "K čemu je Recommendations?",
+        `
+          <div>Spotify Recommendations slouží jako “doplňovač”, když discovery nestačí do počtu.</div>
+          <div>Je potřeba nastavit <code>seed_genres</code> (max 5 se používá v jednom requestu).</div>
+        `,
+      );
+
+    case "recommendations.seed_genres":
+      return helpBlock(
+        "Seed genres",
+        `
+          <div>Seznam Spotify žánrů (comma). V jednom requestu se použije prvních 5.</div>
+          <div class="helpExample"><strong>Příklad:</strong> <code>techno, ambient, rock</code></div>
+        `,
+      );
+
+    // Sources
+    case "sources.search":
+      return helpBlock(
+        "Fallback: Search queries",
+        `
+          <div>Dotazy pro Spotify search, které se použijí jako fallback pool.</div>
+          <div class="helpExample"><strong>Příklad:</strong> <code>genre:techno year:2020-2024</code></div>
+        `,
+      );
+
+    case "sources.playlists":
+      return helpBlock(
+        "Fallback: Playlists",
+        `
+          <div>Playlisty (ID nebo URL), ze kterých se bere fallback pool.</div>
+          <div class="helpExample">
+            <strong>Příklad:</strong><br>
+            <code>https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M</code><br>
+            nebo jen <code>37i9dQZF1DXcBWIGoYBM5M</code>
+          </div>
+        `,
+      );
+
+    case "sources.liked":
+      return helpBlock(
+        "Fallback: Liked tracks",
+        `
+          <div>Když <code>true</code>, přidá do poolu i tvoje Liked Songs.</div>
+          <div>Hodí se jako záchrana, ale může to být “méně unknown”.</div>
+        `,
+      );
+
+    case "sources.max_candidates":
+      return helpBlock(
+        "Max candidates",
+        `
+          <div>Strop, kolik kandidátů se max natahá do poolu ze zdrojů.</div>
+          <div class="helpExample"><strong>Příklad:</strong> <code>1500</code> (vyšší = pomalejší, ale víc výběru)</div>
+        `,
+      );
+
+    case "sources.top_tracks.enabled":
+      return helpBlock(
+        "Fallback: Top tracks",
+        `
+          <div>Zapne přidání Spotify “Top tracks” do poolu.</div>
+        `,
+      );
+
+    case "sources.top_tracks.time_range":
+      return helpBlock(
+        "Období pro Top tracks",
+        `
+          <ul>
+            <li><code>short_term</code> – aktuálně</li>
+            <li><code>medium_term</code> – cca měsíce</li>
+            <li><code>long_term</code> – dlouhodobě</li>
+          </ul>
+        `,
+      );
+
+    case "sources.top_tracks.limit":
+      return helpBlock(
+        "Top tracks limit",
+        `
+          <div>Kolik top tracků Spotify endpoint vrací na stránku (1–50).</div>
+          <div class="helpExample"><strong>Příklad:</strong> <code>50</code></div>
+        `,
+      );
+
+    // Filters
+    case "filters.explicit":
+      return helpBlock(
+        "Explicit policy",
+        `
+          <ul>
+            <li><code>allow</code> – vše</li>
+            <li><code>exclude</code> – bez explicit</li>
+            <li><code>only</code> – jen explicit</li>
+          </ul>
+        `,
+      );
+
+    case "filters.year_min":
+      return helpBlock(
+        "Min rok",
+        `
+          <div>Filtr podle roku vydání (album.release_date). Prázdné = bez filtru.</div>
+          <div class="helpExample"><strong>Příklad:</strong> <code>2015</code></div>
+        `,
+      );
+
+    case "filters.year_max":
+      return helpBlock(
+        "Max rok",
+        `
+          <div>Filtr podle roku vydání (album.release_date). Prázdné = bez filtru.</div>
+          <div class="helpExample"><strong>Příklad:</strong> <code>2024</code></div>
+        `,
+      );
+
+    case "filters.tempo_min":
+      return helpBlock(
+        "Tempo min",
+        `
+          <div>Tempo (BPM). Nejlépe funguje pro Spotify Recommendations (kde se dá přímo říct min/max tempo).</div>
+          <div class="helpExample"><strong>Příklad:</strong> <code>120</code></div>
+        `,
+      );
+
+    case "filters.tempo_max":
+      return helpBlock(
+        "Tempo max",
+        `
+          <div>Tempo (BPM). Nejlépe funguje pro Spotify Recommendations.</div>
+          <div class="helpExample"><strong>Příklad:</strong> <code>140</code></div>
+        `,
+      );
+
+    // Diversity
+    case "diversity.max_per_artist":
+      return helpBlock(
+        "Max per artist",
+        `
+          <div>Omezí, kolikrát se může opakovat stejný interpret.</div>
+          <div class="helpExample"><strong>Příklad:</strong> <code>2</code></div>
+        `,
+      );
+
+    case "diversity.max_per_album":
+      return helpBlock(
+        "Max per album",
+        `
+          <div>Omezí, kolik tracků se může vzít z jednoho alba. Prázdné = bez omezení.</div>
+          <div class="helpExample"><strong>Příklad:</strong> <code>1</code> nebo <code>2</code></div>
+        `,
+      );
+
+    case "diversity.avoid_same_artist_in_row":
+      return helpBlock(
+        "Avoid same artist in a row",
+        `
+          <div>Když <code>true</code>, nedovolí dát dva tracky po sobě od stejného interpreta.</div>
+        `,
+      );
+
+    // Advanced
+    case "advanced.recommendation_attempts":
+      return helpBlock(
+        "Recommendation attempts",
+        `
+          <div>Kolikrát se zkusí zavolat Spotify Recommendations (pokud jsou zapnuté).</div>
+          <div>Víc = víc kandidátů, ale víc requestů a pomalejší běh.</div>
+          <div class="helpExample"><strong>Příklad:</strong> <code>10</code></div>
+        `,
+      );
+
+    default:
+      return "";
+  }
+}
+
 /* ---------------- migration/normalize ---------------- */
 
 function normalizeRecipe(r) {
@@ -439,16 +799,23 @@ function renderRecipeEditor(r) {
       <label class="field">
         <div class="label">Name</div>
         <input data-k="name" value="${escapeHtml(r.name || "")}">
+        ${helpFor("name")}
       </label>
 
       <label class="field">
         <div class="label">Target playlist ID (nebo URL)</div>
-        <input data-k="target_playlist_id" value="${escapeHtml(r.target_playlist_id || "")}" placeholder="Spotify playlist id / open.spotify.com/playlist/...">
+        <input data-k="target_playlist_id" value="${escapeHtml(
+          r.target_playlist_id || "",
+        )}" placeholder="Spotify playlist id / open.spotify.com/playlist/...">
+        ${helpFor("target_playlist_id")}
       </label>
 
       <label class="field">
         <div class="label">Track count</div>
-        <input data-k="track_count" type="number" min="1" max="500" value="${Number(r.track_count || 50)}">
+        <input data-k="track_count" type="number" min="1" max="500" value="${Number(
+          r.track_count || 50,
+        )}">
+        ${helpFor("track_count")}
       </label>
     </div>
 
@@ -460,85 +827,143 @@ function renderRecipeEditor(r) {
           <option value="true" ${disc.enabled === true ? "selected" : ""}>true</option>
           <option value="false" ${disc.enabled !== true ? "selected" : ""}>false</option>
         </select>
+        ${helpFor("discovery.enabled")}
       </label>
 
       <label class="field">
         <div class="label">Strategy</div>
         <select data-k="discovery.strategy">
-          <option value="deep_cuts" ${(disc.strategy || "deep_cuts") === "deep_cuts" ? "selected" : ""}>deep_cuts (album tracks)</option>
-          <option value="recent_albums" ${(disc.strategy || "") === "recent_albums" ? "selected" : ""}>recent_albums</option>
-          <option value="lastfm_toptracks" ${(disc.strategy || "") === "lastfm_toptracks" ? "selected" : ""}>lastfm_toptracks (search)</option>
+          <option value="deep_cuts" ${
+            (disc.strategy || "deep_cuts") === "deep_cuts" ? "selected" : ""
+          }>deep_cuts (album tracks)</option>
+          <option value="recent_albums" ${
+            (disc.strategy || "") === "recent_albums" ? "selected" : ""
+          }>recent_albums</option>
+          <option value="lastfm_toptracks" ${
+            (disc.strategy || "") === "lastfm_toptracks" ? "selected" : ""
+          }>lastfm_toptracks (search)</option>
         </select>
+        ${helpFor("discovery.strategy")}
       </label>
 
       <label class="field">
         <div class="label">Seed top artists time_range</div>
         <select data-k="discovery.seed_top_artists_time_range">
-          <option value="short_term" ${(disc.seed_top_artists_time_range || "short_term") === "short_term" ? "selected" : ""}>short_term</option>
-          <option value="medium_term" ${(disc.seed_top_artists_time_range || "") === "medium_term" ? "selected" : ""}>medium_term</option>
-          <option value="long_term" ${(disc.seed_top_artists_time_range || "") === "long_term" ? "selected" : ""}>long_term</option>
+          <option value="short_term" ${
+            (disc.seed_top_artists_time_range || "short_term") === "short_term"
+              ? "selected"
+              : ""
+          }>short_term</option>
+          <option value="medium_term" ${
+            (disc.seed_top_artists_time_range || "") === "medium_term"
+              ? "selected"
+              : ""
+          }>medium_term</option>
+          <option value="long_term" ${
+            (disc.seed_top_artists_time_range || "") === "long_term"
+              ? "selected"
+              : ""
+          }>long_term</option>
         </select>
+        ${helpFor("discovery.seed_top_artists_time_range")}
       </label>
 
       <label class="field">
         <div class="label">Seed top artists limit</div>
-        <input data-k="discovery.seed_top_artists_limit" type="number" min="1" max="50" value="${Number(disc.seed_top_artists_limit ?? 5)}">
+        <input data-k="discovery.seed_top_artists_limit" type="number" min="1" max="50" value="${Number(
+          disc.seed_top_artists_limit ?? 5,
+        )}">
+        ${helpFor("discovery.seed_top_artists_limit")}
       </label>
 
       <label class="field">
         <div class="label">Similar per seed</div>
-        <input data-k="discovery.similar_per_seed" type="number" min="1" max="500" value="${Number(disc.similar_per_seed ?? 30)}">
+        <input data-k="discovery.similar_per_seed" type="number" min="1" max="500" value="${Number(
+          disc.similar_per_seed ?? 30,
+        )}">
+        ${helpFor("discovery.similar_per_seed")}
       </label>
 
       <label class="field">
         <div class="label">Take artists (cap)</div>
-        <input data-k="discovery.take_artists" type="number" min="1" max="5000" value="${Number(disc.take_artists ?? 80)}">
+        <input data-k="discovery.take_artists" type="number" min="1" max="5000" value="${Number(
+          disc.take_artists ?? 80,
+        )}">
+        ${helpFor("discovery.take_artists")}
       </label>
 
       <label class="field">
         <div class="label">Include seed artists</div>
         <select data-k="discovery.include_seed_artists">
-          <option value="true" ${disc.include_seed_artists === true ? "selected" : ""}>true</option>
-          <option value="false" ${disc.include_seed_artists !== true ? "selected" : ""}>false</option>
+          <option value="true" ${
+            disc.include_seed_artists === true ? "selected" : ""
+          }>true</option>
+          <option value="false" ${
+            disc.include_seed_artists !== true ? "selected" : ""
+          }>false</option>
         </select>
+        ${helpFor("discovery.include_seed_artists")}
       </label>
 
       <label class="field">
         <div class="label">Tracks per artist</div>
-        <input data-k="discovery.tracks_per_artist" type="number" min="1" max="20" value="${Number(disc.tracks_per_artist ?? 2)}">
+        <input data-k="discovery.tracks_per_artist" type="number" min="1" max="20" value="${Number(
+          disc.tracks_per_artist ?? 2,
+        )}">
+        ${helpFor("discovery.tracks_per_artist")}
       </label>
 
       <label class="field">
         <div class="label">Max track popularity (0-100)</div>
-        <input data-k="discovery.max_track_popularity" type="number" min="0" max="100" value="${escapeHtml(disc.max_track_popularity ?? 60)}">
+        <input data-k="discovery.max_track_popularity" type="number" min="0" max="100" value="${escapeHtml(
+          disc.max_track_popularity ?? 60,
+        )}">
+        ${helpFor("discovery.max_track_popularity")}
       </label>
 
       <label class="field">
         <div class="label">Min track popularity (0-100, optional)</div>
-        <input data-k="discovery.min_track_popularity" type="number" min="0" max="100" value="${escapeHtml(disc.min_track_popularity ?? "")}">
+        <input data-k="discovery.min_track_popularity" type="number" min="0" max="100" value="${escapeHtml(
+          disc.min_track_popularity ?? "",
+        )}">
+        ${helpFor("discovery.min_track_popularity")}
       </label>
 
       <label class="field">
         <div class="label">Exclude saved tracks (Liked Songs)</div>
         <select data-k="discovery.exclude_saved_tracks">
-          <option value="true" ${disc.exclude_saved_tracks !== false ? "selected" : ""}>true</option>
-          <option value="false" ${disc.exclude_saved_tracks === false ? "selected" : ""}>false</option>
+          <option value="true" ${
+            disc.exclude_saved_tracks !== false ? "selected" : ""
+          }>true</option>
+          <option value="false" ${
+            disc.exclude_saved_tracks === false ? "selected" : ""
+          }>false</option>
         </select>
+        ${helpFor("discovery.exclude_saved_tracks")}
       </label>
 
       <label class="field">
         <div class="label">Albums per artist</div>
-        <input data-k="discovery.albums_per_artist" type="number" min="1" max="10" value="${Number(disc.albums_per_artist ?? 2)}">
+        <input data-k="discovery.albums_per_artist" type="number" min="1" max="10" value="${Number(
+          disc.albums_per_artist ?? 2,
+        )}">
+        ${helpFor("discovery.albums_per_artist")}
       </label>
 
       <label class="field">
         <div class="label">Albums limit fetch</div>
-        <input data-k="discovery.albums_limit_fetch" type="number" min="1" max="50" value="${Number(disc.albums_limit_fetch ?? 8)}">
+        <input data-k="discovery.albums_limit_fetch" type="number" min="1" max="50" value="${Number(
+          disc.albums_limit_fetch ?? 8,
+        )}">
+        ${helpFor("discovery.albums_limit_fetch")}
       </label>
 
       <label class="field">
         <div class="label">Search limit per track (lastfm_toptracks)</div>
-        <input data-k="discovery.search_limit_per_track" type="number" min="1" max="50" value="${Number(disc.search_limit_per_track ?? 5)}">
+        <input data-k="discovery.search_limit_per_track" type="number" min="1" max="50" value="${Number(
+          disc.search_limit_per_track ?? 5,
+        )}">
+        ${helpFor("discovery.search_limit_per_track")}
       </label>
     </div>
 
@@ -550,11 +975,15 @@ function renderRecipeEditor(r) {
           <option value="true" ${reco.enabled === true ? "selected" : ""}>true</option>
           <option value="false" ${reco.enabled !== true ? "selected" : ""}>false</option>
         </select>
+        ${helpFor("recommendations.enabled")}
       </label>
 
       <label class="field span2">
         <div class="label">Seed genres (comma)</div>
-        <input data-k="recommendations.seed_genres" value="${escapeHtml((reco.seed_genres || []).join(", "))}" placeholder="rock, techno, ambient, ...">
+        <input data-k="recommendations.seed_genres" value="${escapeHtml(
+          (reco.seed_genres || []).join(", "),
+        )}" placeholder="rock, techno, ambient, ...">
+        ${helpFor("recommendations.seed_genres")}
       </label>
     </div>
 
@@ -562,47 +991,82 @@ function renderRecipeEditor(r) {
     <div class="formgrid">
       <label class="field span2">
         <div class="label">Search queries (comma)</div>
-        <input data-k="sources.search" value="${escapeHtml((sources.search || []).join(", "))}">
+        <input data-k="sources.search" value="${escapeHtml(
+          (sources.search || []).join(", "),
+        )}">
+        ${helpFor("sources.search")}
       </label>
 
       <label class="field span2">
         <div class="label">Playlists (IDs nebo URLs, comma)</div>
-        <input data-k="sources.playlists" value="${escapeHtml((sources.playlists || []).join(", "))}">
+        <input data-k="sources.playlists" value="${escapeHtml(
+          (sources.playlists || []).join(", "),
+        )}">
+        ${helpFor("sources.playlists")}
       </label>
 
       <label class="field">
         <div class="label">Liked tracks</div>
         <select data-k="sources.liked">
-          <option value="true" ${sources.liked === true ? "selected" : ""}>true</option>
-          <option value="false" ${sources.liked !== true ? "selected" : ""}>false</option>
+          <option value="true" ${
+            sources.liked === true ? "selected" : ""
+          }>true</option>
+          <option value="false" ${
+            sources.liked !== true ? "selected" : ""
+          }>false</option>
         </select>
+        ${helpFor("sources.liked")}
       </label>
 
       <label class="field">
         <div class="label">Max candidates</div>
-        <input data-k="sources.max_candidates" type="number" min="50" max="10000" value="${Number(sources.max_candidates ?? 1500)}">
+        <input data-k="sources.max_candidates" type="number" min="50" max="10000" value="${Number(
+          sources.max_candidates ?? 1500,
+        )}">
+        ${helpFor("sources.max_candidates")}
       </label>
 
       <label class="field">
         <div class="label">Top tracks enabled</div>
         <select data-k="sources.top_tracks.enabled">
-          <option value="true" ${sources.top_tracks?.enabled !== false ? "selected" : ""}>true</option>
-          <option value="false" ${sources.top_tracks?.enabled === false ? "selected" : ""}>false</option>
+          <option value="true" ${
+            sources.top_tracks?.enabled !== false ? "selected" : ""
+          }>true</option>
+          <option value="false" ${
+            sources.top_tracks?.enabled === false ? "selected" : ""
+          }>false</option>
         </select>
+        ${helpFor("sources.top_tracks.enabled")}
       </label>
 
       <label class="field">
         <div class="label">Top tracks time_range</div>
         <select data-k="sources.top_tracks.time_range">
-          <option value="short_term" ${(sources.top_tracks?.time_range || "short_term") === "short_term" ? "selected" : ""}>short_term</option>
-          <option value="medium_term" ${(sources.top_tracks?.time_range || "") === "medium_term" ? "selected" : ""}>medium_term</option>
-          <option value="long_term" ${(sources.top_tracks?.time_range || "") === "long_term" ? "selected" : ""}>long_term</option>
+          <option value="short_term" ${
+            (sources.top_tracks?.time_range || "short_term") === "short_term"
+              ? "selected"
+              : ""
+          }>short_term</option>
+          <option value="medium_term" ${
+            (sources.top_tracks?.time_range || "") === "medium_term"
+              ? "selected"
+              : ""
+          }>medium_term</option>
+          <option value="long_term" ${
+            (sources.top_tracks?.time_range || "") === "long_term"
+              ? "selected"
+              : ""
+          }>long_term</option>
         </select>
+        ${helpFor("sources.top_tracks.time_range")}
       </label>
 
       <label class="field">
         <div class="label">Top tracks limit</div>
-        <input data-k="sources.top_tracks.limit" type="number" min="1" max="50" value="${Number(sources.top_tracks?.limit ?? 50)}">
+        <input data-k="sources.top_tracks.limit" type="number" min="1" max="50" value="${Number(
+          sources.top_tracks?.limit ?? 50,
+        )}">
+        ${helpFor("sources.top_tracks.limit")}
       </label>
     </div>
 
@@ -611,30 +1075,49 @@ function renderRecipeEditor(r) {
       <label class="field">
         <div class="label">Explicit</div>
         <select data-k="filters.explicit">
-          <option value="allow" ${(filters.explicit || "allow") === "allow" ? "selected" : ""}>allow</option>
-          <option value="exclude" ${(filters.explicit || "") === "exclude" ? "selected" : ""}>exclude</option>
-          <option value="only" ${(filters.explicit || "") === "only" ? "selected" : ""}>only</option>
+          <option value="allow" ${
+            (filters.explicit || "allow") === "allow" ? "selected" : ""
+          }>allow</option>
+          <option value="exclude" ${
+            (filters.explicit || "") === "exclude" ? "selected" : ""
+          }>exclude</option>
+          <option value="only" ${
+            (filters.explicit || "") === "only" ? "selected" : ""
+          }>only</option>
         </select>
+        ${helpFor("filters.explicit")}
       </label>
 
       <label class="field">
         <div class="label">Year min</div>
-        <input data-k="filters.year_min" type="number" value="${escapeHtml(filters.year_min ?? "")}">
+        <input data-k="filters.year_min" type="number" value="${escapeHtml(
+          filters.year_min ?? "",
+        )}">
+        ${helpFor("filters.year_min")}
       </label>
 
       <label class="field">
         <div class="label">Year max</div>
-        <input data-k="filters.year_max" type="number" value="${escapeHtml(filters.year_max ?? "")}">
+        <input data-k="filters.year_max" type="number" value="${escapeHtml(
+          filters.year_max ?? "",
+        )}">
+        ${helpFor("filters.year_max")}
       </label>
 
       <label class="field">
         <div class="label">Tempo min (BPM)</div>
-        <input data-k="filters.tempo_min" type="number" value="${escapeHtml(filters.tempo_min ?? "")}">
+        <input data-k="filters.tempo_min" type="number" value="${escapeHtml(
+          filters.tempo_min ?? "",
+        )}">
+        ${helpFor("filters.tempo_min")}
       </label>
 
       <label class="field">
         <div class="label">Tempo max (BPM)</div>
-        <input data-k="filters.tempo_max" type="number" value="${escapeHtml(filters.tempo_max ?? "")}">
+        <input data-k="filters.tempo_max" type="number" value="${escapeHtml(
+          filters.tempo_max ?? "",
+        )}">
+        ${helpFor("filters.tempo_max")}
       </label>
     </div>
 
@@ -642,20 +1125,31 @@ function renderRecipeEditor(r) {
     <div class="formgrid">
       <label class="field">
         <div class="label">Max per artist</div>
-        <input data-k="diversity.max_per_artist" type="number" min="1" max="50" value="${escapeHtml(diversity.max_per_artist ?? 2)}">
+        <input data-k="diversity.max_per_artist" type="number" min="1" max="50" value="${escapeHtml(
+          diversity.max_per_artist ?? 2,
+        )}">
+        ${helpFor("diversity.max_per_artist")}
       </label>
 
       <label class="field">
         <div class="label">Max per album</div>
-        <input data-k="diversity.max_per_album" type="number" min="1" max="50" value="${escapeHtml(diversity.max_per_album ?? "")}">
+        <input data-k="diversity.max_per_album" type="number" min="1" max="50" value="${escapeHtml(
+          diversity.max_per_album ?? "",
+        )}">
+        ${helpFor("diversity.max_per_album")}
       </label>
 
       <label class="field">
         <div class="label">Avoid same artist in row</div>
         <select data-k="diversity.avoid_same_artist_in_row">
-          <option value="true" ${diversity.avoid_same_artist_in_row === true ? "selected" : ""}>true</option>
-          <option value="false" ${diversity.avoid_same_artist_in_row !== true ? "selected" : ""}>false</option>
+          <option value="true" ${
+            diversity.avoid_same_artist_in_row === true ? "selected" : ""
+          }>true</option>
+          <option value="false" ${
+            diversity.avoid_same_artist_in_row !== true ? "selected" : ""
+          }>false</option>
         </select>
+        ${helpFor("diversity.avoid_same_artist_in_row")}
       </label>
     </div>
 
@@ -663,7 +1157,10 @@ function renderRecipeEditor(r) {
     <div class="formgrid">
       <label class="field">
         <div class="label">Recommendation attempts</div>
-        <input data-k="advanced.recommendation_attempts" type="number" min="1" max="50" value="${Number(adv.recommendation_attempts ?? 10)}">
+        <input data-k="advanced.recommendation_attempts" type="number" min="1" max="50" value="${Number(
+          adv.recommendation_attempts ?? 10,
+        )}">
+        ${helpFor("advanced.recommendation_attempts")}
       </label>
     </div>
   `;
@@ -777,8 +1274,12 @@ function renderAccordion() {
       const caret = isOpen ? "▾" : "▸";
 
       return `
-        <div class="recipeBlock ${isOpen ? "open" : ""}" data-id="${escapeHtml(r.id)}">
-          <button class="recipeHead" type="button" data-action="toggle" data-id="${escapeHtml(r.id)}">
+        <div class="recipeBlock ${isOpen ? "open" : ""}" data-id="${escapeHtml(
+          r.id,
+        )}">
+          <button class="recipeHead" type="button" data-action="toggle" data-id="${escapeHtml(
+            r.id,
+          )}">
             <div class="rhLeft">
               <div class="rhTitle">
                 <span class="caret">${caret}</span>
@@ -802,9 +1303,15 @@ function renderAccordion() {
             <div class="row" style="justify-content: space-between; align-items:center; margin-bottom:10px;">
               <div class="small muted">Edituješ přímo tento recipe. Uložení je až po “Save all”.</div>
               <div class="btns">
-                <button class="danger" data-action="delete" data-id="${escapeHtml(r.id)}">Delete</button>
-                <button data-action="dup" data-id="${escapeHtml(r.id)}">Duplicate</button>
-                <button class="primary" data-action="saveone" data-id="${escapeHtml(r.id)}">Save recipe</button>
+                <button class="danger" data-action="delete" data-id="${escapeHtml(
+                  r.id,
+                )}">Delete</button>
+                <button data-action="dup" data-id="${escapeHtml(
+                  r.id,
+                )}">Duplicate</button>
+                <button class="primary" data-action="saveone" data-id="${escapeHtml(
+                  r.id,
+                )}">Save recipe</button>
               </div>
             </div>
 

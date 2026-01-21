@@ -1,0 +1,10 @@
+#!/usr/bin/with-contenv bash
+set -euo pipefail
+
+export PORT="${PORT:-${PORT:-7790}}"
+
+# HA add-on options are exposed via /data/options.json in Supervisor env,
+# but easiest is to read env vars injected by HA (it injects as env too).
+# We'll also parse /data/options.json in the app for reliability.
+
+exec node /app/server.js

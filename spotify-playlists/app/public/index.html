@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="cs">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Spotify Playlist Builder</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>Spotify Playlist Builder</h1>
+
+      <div class="card">
+        <div class="row">
+          <div>
+            <h2>Status</h2>
+            <div id="status">Loading…</div>
+          </div>
+          <div class="right">
+            <button id="btnRun">Run now</button>
+            <button id="btnDry" disabled>Dry run (soon)</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Spotify OAuth</h2>
+        <p>
+          Nejdřív vyplň v add-on options: <b>spotify_client_id</b>,
+          <b>spotify_client_secret</b>, <b>spotify_redirect_uri</b>. Pak klikni
+          authorize.
+        </p>
+        <button id="btnAuth">Authorize</button>
+        <div id="authInfo" class="muted"></div>
+      </div>
+
+      <div class="card">
+        <div class="row">
+          <h2>Recipes</h2>
+          <button id="btnAdd">Add recipe</button>
+        </div>
+        <div id="recipes"></div>
+        <div class="muted">Ukládá se do /data/config.json</div>
+      </div>
+
+      <div class="card">
+        <h2>History</h2>
+        <button id="btnClearHistory">Clear history</button>
+        <div class="muted">Pozor: smaže všechna “no-repeat” data.</div>
+      </div>
+    </div>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

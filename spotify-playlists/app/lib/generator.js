@@ -1,11 +1,15 @@
 // app/lib/generator.js
 // Generator with:
-// - Spotify API retry/backoff on 429
-// - Optional Last.fm discovery (new artists) via LASTFM_API_KEY
+// - Spotify API retry/backoff on 429/5xx
+// - Optional Last.fm discovery via LASTFM_API_KEY
 // - Discovery strategies: deep_cuts / recent_albums / lastfm_toptracks
-// - Optional exclude of saved tracks (Liked Songs) for "unknown" feeling
+// - Spotify Recommendations (seed genres + tempo) for freshness
+// - Optional exclude of saved tracks for discovery ("unknown" feeling)
 // - Fallback to configured Spotify sources pool
-// - No-repeat via excludedSet + per-artist limit
+// - No-repeat via excludedSet
+// - Diversity constraints enforced ACROSS the whole final list:
+//   max_per_artist, max_per_album, avoid_same_artist_in_row
+// - Tempo filtering via Spotify audio features when needed
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
@@ -25,6 +29,7 @@ async function spRetry(fn, { maxRetries = 6, baseDelayMs = 400 } = {}) {
 
       const isRetryable =
         status === 429 || status === 502 || status === 503 || status === 504;
+
       if (!isRetryable || attempt >= maxRetries) throw e;
 
       const backoff = Math.round(baseDelayMs * Math.pow(2, attempt));
@@ -97,6 +102,19 @@ function uniq(arr) {
   return out;
 }
 
+function uniqIds(ids) {
+  const out = [];
+  const seen = new Set();
+  for (const id of ids || []) {
+    if (!id) continue;
+    const s = String(id);
+    if (seen.has(s)) continue;
+    seen.add(s);
+    out.push(s);
+  }
+  return out;
+}
+
 function getRecipeSources(recipe) {
   const src = recipe.sources || {};
   return {
@@ -124,17 +142,52 @@ function getRecipeFilters(recipe) {
       f.year_max === null || f.year_max === "" || f.year_max === undefined
         ? null
         : Number(f.year_max),
+    tempo_min:
+      f.tempo_min === null || f.tempo_min === "" || f.tempo_min === undefined
+        ? null
+        : Number(f.tempo_min),
+    tempo_max:
+      f.tempo_max === null || f.tempo_max === "" || f.tempo_max === undefined
+        ? null
+        : Number(f.tempo_max),
   };
 }
 
 function getRecipeLimits(recipe) {
   const d = recipe.diversity || {};
   const maxPerArtist = d.max_per_artist ?? null;
+  const maxPerAlbum = d.max_per_album ?? null;
+  const avoidSameArtistInRow = d.avoid_same_artist_in_row ?? false;
+
   return {
     max_per_artist:
       maxPerArtist === null || maxPerArtist === "" || maxPerArtist === undefined
         ? null
         : Number(maxPerArtist),
+    max_per_album:
+      maxPerAlbum === null || maxPerAlbum === "" || maxPerAlbum === undefined
+        ? null
+        : Number(maxPerAlbum),
+    avoid_same_artist_in_row: Boolean(avoidSameArtistInRow),
+  };
+}
+
+function getAdvanced(recipe) {
+  const a = recipe.advanced || {};
+  return {
+    recommendation_attempts: Number(a.recommendation_attempts ?? 10),
+  };
+}
+
+function getRecommendationsCfg(recipe) {
+  const r = recipe.recommendations || {};
+  return {
+    enabled: Boolean(r.enabled),
+    seed_genres: Array.isArray(r.seed_genres) ? r.seed_genres : [],
+    // legacy path (some older configs might have it elsewhere)
+    legacy_seed_genres: Array.isArray(recipe?.source?.seed_genres)
+      ? recipe.source.seed_genres
+      : [],
   };
 }
 
@@ -144,15 +197,19 @@ function getDiscovery(recipe) {
     enabled: Boolean(d.enabled),
 
     // Strategy:
-    // - "deep_cuts" (default): take album tracks + filter by popularity cap
-    // - "recent_albums": take newest albums/singles tracks first (still applies popularity cap if set)
-    // - "lastfm_toptracks": old behavior
+    // - "deep_cuts" (default): take album tracks + shuffle
+    // - "recent_albums": take newest albums/singles tracks first
+    // - "lastfm_toptracks": last.fm top tracks -> spotify search
     strategy: String(d.strategy ?? "deep_cuts"),
 
     // Seed artists from Spotify top artists
-    seed_top_artists_limit: Number(d.seed_top_artists_limit ?? 5),
+    seed_top_artists_limit: Number(
+      d.seed_top_artists_limit ?? d.seed_top_artists?.limit ?? 5,
+    ),
     seed_top_artists_time_range: String(
-      d.seed_top_artists_time_range ?? "short_term",
+      d.seed_top_artists_time_range ??
+        d.seed_top_artists?.time_range ??
+        "short_term",
     ),
 
     // Last.fm similar
@@ -166,7 +223,6 @@ function getDiscovery(recipe) {
     tracks_per_artist: Number(d.tracks_per_artist ?? 2),
 
     // Popularity shaping (Spotify popularity 0..100)
-    // Lower cap => more "unknown" vibe.
     max_track_popularity:
       d.max_track_popularity === null || d.max_track_popularity === undefined
         ? 60
@@ -194,11 +250,17 @@ function normalizeTrack(t) {
     explicit: Boolean(t?.explicit),
     release_date: t?.album?.release_date || null,
     popularity: typeof t?.popularity === "number" ? t.popularity : null,
+    tempo: typeof t?.tempo === "number" ? t.tempo : null, // enriched if needed
+    album_id: t?.album?.id || null,
     artists: Array.isArray(t?.artists)
       ? t.artists.map((a) => ({ id: a.id, name: a.name }))
       : [],
     name: t?.name || "",
   };
+}
+
+function tempoWanted(filters) {
+  return filters && (filters.tempo_min !== null || filters.tempo_max !== null);
 }
 
 function applyFiltersAndDedup(rawTracks, { excludedSet, filters, popularity }) {
@@ -223,6 +285,20 @@ function applyFiltersAndDedup(rawTracks, { excludedSet, filters, popularity }) {
     if (filters.year_min !== null && y !== null && y < filters.year_min)
       continue;
     if (filters.year_max !== null && y !== null && y > filters.year_max)
+      continue;
+
+    // tempo range (requires enrichment)
+    if (
+      filters.tempo_min !== null &&
+      typeof t.tempo === "number" &&
+      t.tempo < filters.tempo_min
+    )
+      continue;
+    if (
+      filters.tempo_max !== null &&
+      typeof t.tempo === "number" &&
+      t.tempo > filters.tempo_max
+    )
       continue;
 
     // popularity shaping (optional)
@@ -250,29 +326,122 @@ function applyFiltersAndDedup(rawTracks, { excludedSet, filters, popularity }) {
   return out;
 }
 
-function selectTracks(candidates, trackCount, maxPerArtist) {
-  const chosen = [];
-  const artistCounts = new Map();
+/* -------- diversity across whole list -------- */
 
-  for (const t of candidates) {
-    if (chosen.length >= trackCount) break;
-
-    if (maxPerArtist && maxPerArtist > 0) {
-      const a0 = t.artists?.[0]?.id || t.artists?.[0]?.name || null;
-      if (a0) {
-        const c = artistCounts.get(a0) || 0;
-        if (c >= maxPerArtist) continue;
-        artistCounts.set(a0, c + 1);
-      }
-    }
-
-    chosen.push(t);
-  }
-
-  return chosen;
+function diversityKeyArtist(t) {
+  return t.artists?.[0]?.id || t.artists?.[0]?.name || null;
 }
 
-// -------- Spotify pool sources --------
+function diversityKeyAlbum(t) {
+  return t.album_id || null;
+}
+
+function createDiversityState(initialChosen = []) {
+  const state = {
+    chosen: [],
+    chosenIds: new Set(),
+    artistCounts: new Map(),
+    albumCounts: new Map(),
+    lastArtistKey: null,
+  };
+
+  for (const t of initialChosen) {
+    if (!t?.id) continue;
+    if (state.chosenIds.has(t.id)) continue;
+
+    state.chosen.push(t);
+    state.chosenIds.add(t.id);
+
+    const a0 = diversityKeyArtist(t);
+    const al = diversityKeyAlbum(t);
+
+    if (a0) state.artistCounts.set(a0, (state.artistCounts.get(a0) || 0) + 1);
+    if (al) state.albumCounts.set(al, (state.albumCounts.get(al) || 0) + 1);
+    state.lastArtistKey = a0 || state.lastArtistKey;
+  }
+
+  return state;
+}
+
+function canTakeWithLimits(state, t, limits) {
+  const a0 = diversityKeyArtist(t);
+  const al = diversityKeyAlbum(t);
+
+  if (
+    limits.avoid_same_artist_in_row &&
+    state.lastArtistKey &&
+    a0 &&
+    String(a0) === String(state.lastArtistKey)
+  ) {
+    return false;
+  }
+
+  if (limits.max_per_artist && limits.max_per_artist > 0 && a0) {
+    const c = state.artistCounts.get(a0) || 0;
+    if (c >= limits.max_per_artist) return false;
+  }
+
+  if (limits.max_per_album && limits.max_per_album > 0 && al) {
+    const c = state.albumCounts.get(al) || 0;
+    if (c >= limits.max_per_album) return false;
+  }
+
+  return true;
+}
+
+function takeFromCandidates(state, candidates, takeN, limits) {
+  for (const t of candidates) {
+    if (state.chosen.length >= takeN) break;
+    if (!t?.id) continue;
+    if (state.chosenIds.has(t.id)) continue;
+
+    if (!canTakeWithLimits(state, t, limits)) continue;
+
+    state.chosen.push(t);
+    state.chosenIds.add(t.id);
+
+    const a0 = diversityKeyArtist(t);
+    const al = diversityKeyAlbum(t);
+
+    if (a0) state.artistCounts.set(a0, (state.artistCounts.get(a0) || 0) + 1);
+    if (al) state.albumCounts.set(al, (state.albumCounts.get(al) || 0) + 1);
+    state.lastArtistKey = a0 || state.lastArtistKey;
+  }
+
+  return state;
+}
+
+/* -------- audio features (tempo) -------- */
+
+async function enrichTempoIfNeeded(sp, tracks, filters) {
+  if (!tempoWanted(filters)) return { tracks, ok: true };
+
+  const ids = uniqIds(tracks.map((t) => t?.id).filter(Boolean));
+  if (!ids.length) return { tracks, ok: true };
+
+  const tempoById = new Map();
+
+  for (let i = 0; i < ids.length; i += 100) {
+    const chunk = ids.slice(i, i + 100);
+    const resp = await spRetry(() => sp.getAudioFeaturesForTracks(chunk));
+    const feats = resp.body?.audio_features || [];
+    for (const f of feats) {
+      if (!f?.id) continue;
+      if (typeof f.tempo === "number") tempoById.set(f.id, f.tempo);
+    }
+  }
+
+  const out = tracks.map((t) => {
+    if (!t?.id) return t;
+    const tempo = tempoById.get(t.id);
+    if (typeof tempo === "number") return { ...t, tempo };
+    return t;
+  });
+
+  return { tracks: out, ok: true };
+}
+
+/* -------- Spotify pool sources -------- */
 
 async function fetchAllPlaylistTrackItems(sp, playlistId, maxCandidates) {
   const items = [];
@@ -285,7 +454,7 @@ async function fetchAllPlaylistTrackItems(sp, playlistId, maxCandidates) {
         limit,
         offset,
         fields:
-          "items(track(id,uri,name,explicit,popularity,album(release_date),artists(id,name))),next",
+          "items(track(id,uri,name,explicit,popularity,album(id,release_date),artists(id,name))),next",
       }),
     );
 
@@ -323,10 +492,10 @@ async function fetchLikedTracks(sp, maxCandidates) {
   return items;
 }
 
-async function fetchTopTracks(sp, timeRange, maxCandidates) {
+async function fetchTopTracks(sp, timeRange, maxCandidates, limitPerPage = 50) {
   const items = [];
   let offset = 0;
-  const limit = 50;
+  const limit = Math.max(1, Math.min(50, Number(limitPerPage || 50)));
 
   while (items.length < maxCandidates) {
     const resp = await spRetry(() =>
@@ -377,7 +546,85 @@ async function fetchSearchTracks(sp, query, market, maxCandidates) {
   return items;
 }
 
-// -------- Last.fm discovery --------
+/* -------- Spotify Recommendations (seed genres + tempo) -------- */
+
+async function fetchRecommendations(
+  sp,
+  { market, seed_genres, tempo_min, tempo_max },
+) {
+  const params = {
+    market,
+    limit: 100,
+    seed_genres: (seed_genres || []).slice(0, 5),
+  };
+
+  // Spotify supports min_tempo/max_tempo directly on recommendations
+  if (tempo_min !== null && tempo_min !== undefined)
+    params.min_tempo = Number(tempo_min);
+  if (tempo_max !== null && tempo_max !== undefined)
+    params.max_tempo = Number(tempo_max);
+
+  const resp = await spRetry(() => sp.getRecommendations(params));
+  return resp.body?.tracks || [];
+}
+
+async function poolFromRecommendations({
+  sp,
+  recipe,
+  market,
+  excludedSet,
+  meta,
+}) {
+  const filters = getRecipeFilters(recipe);
+  const limits = getRecipeLimits(recipe);
+  const adv = getAdvanced(recipe);
+  const rcfg = getRecommendationsCfg(recipe);
+
+  const trackCount = Number(recipe.track_count ?? 50);
+  const attempts = Math.max(1, Math.min(50, adv.recommendation_attempts || 10));
+
+  const seedGenres = uniq([
+    ...(rcfg.seed_genres || []),
+    ...(rcfg.legacy_seed_genres || []),
+  ]).slice(0, 10);
+
+  if (!seedGenres.length) {
+    meta?.notes?.push("recommendations_no_seed_genres");
+    return [];
+  }
+
+  const raw = [];
+  for (let i = 0; i < attempts; i++) {
+    const got = await fetchRecommendations(sp, {
+      market,
+      seed_genres: seedGenres,
+      tempo_min: filters.tempo_min,
+      tempo_max: filters.tempo_max,
+    });
+    raw.push(...got);
+  }
+
+  // enrich tempo if filters demand it (reco already tries, but we keep consistent)
+  try {
+    const enr = await enrichTempoIfNeeded(sp, raw, filters);
+    raw.splice(0, raw.length, ...(enr.tracks || raw));
+  } catch {
+    meta?.notes?.push("tempo_enrich_failed_recommendations");
+  }
+
+  let candidates = applyFiltersAndDedup(raw, {
+    excludedSet: excludedSet || new Set(),
+    filters,
+    popularity: null,
+  });
+
+  shuffleInPlace(candidates);
+
+  // Return pool; final diversity selection happens centrally across providers
+  return candidates.slice(0, Math.max(trackCount * 8, 400));
+}
+
+/* -------- Last.fm discovery -------- */
 
 function lastfmKey() {
   return process.env.LASTFM_API_KEY
@@ -450,7 +697,6 @@ async function spotifyGetFullTracks(sp, ids, market) {
 }
 
 async function spotifyFilterOutSavedTracks(sp, trackIds) {
-  // returns subset of ids that are NOT saved
   const out = [];
   for (let i = 0; i < trackIds.length; i += 50) {
     const chunk = trackIds.slice(i, i + 50);
@@ -464,7 +710,6 @@ async function spotifyFilterOutSavedTracks(sp, trackIds) {
 }
 
 async function spotifyGetArtistAlbumTrackIds(sp, artistId, market, disc) {
-  // Fetch albums/singles, pick newest, then get their track ids.
   const albumsResp = await spRetry(() =>
     sp.getArtistAlbums(artistId, {
       include_groups: "album,single",
@@ -475,12 +720,10 @@ async function spotifyGetArtistAlbumTrackIds(sp, artistId, market, disc) {
   );
 
   let albums = albumsResp.body?.items || [];
-  // sort by release_date desc (string compare works for YYYY / YYYY-MM / YYYY-MM-DD)
   albums = albums.sort((a, b) =>
     String(b?.release_date || "").localeCompare(String(a?.release_date || "")),
   );
 
-  // take top N albums
   const take = Math.max(1, Math.min(10, disc.albums_per_artist));
   const chosenAlbums = albums.slice(0, take);
 
@@ -501,40 +744,25 @@ async function spotifyGetArtistAlbumTrackIds(sp, artistId, market, disc) {
       }
       if (!tr.body?.next) break;
       offset += limit;
-      // safety: don't go crazy
       if (offset > 200) break;
     }
   }
 
-  return uniq(trackIds);
+  return uniqIds(trackIds);
 }
 
-async function discoverWithLastFm({ sp, market, excludedSet, recipe }) {
-  const meta = {
-    provider: "lastfm",
-    used_provider: "lastfm",
-    need: Number(recipe.track_count ?? 50),
-    counts: { lastfm_selected: 0, fallback_selected: 0 },
-    notes: [],
-  };
-
+async function discoverWithLastFm({ sp, market, excludedSet, recipe, meta }) {
   const disc = getDiscovery(recipe);
 
   if (!disc.enabled) {
-    meta.used_provider = "sources";
-    meta.provider = "sources";
-    meta.notes.push("discovery_disabled");
-    return { tracks: [], meta };
+    meta?.notes?.push("discovery_disabled");
+    return [];
   }
-
   if (!lastfmKey()) {
-    meta.used_provider = "sources";
-    meta.provider = "sources";
-    meta.notes.push("missing_lastfm_api_key");
-    return { tracks: [], meta };
+    meta?.notes?.push("missing_lastfm_api_key");
+    return [];
   }
 
-  // 1) seed artists from Spotify top artists
   const top = await spRetry(() =>
     sp.getMyTopArtists({
       limit: Math.max(1, Math.min(50, disc.seed_top_artists_limit)),
@@ -544,13 +772,10 @@ async function discoverWithLastFm({ sp, market, excludedSet, recipe }) {
 
   const seeds = (top.body?.items || []).map((a) => a?.name).filter(Boolean);
   if (!seeds.length) {
-    meta.used_provider = "sources";
-    meta.provider = "sources";
-    meta.notes.push("no_top_artists");
-    return { tracks: [], meta };
+    meta?.notes?.push("no_top_artists");
+    return [];
   }
 
-  // 2) similar artists from Last.fm
   const similarAll = [];
   for (const s of seeds) {
     const sim = await lastfmGetSimilarArtists(s, disc.similar_per_seed);
@@ -558,24 +783,18 @@ async function discoverWithLastFm({ sp, market, excludedSet, recipe }) {
   }
 
   let artistPool = uniq(similarAll);
-
-  if (disc.include_seed_artists) {
-    artistPool = uniq([...seeds, ...artistPool]);
-  }
-
+  if (disc.include_seed_artists) artistPool = uniq([...seeds, ...artistPool]);
   artistPool = artistPool.slice(0, Math.max(5, disc.take_artists));
 
   if (!artistPool.length) {
-    meta.notes.push("no_similar_artists");
-    return { tracks: [], meta };
+    meta?.notes?.push("no_similar_artists");
+    return [];
   }
 
-  // 3) build candidates depending on strategy
   const candidates = [];
   const seenIds = new Set();
 
   if (disc.strategy === "lastfm_toptracks") {
-    // Old behavior: Last.fm top tracks -> Spotify search
     for (const artistName of artistPool) {
       const topTracks = await lastfmGetTopTracks(
         artistName,
@@ -592,8 +811,6 @@ async function discoverWithLastFm({ sp, market, excludedSet, recipe }) {
       }
     }
   } else {
-    // New behavior: use Spotify albums for discovered artists (deep_cuts / recent_albums)
-    // 3a) find spotify artist ids
     const artistIds = [];
     for (const name of artistPool) {
       const aid = await spotifySearchArtistId(sp, name, market);
@@ -601,17 +818,14 @@ async function discoverWithLastFm({ sp, market, excludedSet, recipe }) {
     }
 
     if (!artistIds.length) {
-      meta.notes.push("spotify_artist_search_no_hits");
-      return { tracks: [], meta };
+      meta?.notes?.push("spotify_artist_search_no_hits");
+      return [];
     }
 
-    // 3b) collect album track ids
     for (const a of artistIds) {
       const ids = await spotifyGetArtistAlbumTrackIds(sp, a.id, market, disc);
       if (!ids.length) continue;
 
-      // choose a few ids per artist to control API pressure:
-      // deep_cuts => sample across album tracks; recent_albums => keep order (newest albums were chosen first)
       const pickN = Math.max(1, disc.tracks_per_artist * 8);
       const pool =
         disc.strategy === "deep_cuts" ? shuffleInPlace([...ids]) : ids;
@@ -626,36 +840,31 @@ async function discoverWithLastFm({ sp, market, excludedSet, recipe }) {
   }
 
   if (!candidates.length) {
-    meta.notes.push("lastfm_no_matches");
-    return { tracks: [], meta };
+    meta?.notes?.push("lastfm_no_matches");
+    return [];
   }
 
-  // 4) Optionally remove tracks already in Liked songs (best "unknown" feeling)
   let ids = candidates;
+
   if (disc.exclude_saved_tracks) {
     ids = await spotifyFilterOutSavedTracks(sp, ids);
-    meta.notes.push("exclude_saved_tracks");
+    meta?.notes?.push("exclude_saved_tracks");
   }
 
   if (!ids.length) {
-    meta.notes.push("all_candidates_were_saved");
-    return { tracks: [], meta };
+    meta?.notes?.push("all_candidates_were_saved");
+    return [];
   }
 
-  // 5) fetch full track objects so filters can apply + popularity can be used
   const fullTracks = await spotifyGetFullTracks(sp, ids, market);
-
-  meta.counts.lastfm_selected = fullTracks.length;
-
-  return { tracks: fullTracks, meta };
+  return fullTracks;
 }
 
-// -------- sources fallback (playlists/liked/top/search) --------
+/* -------- sources fallback (playlists/liked/top/search) -------- */
 
-async function poolFromSources({ sp, recipe, market, excludedSet }) {
+async function poolFromSources({ sp, recipe, market, excludedSet, meta }) {
   const sources = getRecipeSources(recipe);
   const filters = getRecipeFilters(recipe);
-  const limits = getRecipeLimits(recipe);
 
   const trackCount = Number(recipe.track_count ?? 50);
   const maxCandidates = Math.max(
@@ -692,18 +901,34 @@ async function poolFromSources({ sp, recipe, market, excludedSet }) {
 
   if (sources.top_tracks?.enabled) {
     const tr = sources.top_tracks?.time_range || "short_term";
-    const got = await fetchTopTracks(sp, tr, Math.floor(maxCandidates / 2));
+    const lim = sources.top_tracks?.limit ?? 50;
+    const got = await fetchTopTracks(
+      sp,
+      tr,
+      Math.floor(maxCandidates / 2),
+      lim,
+    );
     raw.push(...got);
   }
 
   if (raw.length === 0) {
+    meta?.notes?.push("sources_empty_using_default_pool");
     const liked = await fetchLikedTracks(sp, Math.floor(maxCandidates / 2));
     const top = await fetchTopTracks(
       sp,
       "short_term",
       Math.floor(maxCandidates / 2),
+      50,
     );
     raw.push(...liked, ...top);
+  }
+
+  // tempo enrichment if needed
+  try {
+    const enr = await enrichTempoIfNeeded(sp, raw, filters);
+    raw.splice(0, raw.length, ...(enr.tracks || raw));
+  } catch {
+    meta?.notes?.push("tempo_enrich_failed_sources");
   }
 
   let candidates = applyFiltersAndDedup(raw, {
@@ -714,11 +939,10 @@ async function poolFromSources({ sp, recipe, market, excludedSet }) {
 
   shuffleInPlace(candidates);
 
-  const selected = selectTracks(candidates, trackCount, limits.max_per_artist);
-  return selected;
+  return candidates.slice(0, Math.max(trackCount * 10, 600));
 }
 
-// -------- public API --------
+/* -------- public API -------- */
 
 async function generateTracksWithMeta({ sp, recipe, market, excludedSet }) {
   const need = Number(recipe.track_count ?? 50);
@@ -727,25 +951,44 @@ async function generateTracksWithMeta({ sp, recipe, market, excludedSet }) {
     need,
     provider: "sources",
     used_provider: "sources",
-    counts: { lastfm_selected: 0, fallback_selected: 0 },
+    counts: { lastfm_selected: 0, reco_selected: 0, sources_selected: 0 },
     notes: [],
   };
 
   const filters = getRecipeFilters(recipe);
   const limits = getRecipeLimits(recipe);
   const disc = getDiscovery(recipe);
+  const rcfg = getRecommendationsCfg(recipe);
 
-  // 1) Try Last.fm discovery first if enabled
+  const state = createDiversityState([]);
+
+  // 1) Discovery (Last.fm) first (if enabled)
   if (disc.enabled) {
-    const dres = await discoverWithLastFm({ sp, market, excludedSet, recipe });
+    meta.provider = "lastfm";
 
-    meta.provider = dres.meta.provider;
-    meta.used_provider = dres.meta.used_provider;
-    meta.notes.push(...(dres.meta.notes || []));
+    let discovered = [];
+    try {
+      discovered = await discoverWithLastFm({
+        sp,
+        market,
+        excludedSet,
+        recipe,
+        meta,
+      });
+    } catch (e) {
+      meta.notes.push("lastfm_discovery_failed");
+      discovered = [];
+    }
 
-    let discovered = dres.tracks || [];
+    // tempo enrichment if needed
+    try {
+      const enr = await enrichTempoIfNeeded(sp, discovered, filters);
+      discovered = enr.tracks || discovered;
+    } catch {
+      meta.notes.push("tempo_enrich_failed_lastfm");
+    }
 
-    // Apply filters/dedup/excluded + popularity shaping for discovery
+    // apply filters (including popularity shaping for discovery)
     discovered = applyFiltersAndDedup(discovered, {
       excludedSet: excludedSet || new Set(),
       filters,
@@ -755,44 +998,88 @@ async function generateTracksWithMeta({ sp, recipe, market, excludedSet }) {
       },
     });
 
-    // Strategy tweak: for recent_albums keep order more, for deep_cuts shuffle more
     if (disc.strategy === "deep_cuts") shuffleInPlace(discovered);
 
-    // Apply per-artist limit selection from discovery first
-    const picked = selectTracks(discovered, need, limits.max_per_artist);
-    meta.counts.lastfm_selected = picked.length;
+    const before = state.chosen.length;
+    takeFromCandidates(state, discovered, need, limits);
+    const pickedNow = state.chosen.length - before;
 
-    if (picked.length >= need) {
+    meta.counts.lastfm_selected = pickedNow;
+
+    if (state.chosen.length >= need) {
       meta.used_provider = "lastfm";
-      return { tracks: picked.slice(0, need), meta };
+      return { tracks: state.chosen.slice(0, need), meta };
     }
-
-    // Not enough -> fill from sources
-    const remainingNeed = need - picked.length;
-    meta.notes.push("fill_from_sources");
-
-    const fallback = await poolFromSources({
-      sp,
-      recipe,
-      market,
-      excludedSet: new Set([
-        ...(excludedSet || []),
-        ...picked.map((t) => t.id),
-      ]),
-    });
-
-    const add = fallback.slice(0, remainingNeed);
-    meta.counts.fallback_selected = add.length;
-
-    meta.used_provider = "mixed";
-    return { tracks: [...picked, ...add].slice(0, need), meta };
+  } else {
+    meta.provider = "sources";
   }
 
-  // 2) Sources only
-  const tracks = await poolFromSources({ sp, recipe, market, excludedSet });
-  meta.used_provider = "sources";
-  meta.counts.fallback_selected = tracks.length;
-  return { tracks: tracks.slice(0, need), meta };
+  // 2) Fill from Spotify Recommendations (if enabled)
+  const remainingAfterDiscovery = need - state.chosen.length;
+  if (remainingAfterDiscovery > 0 && rcfg.enabled) {
+    meta.notes.push("fill_from_recommendations");
+
+    let recoPool = [];
+    try {
+      recoPool = await poolFromRecommendations({
+        sp,
+        recipe,
+        market,
+        excludedSet: new Set([
+          ...(excludedSet || []),
+          ...state.chosen.map((t) => t.id),
+        ]),
+        meta,
+      });
+    } catch {
+      meta.notes.push("recommendations_failed");
+      recoPool = [];
+    }
+
+    const before = state.chosen.length;
+    takeFromCandidates(state, recoPool, need, limits);
+    meta.counts.reco_selected = state.chosen.length - before;
+
+    if (state.chosen.length >= need) {
+      meta.used_provider = disc.enabled ? "mixed" : "recommendations";
+      return { tracks: state.chosen.slice(0, need), meta };
+    }
+  }
+
+  // 3) Fill from sources fallback
+  const remaining = need - state.chosen.length;
+  if (remaining > 0) {
+    meta.notes.push("fill_from_sources");
+
+    let srcPool = [];
+    try {
+      srcPool = await poolFromSources({
+        sp,
+        recipe,
+        market,
+        excludedSet: new Set([
+          ...(excludedSet || []),
+          ...state.chosen.map((t) => t.id),
+        ]),
+        meta,
+      });
+    } catch {
+      meta.notes.push("sources_failed");
+      srcPool = [];
+    }
+
+    const before = state.chosen.length;
+    takeFromCandidates(state, srcPool, need, limits);
+    meta.counts.sources_selected = state.chosen.length - before;
+  }
+
+  if (disc.enabled && meta.counts.lastfm_selected > 0)
+    meta.used_provider = "mixed";
+  else if (rcfg.enabled && meta.counts.reco_selected > 0)
+    meta.used_provider = "recommendations";
+  else meta.used_provider = "sources";
+
+  return { tracks: state.chosen.slice(0, need), meta };
 }
 
 async function replacePlaylistItems({ sp, playlistId, trackUris }) {

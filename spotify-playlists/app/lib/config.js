@@ -2,7 +2,7 @@ const fs = require("fs");
 const path = require("path");
 
 const DATA_DIR = process.env.DATA_DIR || "/data";
-const OPTIONS_PATH = path.join(DATA_DIR, "options.json"); // HA Supervisor writes this
+const OPTIONS_PATH = path.join(DATA_DIR, "options.json"); // HA Supervisor writes this (optional locally)
 const CONFIG_PATH = path.join(DATA_DIR, "config.json");
 
 function readJsonSafe(p, fallback) {
@@ -14,52 +14,234 @@ function readJsonSafe(p, fallback) {
   }
 }
 
+function toNumOr(v, fallback) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function toBoolOr(v, fallback) {
+  if (v === true || v === false) return v;
+  if (v === "true" || v === "1" || v === 1) return true;
+  if (v === "false" || v === "0" || v === 0) return false;
+  return fallback;
+}
+
+function toStrOr(v, fallback) {
+  if (v === null || v === undefined) return fallback;
+  return String(v);
+}
+
+function normalizeRecipe(recipe) {
+  const r = recipe && typeof recipe === "object" ? recipe : {};
+
+  if (!r.id) r.id = `r_${Math.random().toString(36).slice(2, 10)}`;
+  if (!r.name) r.name = "Recipe";
+  if (!r.target_playlist_id) r.target_playlist_id = "";
+  r.track_count = toNumOr(r.track_count, 50);
+
+  // ---- discovery ----
+  if (!r.discovery || typeof r.discovery !== "object") r.discovery = {};
+  const d = r.discovery;
+
+  d.enabled = toBoolOr(d.enabled, false);
+
+  // Back-compat: UI uses nested seed_top_artists; generator also supports flat keys.
+  // Normalize so BOTH exist.
+  if (!d.seed_top_artists || typeof d.seed_top_artists !== "object") {
+    d.seed_top_artists = { time_range: "short_term", limit: 10 };
+  } else {
+    d.seed_top_artists.time_range = toStrOr(
+      d.seed_top_artists.time_range,
+      "short_term",
+    );
+    d.seed_top_artists.limit = toNumOr(d.seed_top_artists.limit, 10);
+  }
+
+  // Provide flat aliases (generator-friendly)
+  if (d.seed_top_artists_time_range == null) {
+    d.seed_top_artists_time_range = d.seed_top_artists.time_range;
+  } else {
+    d.seed_top_artists_time_range = toStrOr(
+      d.seed_top_artists_time_range,
+      "short_term",
+    );
+  }
+
+  if (d.seed_top_artists_limit == null) {
+    d.seed_top_artists_limit = d.seed_top_artists.limit;
+  } else {
+    d.seed_top_artists_limit = toNumOr(d.seed_top_artists_limit, 10);
+  }
+
+  d.similar_per_seed = toNumOr(d.similar_per_seed, 50);
+  d.take_artists = toNumOr(d.take_artists, 150);
+  d.tracks_per_artist = toNumOr(d.tracks_per_artist, 2);
+
+  // Strategy/provider: keep what user has, but ensure defined
+  d.strategy = toStrOr(d.strategy ?? d.provider ?? "deep_cuts", "deep_cuts");
+
+  // additional discovery knobs (used by generator)
+  if (d.include_seed_artists == null) d.include_seed_artists = false;
+  if (d.albums_per_artist == null) d.albums_per_artist = 2;
+  if (d.albums_limit_fetch == null) d.albums_limit_fetch = 8;
+  if (d.max_track_popularity == null) d.max_track_popularity = 60;
+  if (d.min_track_popularity == null) d.min_track_popularity = null;
+  if (d.exclude_saved_tracks == null) d.exclude_saved_tracks = true;
+  if (d.search_limit_per_track == null) d.search_limit_per_track = 5;
+
+  // ---- sources ----
+  if (!r.sources || typeof r.sources !== "object") r.sources = {};
+  const s = r.sources;
+  if (!Array.isArray(s.search)) s.search = [];
+  if (!Array.isArray(s.playlists)) s.playlists = [];
+  s.liked = toBoolOr(s.liked, false);
+  s.max_candidates = toNumOr(s.max_candidates, 1500);
+
+  if (!s.top_tracks || typeof s.top_tracks !== "object") {
+    s.top_tracks = { enabled: true, time_range: "short_term", limit: 50 };
+  } else {
+    s.top_tracks.enabled = toBoolOr(s.top_tracks.enabled, true);
+    s.top_tracks.time_range = toStrOr(s.top_tracks.time_range, "short_term");
+    s.top_tracks.limit = toNumOr(s.top_tracks.limit, 50);
+  }
+
+  // ---- filters ----
+  if (!r.filters || typeof r.filters !== "object") r.filters = {};
+  const f = r.filters;
+  f.explicit = toStrOr(f.explicit, "allow"); // allow|exclude|only
+  f.year_min =
+    f.year_min === "" || f.year_min === undefined
+      ? null
+      : f.year_min === null
+        ? null
+        : toNumOr(f.year_min, null);
+  f.year_max =
+    f.year_max === "" || f.year_max === undefined
+      ? null
+      : f.year_max === null
+        ? null
+        : toNumOr(f.year_max, null);
+  // optional tempo fields (generator supports)
+  if (f.tempo_min === undefined) f.tempo_min = null;
+  if (f.tempo_max === undefined) f.tempo_max = null;
+
+  // ---- diversity/limits (back-compat) ----
+  // Some configs had `limits`, some `diversity`. Keep both but ensure `diversity` is present.
+  if (!r.diversity || typeof r.diversity !== "object") r.diversity = {};
+  const dv = r.diversity;
+  const legacy = r.limits && typeof r.limits === "object" ? r.limits : {};
+
+  // Prefer diversity.* if present, else fallback to limits.*
+  if (dv.max_per_artist == null && legacy.max_per_artist != null)
+    dv.max_per_artist = legacy.max_per_artist;
+  if (dv.max_per_album == null && legacy.max_per_album != null)
+    dv.max_per_album = legacy.max_per_album;
+  if (
+    dv.avoid_same_artist_in_row == null &&
+    legacy.avoid_same_artist_in_row != null
+  )
+    dv.avoid_same_artist_in_row = legacy.avoid_same_artist_in_row;
+
+  // normalize types
+  dv.max_per_artist =
+    dv.max_per_artist === "" ||
+    dv.max_per_artist === undefined ||
+    dv.max_per_artist === null
+      ? null
+      : toNumOr(dv.max_per_artist, null);
+  dv.max_per_album =
+    dv.max_per_album === "" ||
+    dv.max_per_album === undefined ||
+    dv.max_per_album === null
+      ? null
+      : toNumOr(dv.max_per_album, null);
+  dv.avoid_same_artist_in_row = toBoolOr(dv.avoid_same_artist_in_row, false);
+
+  // ---- recommendations ----
+  if (!r.recommendations || typeof r.recommendations !== "object")
+    r.recommendations = {};
+  const rec = r.recommendations;
+  rec.enabled = toBoolOr(rec.enabled, false);
+  if (!Array.isArray(rec.seed_genres)) rec.seed_genres = [];
+
+  // ---- advanced ----
+  if (!r.advanced || typeof r.advanced !== "object") r.advanced = {};
+  const a = r.advanced;
+  a.recommendation_attempts = toNumOr(a.recommendation_attempts, 10);
+
+  return r;
+}
+
+function normalizeConfig(cfg) {
+  const c = cfg && typeof cfg === "object" ? cfg : {};
+  if (!Array.isArray(c.recipes)) c.recipes = [];
+  c.recipes = c.recipes.map(normalizeRecipe);
+  return c;
+}
+
 function getOptions() {
-  // Prefer /data/options.json (supervisor), fallback env
+  // Prefer /data/options.json (supervisor), fallback env (local dev)
   const opts = readJsonSafe(OPTIONS_PATH, {});
+
   return {
-    port: Number(opts.port ?? process.env.PORT ?? 7790),
-    base_url: String(
-      opts.base_url ??
-        process.env.BASE_URL ??
-        "http://homeassistant.local:7790",
+    port: toNumOr(opts.port ?? process.env.PORT, 7790),
+    base_url: toStrOr(
+      opts.base_url ?? process.env.BASE_URL,
+      "http://homeassistant.local:7790",
     ),
-    api_token: String(opts.api_token ?? process.env.API_TOKEN ?? ""),
+    api_token: toStrOr(opts.api_token ?? process.env.API_TOKEN, ""),
 
-    spotify_client_id: String(
-      opts.spotify_client_id ?? process.env.SPOTIFY_CLIENT_ID ?? "",
+    spotify_client_id: toStrOr(
+      opts.spotify_client_id ?? process.env.SPOTIFY_CLIENT_ID,
+      "",
     ),
-    spotify_client_secret: String(
-      opts.spotify_client_secret ?? process.env.SPOTIFY_CLIENT_SECRET ?? "",
+    spotify_client_secret: toStrOr(
+      opts.spotify_client_secret ?? process.env.SPOTIFY_CLIENT_SECRET,
+      "",
     ),
-    spotify_redirect_uri: String(
-      opts.spotify_redirect_uri ?? process.env.SPOTIFY_REDIRECT_URI ?? "",
+    spotify_redirect_uri: toStrOr(
+      opts.spotify_redirect_uri ?? process.env.SPOTIFY_REDIRECT_URI,
+      "",
     ),
-    market: String(opts.market ?? process.env.SPOTIFY_MARKET ?? "CZ"),
+    market: toStrOr(opts.market ?? process.env.SPOTIFY_MARKET, "CZ"),
 
-    // NEW:
-    lastfm_api_key: String(
-      opts.lastfm_api_key ?? process.env.LASTFM_API_KEY ?? "",
+    lastfm_api_key: toStrOr(
+      opts.lastfm_api_key ?? process.env.LASTFM_API_KEY,
+      "",
     ),
 
-    log_level: String(opts.log_level ?? process.env.LOG_LEVEL ?? "info"),
+    log_level: toStrOr(opts.log_level ?? process.env.LOG_LEVEL, "info"),
+
     history: {
-      scope: String(opts.history?.scope ?? "per_recipe"),
-      mode: String(opts.history?.mode ?? "rolling_days"),
-      rolling_days: Number(opts.history?.rolling_days ?? 90),
-      lifetime_cap: Number(opts.history?.lifetime_cap ?? 20000),
+      scope: toStrOr(
+        opts.history?.scope ?? process.env.HISTORY_SCOPE,
+        "per_recipe",
+      ),
+      mode: toStrOr(
+        opts.history?.mode ?? process.env.HISTORY_MODE,
+        "rolling_days",
+      ),
+      rolling_days: toNumOr(
+        opts.history?.rolling_days ?? process.env.HISTORY_ROLLING_DAYS,
+        90,
+      ),
+      lifetime_cap: toNumOr(
+        opts.history?.lifetime_cap ?? process.env.HISTORY_LIFETIME_CAP,
+        20000,
+      ),
     },
   };
 }
 
 function loadRecipesConfig() {
-  const cfg = readJsonSafe(CONFIG_PATH, { recipes: [] });
-  if (!cfg.recipes) cfg.recipes = [];
-  return cfg;
+  const raw = readJsonSafe(CONFIG_PATH, { recipes: [] });
+  return normalizeConfig(raw);
 }
 
 function saveRecipesConfig(cfg) {
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2), "utf8");
+  // Save as-is, but ensure structure is valid (so we don't write garbage)
+  const normalized = normalizeConfig(cfg);
+  fs.writeFileSync(CONFIG_PATH, JSON.stringify(normalized, null, 2), "utf8");
 }
 
 module.exports = {

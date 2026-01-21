@@ -1,3 +1,4 @@
+<!-- app/public/index.html -->
 <!doctype html>
 <html lang="cs">
   <head>
@@ -58,6 +59,12 @@
             Tip: pokud dostaneš <code>429</code>, je to rate limit. Server má
             retry/backoff a logy ukážou, co se děje.
           </div>
+
+          <div class="small muted" style="margin-top: 10px">
+            “Pokaždé jiné skladby” řeší historie + (pokud je zapnuto v backendu)
+            i kontrola obsahu cílového playlistu. Pokud ti to opakuje, koukni do
+            logů na <code>excluded=...</code>.
+          </div>
         </div>
 
         <!-- RIGHT -->
@@ -71,7 +78,6 @@
             </div>
 
             <div class="btns">
-              <!-- oprav řádek s btnAdd -->
               <button id="btnAdd" class="primary">Add</button>
               <button id="btnSaveAll" class="primary">Save all</button>
               <button id="btnLoad">Load</button>
@@ -83,10 +89,49 @@
           <!-- accordion list -->
           <div id="recipeList" class="recipeAccordion"></div>
 
-          <div class="small info muted" style="margin-top: 10px">
-            Last.fm discovery: nastav v recipe
-            <code>discovery.enabled=true</code> a doplň
-            <code>LASTFM_API_KEY</code> v prostředí / add-on konfiguraci.
+          <div class="hr"></div>
+
+          <div class="small muted">
+            <div style="margin-bottom: 6px; font-weight: 700; opacity: 0.9">
+              Poznámky k nastavení
+            </div>
+
+            <div style="line-height: 1.6">
+              <div>
+                <strong>Discovery (Last.fm):</strong> vyžaduje
+                <code>LASTFM_API_KEY</code>. Strategie:
+                <code>deep_cuts</code> (album tracky),
+                <code>recent_albums</code> (novější releasy),
+                <code>lastfm_toptracks</code> (top tracky přes vyhledávání).
+              </div>
+
+              <div style="margin-top: 6px">
+                <strong>Recommendations (Spotify):</strong> zapni
+                <code>recommendations.enabled</code> a nastav
+                <code>seed genres</code> (např. <code>rock, techno</code>). To
+                se použije na doplnění do počtu, když discovery nestačí.
+              </div>
+
+              <div style="margin-top: 6px">
+                <strong>Tempo filtry:</strong>
+                <code>tempo_min/tempo_max</code> funguje hlavně pro Spotify
+                Recommendations (protože se filtruje podle BPM přes API). U
+                discovery/sources může být tempo někdy “neznámé” (záleží na tom,
+                co je k dispozici).
+              </div>
+
+              <div style="margin-top: 6px">
+                <strong>Diversity:</strong>
+                <code>max_per_artist</code>, <code>max_per_album</code> a
+                <code>avoid_same_artist_in_row</code> pomáhá, aby playlist nebyl
+                “monotónní”.
+              </div>
+
+              <div style="margin-top: 6px">
+                <strong>Top tracks / Liked / Playlists / Search:</strong> slouží
+                jako fallback pool, když není dost kandidátů z discovery/reco.
+              </div>
+            </div>
           </div>
         </div>
       </div>

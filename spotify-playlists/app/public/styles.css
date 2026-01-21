@@ -8,6 +8,9 @@
   --ok: rgba(60, 255, 180, 0.18);
   --err: rgba(255, 80, 100, 0.18);
   --warn: rgba(255, 190, 80, 0.18);
+
+  --focus: rgba(70, 120, 255, 0.5);
+  --focus2: rgba(70, 120, 255, 0.25);
 }
 
 * {
@@ -366,12 +369,20 @@ code {
 /* -------- editor fields -------- */
 
 .section-title {
-  margin: 12px 0 8px;
+  margin: 14px 0 8px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
   font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: rgba(210, 230, 255, 0.85);
+}
+
+.section-title:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+  margin-top: 6px;
 }
 
 .formgrid {
@@ -408,7 +419,8 @@ code {
 }
 
 input,
-select {
+select,
+textarea {
   background: rgba(0, 0, 0, 0.25);
   color: #fff;
   border: 1px solid rgba(255, 255, 255, 0.15);
@@ -418,7 +430,49 @@ select {
   outline: none;
 }
 
+textarea {
+  min-height: 90px;
+  resize: vertical;
+}
+
+input:hover,
+select:hover,
+textarea:hover {
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
 input:focus,
-select:focus {
-  border-color: rgba(70, 120, 255, 0.4);
+select:focus,
+textarea:focus {
+  border-color: var(--focus);
+  box-shadow: 0 0 0 3px var(--focus2);
+}
+
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.monoInput {
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  letter-spacing: 0.01em;
+}
+
+/* mobile: button rows less chaotic */
+@media (max-width: 520px) {
+  .btns {
+    gap: 8px;
+  }
+
+  button {
+    width: 100%;
+  }
+
+  .rhRight {
+    justify-content: flex-start;
+  }
 }

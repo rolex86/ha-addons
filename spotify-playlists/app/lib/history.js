@@ -15,9 +15,13 @@ function openDb() {
         used_at INTEGER NOT NULL
       )
     `);
+
+    // Fast lookups by scope + time
     db.run(
       `CREATE INDEX IF NOT EXISTS idx_history_scope_usedat ON history(scope_key, used_at)`,
     );
+
+    // Uniqueness for UPSERT
     db.run(
       `CREATE UNIQUE INDEX IF NOT EXISTS u_history_scope_track ON history(scope_key, track_id)`,
     );
@@ -53,21 +57,45 @@ async function getExcludedSet(
 ) {
   const key = scopeKey({ historyScope, recipeId });
 
-  if (mode === "rolling_days") {
-    const cutoff = Date.now() - rollingDays * 24 * 60 * 60 * 1000;
+  const m = String(mode || "rolling_days");
+  const rd = Number.isFinite(Number(rollingDays)) ? Number(rollingDays) : 90;
+  const cap = Number.isFinite(Number(lifetimeCap))
+    ? Number(lifetimeCap)
+    : 20000;
+
+  if (m === "rolling_days") {
+    const cutoff = Date.now() - rd * 24 * 60 * 60 * 1000;
     const rows = await dbAll(
       db,
-      `SELECT track_id FROM history WHERE scope_key=? AND used_at>=?`,
+      `SELECT track_id
+       FROM history
+       WHERE scope_key=? AND used_at>=?`,
       [key, cutoff],
     );
     return new Set(rows.map((r) => r.track_id));
   }
 
-  // lifetime_capped: keep last N entries (by used_at), exclude all of them
+  // Optional extension (doesn't break anything): exclude everything ever used
+  if (m === "lifetime_all") {
+    const rows = await dbAll(
+      db,
+      `SELECT track_id
+       FROM history
+       WHERE scope_key=?`,
+      [key],
+    );
+    return new Set(rows.map((r) => r.track_id));
+  }
+
+  // lifetime_capped: keep last N entries (by used_at DESC, id DESC), exclude all of them
   const rows = await dbAll(
     db,
-    `SELECT track_id FROM history WHERE scope_key=? ORDER BY used_at DESC LIMIT ?`,
-    [key, lifetimeCap],
+    `SELECT track_id
+     FROM history
+     WHERE scope_key=?
+     ORDER BY used_at DESC, id DESC
+     LIMIT ?`,
+    [key, cap],
   );
   return new Set(rows.map((r) => r.track_id));
 }
@@ -75,15 +103,31 @@ async function getExcludedSet(
 async function recordUsed(db, { historyScope, recipeId, trackIds }) {
   const key = scopeKey({ historyScope, recipeId });
   const now = Date.now();
-  // Insert ignore duplicates
-  for (const tid of trackIds) {
-    try {
+  const ids = Array.isArray(trackIds) ? trackIds.filter(Boolean) : [];
+  if (!ids.length) return;
+
+  // Transaction = way faster than N separate writes
+  await dbRun(db, "BEGIN");
+  try {
+    for (const tid of ids) {
+      // UPSERT: if already exists, update used_at to "now"
       await dbRun(
         db,
-        `INSERT OR IGNORE INTO history(scope_key, track_id, used_at) VALUES(?,?,?)`,
-        [key, tid, now],
+        `
+        INSERT INTO history(scope_key, track_id, used_at)
+        VALUES(?,?,?)
+        ON CONFLICT(scope_key, track_id)
+        DO UPDATE SET used_at=excluded.used_at
+        `,
+        [key, String(tid), now],
       );
+    }
+    await dbRun(db, "COMMIT");
+  } catch (e) {
+    try {
+      await dbRun(db, "ROLLBACK");
     } catch (_) {}
+    throw e;
   }
 }
 
@@ -93,8 +137,14 @@ async function prune(
 ) {
   const key = scopeKey({ historyScope, recipeId });
 
-  if (mode === "rolling_days") {
-    const cutoff = Date.now() - rollingDays * 24 * 60 * 60 * 1000;
+  const m = String(mode || "rolling_days");
+  const rd = Number.isFinite(Number(rollingDays)) ? Number(rollingDays) : 90;
+  const cap = Number.isFinite(Number(lifetimeCap))
+    ? Number(lifetimeCap)
+    : 20000;
+
+  if (m === "rolling_days") {
+    const cutoff = Date.now() - rd * 24 * 60 * 60 * 1000;
     await dbRun(db, `DELETE FROM history WHERE scope_key=? AND used_at<?`, [
       key,
       cutoff,
@@ -102,19 +152,39 @@ async function prune(
     return;
   }
 
-  // lifetime_capped: keep last N by used_at
-  // delete all older than the Nth newest
+  // lifetime_all => no pruning
+  if (m === "lifetime_all") return;
+
+  // lifetime_capped: keep last N by (used_at DESC, id DESC)
+  // delete everything older than the Nth newest, and handle same-timestamp ties via id
   const rows = await dbAll(
     db,
-    `SELECT used_at FROM history WHERE scope_key=? ORDER BY used_at DESC LIMIT 1 OFFSET ?`,
-    [key, lifetimeCap - 1],
+    `
+    SELECT id, used_at
+    FROM history
+    WHERE scope_key=?
+    ORDER BY used_at DESC, id DESC
+    LIMIT 1 OFFSET ?
+    `,
+    [key, cap - 1],
   );
-  if (rows.length === 0) return;
-  const threshold = rows[0].used_at;
-  await dbRun(db, `DELETE FROM history WHERE scope_key=? AND used_at<?`, [
-    key,
-    threshold,
-  ]);
+  if (!rows.length) return;
+
+  const thrId = rows[0].id;
+  const thrUsedAt = rows[0].used_at;
+
+  await dbRun(
+    db,
+    `
+    DELETE FROM history
+    WHERE scope_key=?
+      AND (
+        used_at < ?
+        OR (used_at = ? AND id < ?)
+      )
+    `,
+    [key, thrUsedAt, thrUsedAt, thrId],
+  );
 }
 
 module.exports = {

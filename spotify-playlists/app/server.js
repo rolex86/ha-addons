@@ -102,6 +102,80 @@ function requireToken(req, res, next) {
   next();
 }
 
+/* ---------------- Spotify retry helper (server-side) ---------------- */
+
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+async function spRetry(fn, { maxRetries = 6, baseDelayMs = 400 } = {}) {
+  let attempt = 0;
+
+  while (true) {
+    try {
+      return await fn();
+    } catch (e) {
+      const status = e?.statusCode || e?.status;
+      const headers = e?.headers || e?.response?.headers;
+      const ra = headers?.["retry-after"] || headers?.["Retry-After"];
+      const retryAfterMs = ra ? Number(ra) * 1000 : null;
+
+      const isRetryable =
+        status === 429 || status === 502 || status === 503 || status === 504;
+
+      if (!isRetryable || attempt >= maxRetries) throw e;
+
+      const backoff = Math.round(baseDelayMs * Math.pow(2, attempt));
+      const waitMs = retryAfterMs ?? backoff;
+
+      await sleep(waitMs);
+      attempt += 1;
+    }
+  }
+}
+
+// Fetch current track IDs from a target playlist (to avoid repeats even after DB reset)
+async function fetchPlaylistTrackIdSet(
+  sp,
+  playlistId,
+  { maxItems = 10000 } = {},
+) {
+  const pid = String(playlistId || "").trim();
+  const set = new Set();
+
+  if (!pid) return set;
+
+  let offset = 0;
+  const limit = 100;
+
+  while (set.size < maxItems) {
+    const resp = await spRetry(() =>
+      sp.getPlaylistTracks(pid, {
+        limit,
+        offset,
+        fields: "items(track(id)),next",
+      }),
+    );
+
+    const items = resp.body?.items || [];
+    for (const it of items) {
+      const id = it?.track?.id || null;
+      if (id) set.add(id);
+      if (set.size >= maxItems) break;
+    }
+
+    if (!resp.body?.next) break;
+    offset += limit;
+
+    // hard safety
+    if (offset > maxItems + 500) break;
+  }
+
+  return set;
+}
+
+/* ---------------- endpoints ---------------- */
+
 app.get("/api/status", async (req, res) => {
   const opts = getOptions();
   const tokens = loadTokens();
@@ -282,6 +356,12 @@ app.get("/api/auth/callback", async (req, res) => {
 // Run (triggered by HA automation / UI)
 app.post("/api/run", requireToken, async (req, res) => {
   const opts = getOptions();
+
+  // Map addon options -> env (so generator reads it consistently)
+  if (opts.lastfm_api_key && !process.env.LASTFM_API_KEY) {
+    process.env.LASTFM_API_KEY = String(opts.lastfm_api_key);
+  }
+
   const sp = createClient();
 
   if (runInProgress) {
@@ -313,6 +393,7 @@ app.post("/api/run", requireToken, async (req, res) => {
         summary: null,
         error: "not_authorized",
       };
+
       runState.running = false;
       runState.finished_at = Date.now();
       runState.ok = false;
@@ -340,9 +421,10 @@ app.post("/api/run", requireToken, async (req, res) => {
         continue;
       }
 
-      logRun("info", `Recipe ${recipe.id}: generating tracks...`);
+      logRun("info", `Recipe ${recipe.id}: preparing excluded set...`);
 
-      const excludedSet = await getExcludedSet(db, {
+      // 1) history-based exclude
+      const historyExcluded = await getExcludedSet(db, {
         historyScope: opts.history.scope,
         recipeId: recipe.id,
         mode: opts.history.mode,
@@ -350,7 +432,22 @@ app.post("/api/run", requireToken, async (req, res) => {
         lifetimeCap: opts.history.lifetime_cap,
       });
 
-      logRun("debug", `Recipe ${recipe.id}: excluded=${excludedSet.size}`);
+      // 2) playlist-content exclude (robust no-repeat even after DB reset)
+      const playlistExcluded = await fetchPlaylistTrackIdSet(
+        sp,
+        recipe.target_playlist_id,
+        { maxItems: 10000 },
+      );
+
+      // union
+      const excludedSet = new Set([...historyExcluded, ...playlistExcluded]);
+
+      logRun(
+        "debug",
+        `Recipe ${recipe.id}: excluded history=${historyExcluded.size} playlist=${playlistExcluded.size} total=${excludedSet.size}`,
+      );
+
+      logRun("info", `Recipe ${recipe.id}: generating tracks...`);
 
       const { tracks, meta } = await generateTracksWithMeta({
         sp,
@@ -363,7 +460,7 @@ app.post("/api/run", requireToken, async (req, res) => {
 
       logRun(
         "info",
-        `Recipe ${recipe.id}: generated=${tracks.length} provider=${meta.used_provider} lastfm=${meta.counts?.lastfm_selected || 0} fallback=${meta.counts?.fallback_selected || 0}`,
+        `Recipe ${recipe.id}: generated=${tracks.length} provider=${meta.used_provider} lastfm=${meta.counts?.lastfm_selected || 0} reco=${meta.counts?.reco_selected || 0} sources=${meta.counts?.sources_selected || 0}`,
       );
       if (meta?.notes?.length)
         logRun("debug", `Recipe ${recipe.id}: notes=${meta.notes.join(",")}`);

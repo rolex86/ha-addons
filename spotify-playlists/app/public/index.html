@@ -65,7 +65,54 @@
             i kontrola obsahu cílového playlistu. Pokud ti to opakuje, koukni do
             logů na <code>excluded=...</code>.
           </div>
-        </div>
+
+<div class="small muted" style="margin-top: 10px">
+  <div style="margin-bottom: 6px; font-weight: 700; opacity: 0.9">
+    Jak projít Spotify autorizací (INVALID_CLIENT / Insecure redirect URI)
+  </div>
+
+  <div style="line-height: 1.6">
+    <div>
+      Spotify typicky odmítá redirect na LAN IP (např.
+      <code>http://192.168.x.x:7790</code>) jako „insecure“. Bezpečný workaround je
+      použít loopback <code>127.0.0.1</code> + SSH tunel.
+    </div>
+
+    <div style="margin-top: 6px">
+      <strong>1) Nastav v add-on konfiguraci:</strong><br />
+      <code>base_url</code> = <code>http://127.0.0.1:7790</code><br />
+      <code>spotify_redirect_uri</code> =
+      <code>http://127.0.0.1:7790/api/auth/callback</code>
+      (callback endpoint je <code>/api/auth/callback</code>).
+    </div>
+
+    <div style="margin-top: 6px">
+      <strong>2) Povol port forwarding v SSH add-onu:</strong><br />
+      v SSH add-on nastavení zapni <code>allow_tcp_forwarding</code>.
+    </div>
+
+    <div style="margin-top: 6px">
+      <strong>3) Z PC si udělej tunel na HA a nech ho běžet:</strong><br />
+      <code>ssh -L 7790:127.0.0.1:7790 hassio@192.168.0.109</code><br />
+      (IP a port uprav podle sebe)
+    </div>
+
+    <div style="margin-top: 6px">
+      <strong>4) Autorizuj přes loopback URL:</strong><br />
+      otevři v prohlížeči <code>http://127.0.0.1:7790</code> → klikni
+      <strong>Authorize Spotify</strong> → potvrď souhlas. Callback se vrátí přes tunel
+      na HA.
+    </div>
+
+    <div style="margin-top: 6px">
+      <strong>Hotovo:</strong> refresh token se ukládá do <code>/data/tokens.json</code>,
+      takže autorizaci obvykle opakuješ jen po přeinstalaci add-onu / smazání
+      <code>/data</code> / odpojení aplikace ve Spotify.
+    </div>
+  </div>
+</div>
+
+
 
         <!-- RIGHT -->
         <div class="card">

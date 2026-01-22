@@ -26,11 +26,11 @@ map:
 
 options:
   port: 7790
-  base_url: "http://homeassistant.local:7790"
+  base_url: "http://192.168.0.109:7790"
   api_token: ""
   spotify_client_id: ""
   spotify_client_secret: ""
-  spotify_redirect_uri: "http://homeassistant.local:7790/api/auth/callback"
+  spotify_redirect_uri: "http://192.168.0.109:7790/api/auth/callback"
   market: "CZ"
   lastfm_api_key: ""
   tastedive_api_key: ""

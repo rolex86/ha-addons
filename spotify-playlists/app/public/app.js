@@ -299,6 +299,109 @@ function helpFor(k) {
         `,
       );
 
+
+
+    case "discovery.use_tastedive":
+      return helpBlock(
+        "TasteDive similar artists",
+        `
+          <div>Alternativa / doplněk k Last.fm podobným interpretům (vyžaduje <code>tastedive_api_key</code> v add-on options).</div>
+          <div>Hodí se pro rozšíření poolu, když už Last.fm začíná docházet.</div>
+        `,
+      );
+
+    case "discovery.tastedive_limit":
+      return helpBlock(
+        "TasteDive limit",
+        `
+          <div>Kolik interpretů max vzít z TasteDive (přes všechny seed interprety).</div>
+          <div class="helpExample"><strong>Příklad:</strong> <code>50–200</code></div>
+        `,
+      );
+
+    case "discovery.use_audiodb_trending":
+      return helpBlock(
+        "TheAudioDB trending",
+        `
+          <div>Přidá chart/trending tracky z TheAudioDB jako další zdroj kandidátů (vyžaduje <code>audiodb_api_key</code>).</div>
+          <div>Vhodné pro “žebříčky” a pro rozšíření zásoby nových tracků.</div>
+        `,
+      );
+
+    case "discovery.audiodb_country":
+      return helpBlock(
+        "TheAudioDB country",
+        `
+          <div>2‑písmenný kód země pro trending (např. <code>us</code>, <code>gb</code>, <code>cz</code>). Když je prázdné, použije se market.</div>
+        `,
+      );
+
+    case "discovery.audiodb_limit":
+      return helpBlock(
+        "TheAudioDB limit",
+        `
+          <div>Kolik položek z trending vůbec zkusit namapovat na Spotify (Spotify search = pomalejší, tak drž rozumně).</div>
+          <div class="helpExample"><strong>Příklad:</strong> <code>20–50</code></div>
+        `,
+      );
+
+    case "discovery.audiodb_fill":
+      return helpBlock(
+        "TheAudioDB fill (volitelné)",
+        `
+          <div>Kolik tracků se má pokusit nacpat z TheAudioDB ještě před podobnými interprety.</div>
+          <div>Když necháš prázdné, použije se automaticky ~30% z track_count.</div>
+          <div class="helpExample"><strong>Příklad:</strong> <code>10</code></div>
+        `,
+      );
+
+    case "discovery.use_songkick_events":
+      return helpBlock(
+        "Songkick (upcoming concerts)",
+        `
+          <div>Přidá interprety z lokálních koncertů (Songkick) jako další zdroj pro discovery pool.</div>
+          <div>Vhodné na “žebříčky / co se hraje v okolí” a objevování něčeho mimo tvoje top artists.</div>
+          <div>Vyžaduje <code>songkick_api_key</code> v addon options.</div>
+        `,
+      );
+
+    case "discovery.songkick_location_query":
+      return helpBlock(
+        "Songkick location query",
+        `
+          <div>Textový dotaz na lokaci (město/oblast), ze kterého se vezme metro area ID.</div>
+          <div class="helpExample"><strong>Příklad:</strong> <code>Prague</code> / <code>Brno</code></div>
+          <div class="helpExample"><strong>Tip:</strong> Když vyplníš přímo <code>metro_area_id</code>, query se nepoužije.</div>
+        `,
+      );
+
+    case "discovery.songkick_metro_area_id":
+      return helpBlock(
+        "Songkick metro area id",
+        `
+          <div>Číselné ID metro area v Songkick. Když je vyplněné, použije se přednostně (nevolá se location search).</div>
+          <div class="helpExample"><strong>Tip:</strong> Když si nejsi jistý ID, vyplň <code>location_query</code> a addon si ho zkusí dohledat.</div>
+        `,
+      );
+
+    case "discovery.songkick_days_ahead":
+      return helpBlock(
+        "Songkick days ahead",
+        `
+          <div>Kolik dní dopředu brát koncerty do kalendáře.</div>
+          <div class="helpExample"><strong>Příklad:</strong> <code>30</code></div>
+        `,
+      );
+
+    case "discovery.songkick_take_artists":
+      return helpBlock(
+        "Songkick take artists",
+        `
+          <div>Kolik interpretů max vytáhnout ze Songkick eventů (unikátně).</div>
+          <div class="helpExample"><strong>Příklad:</strong> <code>50–150</code></div>
+        `,
+      );
+
     // Recommendations
     case "recommendations.enabled":
       return helpBlock(
@@ -437,6 +540,55 @@ function helpFor(k) {
         `,
       );
 
+    case "filters.genres_mode":
+      return helpBlock(
+        "Genre filtering mode",
+        `
+          <div>Filtruje podle žánrů interpretů (Spotify artist genres).</div>
+          <div>
+            <ul>
+              <li><code>ignore</code> = žánry se neřeší</li>
+              <li><code>include</code> = zůstanou jen tracky, které odpovídají include listu</li>
+              <li><code>exclude</code> = vyhodí tracky, které odpovídají exclude listu</li>
+              <li><code>include_exclude</code> = musí projít include a zároveň nesmí být v exclude</li>
+            </ul>
+          </div>
+        `,
+      );
+
+    case "filters.genres_include":
+      return helpBlock(
+        "Genres include",
+        `
+          <div>Seznam žánrů (comma). Match je “fuzzy” (např. <code>metal</code> chytí <code>swedish doom metal</code>).</div>
+          <div class="helpExample"><strong>Příklad:</strong> <code>techno, ambient, indie pop</code></div>
+        `,
+      );
+
+    case "filters.genres_exclude":
+      return helpBlock(
+        "Genres exclude",
+        `
+          <div>Seznam žánrů (comma), které se mají vyhodit.</div>
+          <div class="helpExample"><strong>Příklad:</strong> <code>death metal, hardstyle</code></div>
+        `,
+      );
+
+    case "history.scope":
+      return helpBlock(
+        "History scope (no-repeat)",
+        `
+          <div>Určuje, jestli se “už jednou zahrané” tracky filtrují globálně, nebo jen v rámci tohoto recipe.</div>
+          <div>
+            <ul>
+              <li><code>inherit</code> = použije addon options (<code>history.scope</code>)</li>
+              <li><code>per_recipe</code> = historie se vede zvlášť pro každý recipe</li>
+              <li><code>global</code> = jedna společná historie pro všechny recipe</li>
+            </ul>
+          </div>
+        `,
+      );
+
     // Diversity
     case "diversity.max_per_artist":
       return helpBlock(
@@ -491,8 +643,10 @@ function normalizeRecipe(r) {
   if (!r.filters || typeof r.filters !== "object") r.filters = {};
   if (!r.diversity || typeof r.diversity !== "object") r.diversity = {};
   if (!r.advanced || typeof r.advanced !== "object") r.advanced = {};
+  if (!r.history || typeof r.history !== "object") r.history = {};
   if (!r.recommendations || typeof r.recommendations !== "object")
     r.recommendations = {};
+
 
   const d = r.discovery;
 
@@ -539,6 +693,21 @@ function normalizeRecipe(r) {
   if (d.albums_limit_fetch == null) d.albums_limit_fetch = 8;
   if (d.search_limit_per_track == null) d.search_limit_per_track = 5;
 
+  // External discovery / charts (optional)
+  if (d.use_tastedive == null) d.use_tastedive = false;
+  if (d.tastedive_limit == null) d.tastedive_limit = 80;
+  if (d.use_audiodb_trending == null) d.use_audiodb_trending = false;
+  if (d.audiodb_country == null) d.audiodb_country = "";
+  if (d.audiodb_limit == null) d.audiodb_limit = 30;
+  if (d.audiodb_fill === undefined) d.audiodb_fill = null;
+
+  // Songkick events (optional)
+  if (d.use_songkick_events == null) d.use_songkick_events = false;
+  if (d.songkick_location_query == null) d.songkick_location_query = "";
+  if (d.songkick_metro_area_id == null) d.songkick_metro_area_id = "";
+  if (d.songkick_days_ahead == null) d.songkick_days_ahead = 30;
+  if (d.songkick_take_artists == null) d.songkick_take_artists = 60;
+
   // Recommendations defaults
   if (r.recommendations.enabled == null) r.recommendations.enabled = false;
   if (!Array.isArray(r.recommendations.seed_genres))
@@ -550,6 +719,14 @@ function normalizeRecipe(r) {
   if (r.filters.year_max === undefined) r.filters.year_max = null;
   if (r.filters.tempo_min === undefined) r.filters.tempo_min = null;
   if (r.filters.tempo_max === undefined) r.filters.tempo_max = null;
+
+  // Genre filtering (Spotify artist genres)
+  if (r.filters.genres_mode == null) r.filters.genres_mode = "ignore";
+  if (!Array.isArray(r.filters.genres_include)) r.filters.genres_include = [];
+  if (!Array.isArray(r.filters.genres_exclude)) r.filters.genres_exclude = [];
+
+  // Per-recipe history scope override
+  if (r.history.scope == null) r.history.scope = "inherit"; // inherit|per_recipe|global
 
   // Diversity defaults
   if (r.diversity.max_per_artist === undefined) r.diversity.max_per_artist = 2;
@@ -604,6 +781,21 @@ function recipeTemplate() {
       albums_per_artist: 2,
       albums_limit_fetch: 8,
       search_limit_per_track: 5,
+
+      // Optional external signals
+      use_tastedive: false,
+      tastedive_limit: 80,
+      use_audiodb_trending: false,
+      audiodb_country: "",
+      audiodb_limit: 30,
+      audiodb_fill: null,
+
+      // Songkick upcoming events
+      use_songkick_events: false,
+      songkick_location_query: "",
+      songkick_metro_area_id: "",
+      songkick_days_ahead: 30,
+      songkick_take_artists: 60,
     },
 
     recommendations: {
@@ -625,6 +817,15 @@ function recipeTemplate() {
       year_max: null,
       tempo_min: null,
       tempo_max: null,
+
+      // Spotify artist genres filtering
+      genres_mode: "ignore", // ignore|include|exclude|include_exclude
+      genres_include: [],
+      genres_exclude: [],
+    },
+
+    history: {
+      scope: "inherit", // inherit|per_recipe|global
     },
 
     diversity: {
@@ -777,10 +978,14 @@ function recipeBadges(r) {
   const reco = r.recommendations?.enabled
     ? `<span class="riBadge">reco:on</span>`
     : "";
+  const hs = r.history?.scope || "inherit";
+  const histBadge =
+    hs && hs !== "inherit" ? `<span class="riBadge">hist:${escapeHtml(hs)}</span>` : "";
   return `
     <span class="riBadge">${tracks} tracks</span>
     <span class="riBadge">${escapeHtml(provider)}</span>
     ${reco}
+    ${histBadge}
   `;
 }
 
@@ -790,6 +995,7 @@ function renderRecipeEditor(r) {
   const disc = r.discovery || {};
   const sources = r.sources || {};
   const filters = r.filters || {};
+  const hist = r.history || {};
   const diversity = r.diversity || {};
   const adv = r.advanced || {};
   const reco = r.recommendations || {};
@@ -816,6 +1022,25 @@ function renderRecipeEditor(r) {
           r.track_count || 50,
         )}">
         ${helpFor("track_count")}
+      </label>
+    </div>
+
+    <div class="section-title">History / No-repeat</div>
+    <div class="formgrid">
+      <label class="field">
+        <div class="label">History scope</div>
+        <select data-k="history.scope">
+          <option value="inherit" ${
+            (hist.scope || "inherit") === "inherit" ? "selected" : ""
+          }>inherit (from addon options)</option>
+          <option value="per_recipe" ${
+            (hist.scope || "") === "per_recipe" ? "selected" : ""
+          }>per_recipe</option>
+          <option value="global" ${
+            (hist.scope || "") === "global" ? "selected" : ""
+          }>global (shared across all lists)</option>
+        </select>
+        ${helpFor("history.scope")}
       </label>
     </div>
 
@@ -964,6 +1189,97 @@ function renderRecipeEditor(r) {
           disc.search_limit_per_track ?? 5,
         )}">
         ${helpFor("discovery.search_limit_per_track")}
+      </label>
+
+      <label class="field">
+        <div class="label">Use TasteDive (similar artists)</div>
+        <select data-k="discovery.use_tastedive">
+          <option value="true" ${disc.use_tastedive === true ? "selected" : ""}>true</option>
+          <option value="false" ${disc.use_tastedive !== true ? "selected" : ""}>false</option>
+        </select>
+        ${helpFor("discovery.use_tastedive")}
+      </label>
+
+      <label class="field">
+        <div class="label">TasteDive limit</div>
+        <input data-k="discovery.tastedive_limit" type="number" min="1" max="200" value="${Number(
+          disc.tastedive_limit ?? 80,
+        )}">
+        ${helpFor("discovery.tastedive_limit")}
+      </label>
+
+      <label class="field">
+        <div class="label">Use TheAudioDB trending (charts)</div>
+        <select data-k="discovery.use_audiodb_trending">
+          <option value="true" ${disc.use_audiodb_trending === true ? "selected" : ""}>true</option>
+          <option value="false" ${disc.use_audiodb_trending !== true ? "selected" : ""}>false</option>
+        </select>
+        ${helpFor("discovery.use_audiodb_trending")}
+      </label>
+
+      <label class="field">
+        <div class="label">TheAudioDB country (optional)</div>
+        <input data-k="discovery.audiodb_country" value="${escapeHtml(
+          disc.audiodb_country ?? "",
+        )}" placeholder="cz / us / gb ...">
+        ${helpFor("discovery.audiodb_country")}
+      </label>
+
+      <label class="field">
+        <div class="label">TheAudioDB limit</div>
+        <input data-k="discovery.audiodb_limit" type="number" min="1" max="200" value="${Number(
+          disc.audiodb_limit ?? 30,
+        )}">
+        ${helpFor("discovery.audiodb_limit")}
+      </label>
+
+      <label class="field">
+        <div class="label">TheAudioDB fill (optional)</div>
+        <input data-k="discovery.audiodb_fill" type="number" min="0" max="200" value="${escapeHtml(
+          disc.audiodb_fill ?? "",
+        )}" placeholder="auto">
+        ${helpFor("discovery.audiodb_fill")}
+      </label>
+
+      <label class="field">
+        <div class="label">Use Songkick events</div>
+        <select data-k="discovery.use_songkick_events">
+          <option value="true" ${disc.use_songkick_events === true ? "selected" : ""}>true</option>
+          <option value="false" ${disc.use_songkick_events !== true ? "selected" : ""}>false</option>
+        </select>
+        ${helpFor("discovery.use_songkick_events")}
+      </label>
+
+      <label class="field">
+        <div class="label">Songkick location query (optional)</div>
+        <input data-k="discovery.songkick_location_query" value="${escapeHtml(
+          disc.songkick_location_query ?? "",
+        )}" placeholder="Prague / Brno ...">
+        ${helpFor("discovery.songkick_location_query")}
+      </label>
+
+      <label class="field">
+        <div class="label">Songkick metro area id (optional)</div>
+        <input data-k="discovery.songkick_metro_area_id" type="number" min="1" max="999999" value="${escapeHtml(
+          disc.songkick_metro_area_id ?? "",
+        )}" placeholder="" />
+        ${helpFor("discovery.songkick_metro_area_id")}
+      </label>
+
+      <label class="field">
+        <div class="label">Songkick days ahead</div>
+        <input data-k="discovery.songkick_days_ahead" type="number" min="1" max="365" value="${Number(
+          disc.songkick_days_ahead ?? 30,
+        )}">
+        ${helpFor("discovery.songkick_days_ahead")}
+      </label>
+
+      <label class="field">
+        <div class="label">Songkick take artists (cap)</div>
+        <input data-k="discovery.songkick_take_artists" type="number" min="1" max="500" value="${Number(
+          disc.songkick_take_artists ?? 60,
+        )}">
+        ${helpFor("discovery.songkick_take_artists")}
       </label>
     </div>
 
@@ -1119,6 +1435,41 @@ function renderRecipeEditor(r) {
         )}">
         ${helpFor("filters.tempo_max")}
       </label>
+
+      <label class="field">
+        <div class="label">Genres mode</div>
+        <select data-k="filters.genres_mode">
+          <option value="ignore" ${
+            (filters.genres_mode || "ignore") === "ignore" ? "selected" : ""
+          }>ignore</option>
+          <option value="include" ${
+            (filters.genres_mode || "") === "include" ? "selected" : ""
+          }>include</option>
+          <option value="exclude" ${
+            (filters.genres_mode || "") === "exclude" ? "selected" : ""
+          }>exclude</option>
+          <option value="include_exclude" ${
+            (filters.genres_mode || "") === "include_exclude" ? "selected" : ""
+          }>include_exclude</option>
+        </select>
+        ${helpFor("filters.genres_mode")}
+      </label>
+
+      <label class="field span2">
+        <div class="label">Genres include (comma)</div>
+        <input data-k="filters.genres_include" value="${escapeHtml(
+          (filters.genres_include || []).join(", "),
+        )}" placeholder="techno, ambient, indie pop">
+        ${helpFor("filters.genres_include")}
+      </label>
+
+      <label class="field span2">
+        <div class="label">Genres exclude (comma)</div>
+        <input data-k="filters.genres_exclude" value="${escapeHtml(
+          (filters.genres_exclude || []).join(", "),
+        )}" placeholder="death metal, hardstyle">
+        ${helpFor("filters.genres_exclude")}
+      </label>
     </div>
 
     <div class="section-title">Diversity</div>
@@ -1181,7 +1532,12 @@ function saveRecipeFromBlock(recipeId) {
     const k = el.getAttribute("data-k");
     let v = el.value;
 
-    if (k === "sources.search" || k === "sources.playlists") {
+    if (
+      k === "sources.search" ||
+      k === "sources.playlists" ||
+      k === "filters.genres_include" ||
+      k === "filters.genres_exclude"
+    ) {
       setValueByPath(r, k, splitComma(v));
       return;
     }
@@ -1193,6 +1549,9 @@ function saveRecipeFromBlock(recipeId) {
 
     if (
       k === "discovery.enabled" ||
+      k === "discovery.use_tastedive" ||
+      k === "discovery.use_audiodb_trending" ||
+      k === "discovery.use_songkick_events" ||
       k === "discovery.include_seed_artists" ||
       k === "discovery.exclude_saved_tracks" ||
       k === "recommendations.enabled" ||
@@ -1209,7 +1568,11 @@ function saveRecipeFromBlock(recipeId) {
       k === "filters.year_max" ||
       k === "filters.tempo_min" ||
       k === "filters.tempo_max" ||
-      k === "discovery.min_track_popularity"
+      k === "discovery.min_track_popularity" ||
+      k === "discovery.audiodb_fill" ||
+      k === "discovery.songkick_metro_area_id" ||
+      k === "discovery.songkick_days_ahead" ||
+      k === "discovery.songkick_take_artists"
     ) {
       setValueByPath(r, k, toNumOrNull(v));
       return;
@@ -1225,6 +1588,8 @@ function saveRecipeFromBlock(recipeId) {
       k === "discovery.albums_per_artist" ||
       k === "discovery.albums_limit_fetch" ||
       k === "discovery.search_limit_per_track" ||
+      k === "discovery.tastedive_limit" ||
+      k === "discovery.audiodb_limit" ||
       k === "sources.max_candidates" ||
       k === "sources.top_tracks.limit" ||
       k === "diversity.max_per_artist" ||

@@ -185,6 +185,12 @@ app.get("/api/status", async (req, res) => {
     port: opts.port,
     base_url: opts.base_url,
     market: opts.market,
+    external_keys: {
+      lastfm: Boolean(opts.lastfm_api_key),
+      tastedive: Boolean(opts.tastedive_api_key),
+      audiodb: Boolean(opts.audiodb_api_key),
+      songkick: Boolean(opts.songkick_api_key),
+    },
     auth: {
       has_refresh_token: Boolean(tokens.refresh_token),
       refreshed_at: tokens.refreshed_at || null,
@@ -361,6 +367,15 @@ app.post("/api/run", requireToken, async (req, res) => {
   if (opts.lastfm_api_key && !process.env.LASTFM_API_KEY) {
     process.env.LASTFM_API_KEY = String(opts.lastfm_api_key);
   }
+  if (opts.tastedive_api_key && !process.env.TASTEDIVE_API_KEY) {
+    process.env.TASTEDIVE_API_KEY = String(opts.tastedive_api_key);
+  }
+  if (opts.audiodb_api_key && !process.env.AUDIODB_API_KEY) {
+    process.env.AUDIODB_API_KEY = String(opts.audiodb_api_key);
+  }
+  if (opts.songkick_api_key && !process.env.SONGKICK_API_KEY) {
+    process.env.SONGKICK_API_KEY = String(opts.songkick_api_key);
+  }
 
   const sp = createClient();
 
@@ -411,6 +426,14 @@ app.post("/api/run", requireToken, async (req, res) => {
     for (const recipe of recipes) {
       if (!recipe?.id) continue;
 
+      // History scope can be overridden per recipe (history.scope)
+      // Values: inherit | per_recipe | global
+      let effectiveHistoryScope = opts.history.scope || "per_recipe";
+      const rScope = recipe?.history?.scope;
+      if (rScope && rScope !== "inherit") {
+        effectiveHistoryScope = String(rScope);
+      }
+
       if (!recipe?.target_playlist_id) {
         logRun("warn", `Recipe ${recipe.id}: missing target_playlist_id`);
         runResults.push({
@@ -425,7 +448,7 @@ app.post("/api/run", requireToken, async (req, res) => {
 
       // 1) history-based exclude
       const historyExcluded = await getExcludedSet(db, {
-        historyScope: opts.history.scope,
+        historyScope: effectiveHistoryScope,
         recipeId: recipe.id,
         mode: opts.history.mode,
         rollingDays: opts.history.rolling_days,
@@ -460,7 +483,7 @@ app.post("/api/run", requireToken, async (req, res) => {
 
       logRun(
         "info",
-        `Recipe ${recipe.id}: generated=${tracks.length} provider=${meta.used_provider} lastfm=${meta.counts?.lastfm_selected || 0} reco=${meta.counts?.reco_selected || 0} sources=${meta.counts?.sources_selected || 0}`,
+        `Recipe ${recipe.id}: generated=${tracks.length} provider=${meta.used_provider} audiodb=${meta.counts?.audiodb_selected || 0} discovery=${meta.counts?.lastfm_selected || 0} reco=${meta.counts?.reco_selected || 0} sources=${meta.counts?.sources_selected || 0}`,
       );
       if (meta?.notes?.length)
         logRun("debug", `Recipe ${recipe.id}: notes=${meta.notes.join(",")}`);
@@ -493,13 +516,13 @@ app.post("/api/run", requireToken, async (req, res) => {
       logRun("info", `Recipe ${recipe.id}: playlist updated OK.`);
 
       await recordUsed(db, {
-        historyScope: opts.history.scope,
+        historyScope: effectiveHistoryScope,
         recipeId: recipe.id,
         trackIds: tracks.map((t) => t.id),
       });
 
       await prune(db, {
-        historyScope: opts.history.scope,
+        historyScope: effectiveHistoryScope,
         recipeId: recipe.id,
         mode: opts.history.mode,
         rollingDays: opts.history.rolling_days,

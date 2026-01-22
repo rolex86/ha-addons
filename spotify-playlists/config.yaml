@@ -28,10 +28,14 @@ options:
   spotify_client_secret: ""
   spotify_redirect_uri: "http://homeassistant.local:7790/api/auth/callback"
   market: "CZ"
+  lastfm_api_key: ""
+  tastedive_api_key: ""
+  audiodb_api_key: "2"
+  songkick_api_key: ""
   log_level: "info"
   history:
     scope: "per_recipe" # per_recipe | global
-    mode: "rolling_days" # rolling_days | lifetime_capped
+    mode: "rolling_days" # rolling_days | lifetime_capped | lifetime_all
     rolling_days: 90
     lifetime_cap: 20000
 
@@ -43,9 +47,13 @@ schema:
   spotify_client_secret: password
   spotify_redirect_uri: str
   market: str
+  lastfm_api_key: password
+  tastedive_api_key: password
+  audiodb_api_key: password
+  songkick_api_key: password
   log_level: list(trace|debug|info|warn|error)
   history:
     scope: list(per_recipe|global)
-    mode: list(rolling_days|lifetime_capped)
+    mode: list(rolling_days|lifetime_capped|lifetime_all)
     rolling_days: int(1,3650)
     lifetime_cap: int(1000,1000000)

@@ -89,6 +89,21 @@ function normalizeRecipe(recipe) {
   if (d.exclude_saved_tracks == null) d.exclude_saved_tracks = true;
   if (d.search_limit_per_track == null) d.search_limit_per_track = 5;
 
+  // ---- external discovery / charts (optional) ----
+  if (d.use_tastedive == null) d.use_tastedive = false;
+  if (d.tastedive_limit == null) d.tastedive_limit = 80;
+  if (d.use_audiodb_trending == null) d.use_audiodb_trending = false;
+  if (d.audiodb_country == null) d.audiodb_country = ""; // empty => derive from market
+  if (d.audiodb_limit == null) d.audiodb_limit = 30;
+  if (d.audiodb_fill == null) d.audiodb_fill = null; // null => auto (portion of track_count)
+
+  // Songkick events (optional)
+  if (d.use_songkick_events == null) d.use_songkick_events = false;
+  if (d.songkick_location_query == null) d.songkick_location_query = "";
+  if (d.songkick_metro_area_id == null) d.songkick_metro_area_id = "";
+  if (d.songkick_days_ahead == null) d.songkick_days_ahead = 30;
+  if (d.songkick_take_artists == null) d.songkick_take_artists = 60;
+
   // ---- sources ----
   if (!r.sources || typeof r.sources !== "object") r.sources = {};
   const s = r.sources;
@@ -124,6 +139,17 @@ function normalizeRecipe(recipe) {
   // optional tempo fields (generator supports)
   if (f.tempo_min === undefined) f.tempo_min = null;
   if (f.tempo_max === undefined) f.tempo_max = null;
+
+  // optional genre filtering (Spotify artist genres)
+  // mode: ignore | include | exclude | include_exclude
+  if (f.genres_mode == null) f.genres_mode = "ignore";
+  if (!Array.isArray(f.genres_include)) f.genres_include = [];
+  if (!Array.isArray(f.genres_exclude)) f.genres_exclude = [];
+
+  // ---- per-recipe history scope override (optional) ----
+  // If missing or set to "inherit", addon options history.scope is used.
+  if (!r.history || typeof r.history !== "object") r.history = {};
+  if (r.history.scope == null) r.history.scope = "inherit"; // inherit|per_recipe|global
 
   // ---- diversity/limits (back-compat) ----
   // Some configs had `limits`, some `diversity`. Keep both but ensure `diversity` is present.
@@ -207,6 +233,21 @@ function getOptions() {
 
     lastfm_api_key: toStrOr(
       opts.lastfm_api_key ?? process.env.LASTFM_API_KEY,
+      "",
+    ),
+
+    tastedive_api_key: toStrOr(
+      opts.tastedive_api_key ?? process.env.TASTEDIVE_API_KEY,
+      "",
+    ),
+
+    audiodb_api_key: toStrOr(
+      opts.audiodb_api_key ?? process.env.AUDIODB_API_KEY,
+      "2",
+    ),
+
+    songkick_api_key: toStrOr(
+      opts.songkick_api_key ?? process.env.SONGKICK_API_KEY,
       "",
     ),
 

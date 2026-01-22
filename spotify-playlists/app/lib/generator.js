@@ -132,6 +132,30 @@ function getRecipeSources(recipe) {
 function getRecipeFilters(recipe) {
   const f = recipe.filters || {};
   const explicitPolicy = String(f.explicit ?? "allow").toLowerCase(); // allow|exclude|only
+
+  // Genre filtering is based on Spotify *artist* genres.
+  // mode:
+  // - ignore: do not fetch genres / do not filter
+  // - include: keep only tracks where artist genres match any include
+  // - exclude: remove tracks where artist genres match any exclude
+  // - include_exclude: apply both rules
+  const genresMode = String(f.genres_mode ?? "ignore").toLowerCase();
+  const genresInclude = Array.isArray(f.genres_include)
+    ? f.genres_include
+    : typeof f.genres_include === "string"
+      ? String(f.genres_include)
+          .split(",")
+          .map((x) => x.trim())
+          .filter(Boolean)
+      : [];
+  const genresExclude = Array.isArray(f.genres_exclude)
+    ? f.genres_exclude
+    : typeof f.genres_exclude === "string"
+      ? String(f.genres_exclude)
+          .split(",")
+          .map((x) => x.trim())
+          .filter(Boolean)
+      : [];
   return {
     explicit: explicitPolicy,
     year_min:
@@ -150,6 +174,10 @@ function getRecipeFilters(recipe) {
       f.tempo_max === null || f.tempo_max === "" || f.tempo_max === undefined
         ? null
         : Number(f.tempo_max),
+
+    genres_mode: genresMode,
+    genres_include: genresInclude,
+    genres_exclude: genresExclude,
   };
 }
 
@@ -241,6 +269,26 @@ function getDiscovery(recipe) {
 
     // Spotify search cap safety (used by lastfm_toptracks strategy)
     search_limit_per_track: Number(d.search_limit_per_track ?? 5),
+
+    // Additional external signals
+    use_tastedive: Boolean(d.use_tastedive ?? false),
+    tastedive_limit: Number(d.tastedive_limit ?? 80),
+
+    // Charts / rankings (TheAudioDB)
+    use_audiodb_trending: Boolean(d.use_audiodb_trending ?? false),
+    audiodb_country: String(d.audiodb_country ?? ""),
+    audiodb_limit: Number(d.audiodb_limit ?? 30),
+    audiodb_fill:
+      d.audiodb_fill === null || d.audiodb_fill === "" || d.audiodb_fill === undefined
+        ? null
+        : Number(d.audiodb_fill),
+
+    // Songkick events (upcoming concerts) -> additional artist pool
+    use_songkick_events: Boolean(d.use_songkick_events ?? false),
+    songkick_location_query: String(d.songkick_location_query ?? ""),
+    songkick_metro_area_id: String(d.songkick_metro_area_id ?? ""),
+    songkick_days_ahead: Number(d.songkick_days_ahead ?? 30),
+    songkick_take_artists: Number(d.songkick_take_artists ?? 60),
   };
 }
 
@@ -667,6 +715,185 @@ async function lastfmGetTopTracks(artistName, limit) {
   return items.map((t) => t?.name).filter(Boolean);
 }
 
+/* -------- TasteDive similarity -------- */
+
+function tastediveKey() {
+  return process.env.TASTEDIVE_API_KEY
+    ? String(process.env.TASTEDIVE_API_KEY).trim()
+    : "";
+}
+
+function tastediveUrl(params) {
+  const usp = new URLSearchParams(params);
+  return `https://tastedive.com/api/similar?${usp.toString()}`;
+}
+
+async function tastediveGetSimilarArtists(seedArtists, limit) {
+  const key = tastediveKey();
+  if (!key) return [];
+
+  const seeds = Array.isArray(seedArtists)
+    ? seedArtists
+        .map((x) => String(x || "").trim())
+        .filter(Boolean)
+    : [];
+  if (!seeds.length) return [];
+
+  const url = tastediveUrl({
+    q: seeds.join(","),
+    type: "music",
+    limit: String(limit || 50),
+    info: "0",
+    k: key,
+  });
+
+  const js = await httpJsonRetry(url);
+  const items = js?.Similar?.Results || [];
+  return items.map((r) => r?.Name).filter(Boolean);
+}
+
+/* -------- TheAudioDB charts / trending -------- */
+
+function audiodbKey() {
+  const raw =
+    process.env.AUDIODB_API_KEY != null
+      ? String(process.env.AUDIODB_API_KEY).trim()
+      : "";
+  return raw || "2";
+}
+
+function audiodbTrendingUrl(country) {
+  const usp = new URLSearchParams({
+    country: String(country || "us").toLowerCase(),
+    type: "itunes",
+    format: "singles",
+  });
+  return `https://www.theaudiodb.com/api/v1/json/${audiodbKey()}/trending.php?${usp.toString()}`;
+}
+
+async function audiodbGetTrendingTracks(country, limit) {
+  const url = audiodbTrendingUrl(country);
+  const js = await httpJsonRetry(url);
+  const items = js?.trending || [];
+
+  const out = [];
+  for (const it of items) {
+    const artist = it?.strArtist || it?.artist || null;
+    const track = it?.strTrack || it?.track || null;
+    if (artist && track) out.push({ artist, track });
+    if (out.length >= (limit || 50)) break;
+  }
+
+  return out;
+}
+
+/* -------- Songkick events (upcoming concerts) -------- */
+
+function songkickKey() {
+  return process.env.SONGKICK_API_KEY
+    ? String(process.env.SONGKICK_API_KEY).trim()
+    : "";
+}
+
+function songkickLocationSearchUrl(query) {
+  const usp = new URLSearchParams({
+    query: String(query || "").trim(),
+    apikey: songkickKey(),
+  });
+  return `https://api.songkick.com/api/3.0/search/locations.json?${usp.toString()}`;
+}
+
+function songkickMetroCalendarUrl(metroAreaId, { min_date, max_date, page, per_page } = {}) {
+  const usp = new URLSearchParams({
+    apikey: songkickKey(),
+  });
+  if (min_date) usp.set("min_date", String(min_date));
+  if (max_date) usp.set("max_date", String(max_date));
+  if (page) usp.set("page", String(page));
+  if (per_page) usp.set("per_page", String(per_page));
+
+  return `https://api.songkick.com/api/3.0/metro_areas/${encodeURIComponent(
+    String(metroAreaId),
+  )}/calendar.json?${usp.toString()}`;
+}
+
+function fmtDateYYYYMMDD(d) {
+  const dt = d instanceof Date ? d : new Date(d);
+  if (Number.isNaN(dt.getTime())) return null;
+  return dt.toISOString().slice(0, 10);
+}
+
+async function songkickResolveMetroAreaId(locationQuery) {
+  const q = String(locationQuery || "").trim();
+  if (!q) return null;
+  const url = songkickLocationSearchUrl(q);
+  const js = await httpJsonRetry(url);
+  const loc = js?.resultsPage?.results?.location?.[0] || null;
+  const metroId = loc?.metroArea?.id || null;
+  return metroId ? Number(metroId) : null;
+}
+
+async function songkickGetUpcomingEventArtists({
+  metroAreaId,
+  minDate,
+  maxDate,
+  takeArtists = 60,
+}) {
+  const key = songkickKey();
+  if (!key) return [];
+  if (!metroAreaId) return [];
+
+  const min_date = fmtDateYYYYMMDD(minDate);
+  const max_date = fmtDateYYYYMMDD(maxDate);
+  if (!min_date || !max_date) return [];
+
+  const wanted = Math.max(1, Math.min(500, Number(takeArtists || 60)));
+  const per_page = 50;
+  const seen = new Set();
+  const artists = [];
+
+  let page = 1;
+  let maxPage = 1;
+
+  while (artists.length < wanted && page <= maxPage && page <= 20) {
+    const url = songkickMetroCalendarUrl(metroAreaId, {
+      min_date,
+      max_date,
+      page,
+      per_page,
+    });
+
+    const js = await httpJsonRetry(url);
+    const rp = js?.resultsPage || {};
+    const events = rp?.results?.event || [];
+
+    const total = Number(rp?.totalEntries || 0);
+    const per = Number(rp?.perPage || per_page);
+    if (total > 0 && per > 0) maxPage = Math.max(1, Math.ceil(total / per));
+
+    for (const ev of events) {
+      const perfs = Array.isArray(ev?.performance) ? ev.performance : [];
+      for (const p of perfs) {
+        const nm =
+          p?.artist?.displayName || p?.displayName || p?.artist?.name || null;
+        if (!nm) continue;
+        const k = normalizeForMatch(nm);
+        if (!k) continue;
+        if (seen.has(k)) continue;
+        seen.add(k);
+        artists.push(nm);
+        if (artists.length >= wanted) break;
+      }
+      if (artists.length >= wanted) break;
+    }
+
+    if (events.length === 0) break;
+    page += 1;
+  }
+
+  return artists;
+}
+
 async function spotifySearchArtistId(sp, artistName, market) {
   const q = `artist:"${artistName}"`;
   const resp = await spRetry(() =>
@@ -676,14 +903,204 @@ async function spotifySearchArtistId(sp, artistName, market) {
   return a0?.id || null;
 }
 
-async function spotifySearchTrackId(sp, artistName, trackName, market) {
-  const q = `artist:"${artistName}" track:"${trackName}"`;
-  const resp = await spRetry(() =>
-    sp.searchTracks(q, { market, limit: 5, offset: 0 }),
+function normalizeForMatch(s) {
+  return String(s || "")
+    .toLowerCase()
+    .replace(/\(.*?\)/g, " ")
+    .replace(/\[.*?\]/g, " ")
+    .replace(/feat\.?/g, " ")
+    .replace(/ft\.?/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+/* -------- genre filtering (Spotify artist genres) -------- */
+
+function genresWanted(filters) {
+  if (!filters) return false;
+  const mode = String(filters.genres_mode || "ignore").toLowerCase();
+  if (mode === "ignore") return false;
+
+  const inc = Array.isArray(filters.genres_include) ? filters.genres_include : [];
+  const exc = Array.isArray(filters.genres_exclude) ? filters.genres_exclude : [];
+  return inc.length > 0 || exc.length > 0;
+}
+
+function normalizeGenrePatterns(list) {
+  return (Array.isArray(list) ? list : [])
+    .map((x) => normalizeForMatch(x))
+    .filter(Boolean);
+}
+
+function anyGenreMatch(artistGenres, patterns) {
+  if (!patterns || patterns.length === 0) return false;
+  const gs = Array.isArray(artistGenres) ? artistGenres : [];
+  for (const g of gs) {
+    const gn = normalizeForMatch(g);
+    if (!gn) continue;
+    for (const p of patterns) {
+      if (!p) continue;
+      if (gn === p) return true;
+      if (gn.includes(p) || p.includes(gn)) return true;
+    }
+  }
+  return false;
+}
+
+async function spotifyGetArtistGenresCached(sp, artistIds, cache) {
+  const ids = uniqIds(artistIds || []).filter(Boolean);
+  const missing = ids.filter((id) => !cache.has(id));
+  if (!missing.length) return;
+
+  for (let i = 0; i < missing.length; i += 50) {
+    const chunk = missing.slice(i, i + 50);
+    const resp = await spRetry(() => sp.getArtists(chunk));
+    const items = resp.body?.artists || [];
+
+    // Spotify keeps order, but be robust
+    for (let j = 0; j < items.length; j++) {
+      const a = items[j];
+      if (!a?.id) continue;
+      const genres = Array.isArray(a.genres) ? a.genres : [];
+      cache.set(a.id, genres);
+    }
+  }
+}
+
+async function filterByGenresIfNeeded(sp, tracks, filters, cache, meta) {
+  if (!genresWanted(filters)) return tracks;
+
+  let mode = String(filters.genres_mode || "ignore").toLowerCase();
+  if (mode === "ignore") return tracks;
+
+  const includeP = normalizeGenrePatterns(filters.genres_include);
+  const excludeP = normalizeGenrePatterns(filters.genres_exclude);
+
+  // If the user filled both include + exclude lists, apply both even if they
+  // selected include/exclude mode.
+  if (includeP.length && excludeP.length) mode = "include_exclude";
+
+  if (!includeP.length && !excludeP.length) return tracks;
+
+  // Fetch genres for relevant artists
+  const artistIds = [];
+  for (const t of tracks || []) {
+    const arts = Array.isArray(t?.artists) ? t.artists : [];
+    for (const a of arts.slice(0, 3)) {
+      if (a?.id) artistIds.push(a.id);
+    }
+  }
+
+  try {
+    await spotifyGetArtistGenresCached(sp, artistIds, cache);
+  } catch {
+    meta?.notes?.push("genre_fetch_failed");
+    // Don't hard-fail generation – just skip genre filtering.
+    return tracks;
+  }
+
+  const out = [];
+  for (const t of tracks || []) {
+    const arts = Array.isArray(t?.artists) ? t.artists : [];
+    const genres = [];
+    for (const a of arts.slice(0, 3)) {
+      if (!a?.id) continue;
+      const g = cache.get(a.id);
+      if (Array.isArray(g)) genres.push(...g);
+    }
+
+    const hasInclude = includeP.length ? anyGenreMatch(genres, includeP) : true;
+    const hasExclude = excludeP.length ? anyGenreMatch(genres, excludeP) : false;
+
+    // include-only
+    if (mode === "include" && !hasInclude) continue;
+    // exclude-only
+    if (mode === "exclude" && hasExclude) continue;
+    // include_exclude: both rules
+    if (mode === "include_exclude") {
+      if (!hasInclude) continue;
+      if (hasExclude) continue;
+    }
+
+    // Unknown mode => behave as include_exclude-ish
+    if (!["include", "exclude", "include_exclude"].includes(mode)) {
+      if (!hasInclude) continue;
+      if (hasExclude) continue;
+    }
+
+    out.push(t);
+  }
+
+  meta?.notes?.push(
+    `genre_filter:${mode}:in=${includeP.length}:ex=${excludeP.length}:kept=${out.length}/${(tracks || []).length}`,
   );
+  return out;
+}
+
+function scoreSpotifyTrackCandidate(item, artistName, trackName) {
+  const tn = normalizeForMatch(item?.name);
+  const ta = normalizeForMatch(trackName);
+  const an0 = normalizeForMatch(item?.artists?.[0]?.name);
+  const aa = normalizeForMatch(artistName);
+
+  let score = 0;
+
+  if (tn && ta) {
+    if (tn == ta) score += 80;
+    else if (tn.startsWith(ta) || ta.startsWith(tn)) score += 60;
+    else if (tn.includes(ta) || ta.includes(tn)) score += 45;
+  }
+
+  if (an0 && aa) {
+    if (an0 == aa) score += 60;
+    else if (an0.includes(aa) || aa.includes(an0)) score += 35;
+  }
+
+  // If any of the first few artists match exactly, give a small boost
+  const artists = Array.isArray(item?.artists) ? item.artists : [];
+  for (const a of artists.slice(0, 3)) {
+    const an = normalizeForMatch(a?.name);
+    if (an && aa && an == aa) {
+      score += 20;
+      break;
+    }
+  }
+
+  const pop = typeof item?.popularity === "number" ? item.popularity : 0;
+  score += Math.round(pop / 10);
+
+  return score;
+}
+
+async function spotifySearchTrackId(sp, artistName, trackName, market, limit = 5) {
+  const a = String(artistName || "").replaceAll('"', " ").trim();
+  const t = String(trackName || "").replaceAll('"', " ").trim();
+  if (!a || !t) return null;
+
+  const q = `artist:"${a}" track:"${t}"`;
+  const lim = Math.max(1, Math.min(50, Number(limit || 5)));
+
+  const resp = await spRetry(() =>
+    sp.searchTracks(q, { market, limit: lim, offset: 0 }),
+  );
+
   const items = resp.body?.tracks?.items || [];
-  const t0 = items[0];
-  return t0?.id || null;
+  if (!items.length) return null;
+
+  let best = null;
+  let bestScore = -1;
+  for (const it of items) {
+    const sc = scoreSpotifyTrackCandidate(it, a, t);
+    if (sc > bestScore) {
+      bestScore = sc;
+      best = it;
+    }
+  }
+
+  // Safety: if nothing looks like a decent match, return null
+  if (bestScore < 60) return null;
+
+  return best?.id || null;
 }
 
 async function spotifyGetFullTracks(sp, ids, market) {
@@ -751,6 +1168,84 @@ async function spotifyGetArtistAlbumTrackIds(sp, artistId, market, disc) {
   return uniqIds(trackIds);
 }
 
+async function discoverWithAudioDbTrending({ sp, market, excludedSet, recipe, meta }) {
+  const disc = getDiscovery(recipe);
+
+  if (!disc.enabled || !disc.use_audiodb_trending) {
+    return [];
+  }
+
+  const key = audiodbKey();
+  if (!key) {
+    meta?.notes?.push("missing_audiodb_api_key");
+    return [];
+  }
+
+  const countryRaw = String(disc.audiodb_country || market || "US").trim();
+  const country = countryRaw ? countryRaw.toLowerCase() : "us";
+  const limit = Math.max(1, Math.min(200, disc.audiodb_limit || 30));
+
+  let pairs = [];
+  try {
+    pairs = await audiodbGetTrendingTracks(country, limit);
+  } catch {
+    meta?.notes?.push("audiodb_fetch_failed");
+    return [];
+  }
+
+  if (!pairs.length) {
+    meta?.notes?.push("audiodb_no_results");
+    return [];
+  }
+
+  const candidates = [];
+  const seenIds = new Set();
+  const searchLimit = Math.max(
+    1,
+    Math.min(50, Number(disc.search_limit_per_track || 5)),
+  );
+
+  for (const it of pairs.slice(0, limit)) {
+    const artistName = it.artist;
+    const trackName = it.track;
+
+    const id = await spotifySearchTrackId(
+      sp,
+      artistName,
+      trackName,
+      market,
+      searchLimit,
+    );
+
+    if (!id) continue;
+    if (excludedSet && excludedSet.has(id)) continue;
+    if (seenIds.has(id)) continue;
+
+    seenIds.add(id);
+    candidates.push(id);
+  }
+
+  if (!candidates.length) {
+    meta?.notes?.push("audiodb_no_spotify_matches");
+    return [];
+  }
+
+  let ids = candidates;
+
+  if (disc.exclude_saved_tracks) {
+    ids = await spotifyFilterOutSavedTracks(sp, ids);
+    meta?.notes?.push("exclude_saved_tracks_audiodb");
+  }
+
+  if (!ids.length) {
+    meta?.notes?.push("audiodb_all_candidates_were_saved");
+    return [];
+  }
+
+  const fullTracks = await spotifyGetFullTracks(sp, ids, market);
+  return fullTracks;
+}
+
 async function discoverWithLastFm({ sp, market, excludedSet, recipe, meta }) {
   const disc = getDiscovery(recipe);
 
@@ -758,43 +1253,127 @@ async function discoverWithLastFm({ sp, market, excludedSet, recipe, meta }) {
     meta?.notes?.push("discovery_disabled");
     return [];
   }
-  if (!lastfmKey()) {
-    meta?.notes?.push("missing_lastfm_api_key");
+
+  const hasLastfm = Boolean(lastfmKey());
+  const hasTaste = disc.use_tastedive && Boolean(tastediveKey());
+  const hasSongkick = disc.use_songkick_events && Boolean(songkickKey());
+
+  if (!hasLastfm && disc.strategy === "lastfm_toptracks") {
+    meta?.notes?.push("lastfm_toptracks_requires_lastfm");
+  }
+
+  if (disc.use_tastedive && !tastediveKey()) {
+    meta?.notes?.push("missing_tastedive_api_key");
+  }
+
+  if (disc.use_songkick_events && !songkickKey()) {
+    meta?.notes?.push("missing_songkick_api_key");
+  }
+
+  if (!hasLastfm && !hasTaste && !hasSongkick) {
+    meta?.notes?.push("missing_lastfm_tastedive_songkick");
     return [];
   }
 
-  const top = await spRetry(() =>
-    sp.getMyTopArtists({
-      limit: Math.max(1, Math.min(50, disc.seed_top_artists_limit)),
-      time_range: disc.seed_top_artists_time_range,
-    }),
-  );
+  // Spotify top artists are only needed when we want to query similar artists
+  // via Last.fm / TasteDive. Songkick can run independently.
+  let seeds = [];
+  if (hasLastfm || hasTaste) {
+    const top = await spRetry(() =>
+      sp.getMyTopArtists({
+        limit: Math.max(1, Math.min(50, disc.seed_top_artists_limit)),
+        time_range: disc.seed_top_artists_time_range,
+      }),
+    );
 
-  const seeds = (top.body?.items || []).map((a) => a?.name).filter(Boolean);
-  if (!seeds.length) {
-    meta?.notes?.push("no_top_artists");
-    return [];
+    seeds = (top.body?.items || []).map((a) => a?.name).filter(Boolean);
+    if (!seeds.length) {
+      meta?.notes?.push("no_top_artists");
+      // Still allow Songkick-only discovery
+      if (!hasSongkick) return [];
+    }
   }
 
   const similarAll = [];
-  for (const s of seeds) {
-    const sim = await lastfmGetSimilarArtists(s, disc.similar_per_seed);
-    similarAll.push(...sim);
+
+  if (hasLastfm && seeds.length) {
+    for (const s of seeds) {
+      const sim = await lastfmGetSimilarArtists(s, disc.similar_per_seed);
+      similarAll.push(...sim);
+    }
   }
 
-  let artistPool = uniq(similarAll);
-  if (disc.include_seed_artists) artistPool = uniq([...seeds, ...artistPool]);
+  if (hasTaste && seeds.length) {
+    try {
+      const sim = await tastediveGetSimilarArtists(
+        seeds,
+        Math.max(1, Math.min(200, disc.tastedive_limit || 80)),
+      );
+      similarAll.push(...sim);
+      meta?.notes?.push("tastedive_used");
+    } catch {
+      meta?.notes?.push("tastedive_fetch_failed");
+    }
+  } else if (hasTaste && !seeds.length) {
+    meta?.notes?.push("tastedive_requires_seed_artists");
+  }
+
+  // Songkick upcoming event artists (optional)
+  let songkickArtists = [];
+  if (disc.use_songkick_events && songkickKey()) {
+    try {
+      let metroId = null;
+      const rawId = String(disc.songkick_metro_area_id || "").trim();
+      if (rawId && /^\d+$/.test(rawId)) metroId = Number(rawId);
+
+      if (!metroId && disc.songkick_location_query) {
+        metroId = await songkickResolveMetroAreaId(disc.songkick_location_query);
+        if (metroId) meta?.notes?.push(`songkick_location_resolved:${metroId}`);
+      }
+
+      if (!metroId) {
+        meta?.notes?.push("songkick_missing_metro_area");
+      } else {
+        const days = Math.max(1, Math.min(365, Number(disc.songkick_days_ahead || 30)));
+        const minDate = new Date();
+        const maxDate = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+
+        songkickArtists = await songkickGetUpcomingEventArtists({
+          metroAreaId: metroId,
+          minDate,
+          maxDate,
+          takeArtists: disc.songkick_take_artists,
+        });
+
+        if (songkickArtists.length) meta?.notes?.push("songkick_used");
+        else meta?.notes?.push("songkick_no_results");
+      }
+    } catch {
+      meta?.notes?.push("songkick_fetch_failed");
+      songkickArtists = [];
+    }
+  }
+
+  let artistPool = uniq([...songkickArtists, ...similarAll]);
+  if (disc.include_seed_artists && seeds.length)
+    artistPool = uniq([...seeds, ...artistPool]);
   artistPool = artistPool.slice(0, Math.max(5, disc.take_artists));
 
   if (!artistPool.length) {
-    meta?.notes?.push("no_similar_artists");
+    meta?.notes?.push("no_artist_pool");
     return [];
   }
 
   const candidates = [];
   const seenIds = new Set();
 
-  if (disc.strategy === "lastfm_toptracks") {
+  let strategy = disc.strategy || "deep_cuts";
+  if (strategy === "lastfm_toptracks" && !hasLastfm) {
+    strategy = "deep_cuts";
+    meta?.notes?.push("strategy_fallback_deep_cuts");
+  }
+
+  if (strategy === "lastfm_toptracks") {
     for (const artistName of artistPool) {
       const topTracks = await lastfmGetTopTracks(
         artistName,
@@ -802,7 +1381,13 @@ async function discoverWithLastFm({ sp, market, excludedSet, recipe, meta }) {
       );
 
       for (const tn of topTracks.slice(0, disc.tracks_per_artist)) {
-        const id = await spotifySearchTrackId(sp, artistName, tn, market);
+        const id = await spotifySearchTrackId(
+          sp,
+          artistName,
+          tn,
+          market,
+          disc.search_limit_per_track,
+        );
         if (!id) continue;
         if (excludedSet && excludedSet.has(id)) continue;
         if (seenIds.has(id)) continue;
@@ -827,8 +1412,7 @@ async function discoverWithLastFm({ sp, market, excludedSet, recipe, meta }) {
       if (!ids.length) continue;
 
       const pickN = Math.max(1, disc.tracks_per_artist * 8);
-      const pool =
-        disc.strategy === "deep_cuts" ? shuffleInPlace([...ids]) : ids;
+      const pool = strategy === "deep_cuts" ? shuffleInPlace([...ids]) : ids;
 
       for (const tid of pool.slice(0, pickN)) {
         if (excludedSet && excludedSet.has(tid)) continue;
@@ -840,7 +1424,7 @@ async function discoverWithLastFm({ sp, market, excludedSet, recipe, meta }) {
   }
 
   if (!candidates.length) {
-    meta?.notes?.push("lastfm_no_matches");
+    meta?.notes?.push("discovery_no_matches");
     return [];
   }
 
@@ -848,7 +1432,7 @@ async function discoverWithLastFm({ sp, market, excludedSet, recipe, meta }) {
 
   if (disc.exclude_saved_tracks) {
     ids = await spotifyFilterOutSavedTracks(sp, ids);
-    meta?.notes?.push("exclude_saved_tracks");
+    meta?.notes?.push("exclude_saved_tracks_discovery");
   }
 
   if (!ids.length) {
@@ -951,7 +1535,12 @@ async function generateTracksWithMeta({ sp, recipe, market, excludedSet }) {
     need,
     provider: "sources",
     used_provider: "sources",
-    counts: { lastfm_selected: 0, reco_selected: 0, sources_selected: 0 },
+    counts: {
+      audiodb_selected: 0,
+      lastfm_selected: 0,
+      reco_selected: 0,
+      sources_selected: 0,
+    },
     notes: [],
   };
 
@@ -961,22 +1550,88 @@ async function generateTracksWithMeta({ sp, recipe, market, excludedSet }) {
   const rcfg = getRecommendationsCfg(recipe);
 
   const state = createDiversityState([]);
+  const genreCache = new Map();
 
-  // 1) Discovery (Last.fm) first (if enabled)
+  // 1) Discovery / external sources first
   if (disc.enabled) {
-    meta.provider = "lastfm";
+    meta.provider = "discovery";
 
+    // 1a) Charts: TheAudioDB trending (optional)
+    if (disc.use_audiodb_trending) {
+      let chartTracks = [];
+      try {
+        chartTracks = await discoverWithAudioDbTrending({
+          sp,
+          market,
+          excludedSet,
+          recipe,
+          meta,
+        });
+      } catch {
+        meta.notes.push("audiodb_discovery_failed");
+        chartTracks = [];
+      }
+
+      // tempo enrichment if needed
+      try {
+        const enr = await enrichTempoIfNeeded(sp, chartTracks, filters);
+        chartTracks = enr.tracks || chartTracks;
+      } catch {
+        meta.notes.push("tempo_enrich_failed_audiodb");
+      }
+
+      // apply filters (no popularity shaping for charts)
+      chartTracks = applyFiltersAndDedup(chartTracks, {
+        excludedSet: excludedSet || new Set(),
+        filters,
+        popularity: null,
+      });
+
+      // optional genre filtering
+      chartTracks = await filterByGenresIfNeeded(
+        sp,
+        chartTracks,
+        filters,
+        genreCache,
+        meta,
+      );
+
+      // keep chart ordering (do not shuffle)
+      const desired =
+        disc.audiodb_fill != null
+          ? Math.max(0, Number(disc.audiodb_fill))
+          : Math.max(0, Math.round(need * 0.3));
+
+      const before = state.chosen.length;
+      takeFromCandidates(
+        state,
+        chartTracks,
+        Math.min(need, Math.max(0, desired)),
+        limits,
+      );
+      meta.counts.audiodb_selected = state.chosen.length - before;
+
+      if (state.chosen.length >= need) {
+        meta.used_provider = "audiodb";
+        return { tracks: state.chosen.slice(0, need), meta };
+      }
+    }
+
+    // 1b) Similar-artist discovery (Last.fm + optional TasteDive)
     let discovered = [];
     try {
       discovered = await discoverWithLastFm({
         sp,
         market,
-        excludedSet,
+        excludedSet: new Set([
+          ...(excludedSet || []),
+          ...state.chosen.map((t) => t.id),
+        ]),
         recipe,
         meta,
       });
-    } catch (e) {
-      meta.notes.push("lastfm_discovery_failed");
+    } catch {
+      meta.notes.push("discovery_failed");
       discovered = [];
     }
 
@@ -985,12 +1640,15 @@ async function generateTracksWithMeta({ sp, recipe, market, excludedSet }) {
       const enr = await enrichTempoIfNeeded(sp, discovered, filters);
       discovered = enr.tracks || discovered;
     } catch {
-      meta.notes.push("tempo_enrich_failed_lastfm");
+      meta.notes.push("tempo_enrich_failed_discovery");
     }
 
     // apply filters (including popularity shaping for discovery)
     discovered = applyFiltersAndDedup(discovered, {
-      excludedSet: excludedSet || new Set(),
+      excludedSet: new Set([
+        ...(excludedSet || []),
+        ...state.chosen.map((t) => t.id),
+      ]),
       filters,
       popularity: {
         max: disc.max_track_popularity,
@@ -998,16 +1656,23 @@ async function generateTracksWithMeta({ sp, recipe, market, excludedSet }) {
       },
     });
 
+    // optional genre filtering
+    discovered = await filterByGenresIfNeeded(
+      sp,
+      discovered,
+      filters,
+      genreCache,
+      meta,
+    );
+
     if (disc.strategy === "deep_cuts") shuffleInPlace(discovered);
 
     const before = state.chosen.length;
     takeFromCandidates(state, discovered, need, limits);
-    const pickedNow = state.chosen.length - before;
-
-    meta.counts.lastfm_selected = pickedNow;
+    meta.counts.lastfm_selected = state.chosen.length - before;
 
     if (state.chosen.length >= need) {
-      meta.used_provider = "lastfm";
+      meta.used_provider = meta.counts.audiodb_selected > 0 ? "mixed" : "discovery";
       return { tracks: state.chosen.slice(0, need), meta };
     }
   } else {
@@ -1031,6 +1696,15 @@ async function generateTracksWithMeta({ sp, recipe, market, excludedSet }) {
         ]),
         meta,
       });
+
+      recoPool = await filterByGenresIfNeeded(
+        sp,
+        recoPool,
+        filters,
+        genreCache,
+        meta,
+      );
+      shuffleInPlace(recoPool);
     } catch {
       meta.notes.push("recommendations_failed");
       recoPool = [];
@@ -1063,6 +1737,15 @@ async function generateTracksWithMeta({ sp, recipe, market, excludedSet }) {
         ]),
         meta,
       });
+
+      srcPool = await filterByGenresIfNeeded(
+        sp,
+        srcPool,
+        filters,
+        genreCache,
+        meta,
+      );
+      shuffleInPlace(srcPool);
     } catch {
       meta.notes.push("sources_failed");
       srcPool = [];
@@ -1073,8 +1756,11 @@ async function generateTracksWithMeta({ sp, recipe, market, excludedSet }) {
     meta.counts.sources_selected = state.chosen.length - before;
   }
 
-  if (disc.enabled && meta.counts.lastfm_selected > 0)
-    meta.used_provider = "mixed";
+  const hasDiscovery =
+    (meta.counts.audiodb_selected || 0) > 0 ||
+    (meta.counts.lastfm_selected || 0) > 0;
+
+  if (hasDiscovery) meta.used_provider = "mixed";
   else if (rcfg.enabled && meta.counts.reco_selected > 0)
     meta.used_provider = "recommendations";
   else meta.used_provider = "sources";

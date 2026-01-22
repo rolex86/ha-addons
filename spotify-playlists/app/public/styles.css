@@ -535,3 +535,85 @@ details.help .helpExample {
   border: 1px solid rgba(255, 255, 255, 0.1);
   background: rgba(0, 0, 0, 0.18);
 }
+
+
+/* ---------------- Genre picker (Spotify seeds) ---------------- */
+
+.gpPanel {
+  margin-top: 8px;
+  padding: 10px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.gpRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.gpRow:first-child {
+  margin-top: 0;
+}
+
+.gpBtn {
+  padding: 8px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+}
+
+.gpInline {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.gpInline span {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.gpSelect {
+  min-width: 160px;
+}
+
+.gpSearch {
+  flex: 1;
+  min-width: 220px;
+}
+
+.gpLabel {
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.gpPills {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.gpHint {
+  width: 100%;
+  font-size: 11px;
+  color: var(--muted);
+  opacity: 0.9;
+  margin: 0 0 6px 0;
+}
+
+.gpCount {
+  margin-left: 6px;
+  font-size: 11px;
+  opacity: 0.75;
+}
+
+button.gpPill {
+  cursor: pointer;
+}

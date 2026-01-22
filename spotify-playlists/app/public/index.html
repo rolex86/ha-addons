@@ -5,7 +5,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>Spotify Playlists (HA add-on)</title>
-    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="styles.css?v=2026-01-22-genre3" />
   </head>
   <body>
     <div class="wrap">
@@ -106,10 +106,6 @@
               </div>
 
               <div style="margin-top: 6px">
-                <strong>Songkick:</strong> když zapneš <code>use_songkick_events</code>, přidá interprety z koncertů v okolí (vyžaduje <code>SONGKICK_API_KEY</code>). Nastav <code>location_query</code> nebo přímo <code>metro_area_id</code>.
-              </div>
-
-              <div style="margin-top: 6px">
                 <strong>Recommendations (Spotify):</strong> zapni
                 <code>recommendations.enabled</code> a nastav
                 <code>seed genres</code> (např. <code>rock, techno</code>). To
@@ -122,10 +118,6 @@
                 Recommendations (protože se filtruje podle BPM přes API). U
                 discovery/sources může být tempo někdy “neznámé” (záleží na tom,
                 co je k dispozici).
-              </div>
-
-              <div style="margin-top: 6px">
-                <strong>Genre filtry:</strong> <code>genres_include</code> / <code>genres_exclude</code> filtruje podle “Spotify artist genres” (žánry interpretů). Match je záměrně volnější (např. <code>metal</code> chytí <code>swedish doom metal</code>).
               </div>
 
               <div style="margin-top: 6px">
@@ -145,6 +137,6 @@
       </div>
     </div>
 
-    <script src="app.js"></script>
+    <script src="app.js?v=2026-01-22-genre3"></script>
   </body>
 </html>

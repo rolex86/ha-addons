@@ -1,8 +1,11 @@
 // app/server.js
 const express = require("express");
 const path = require("path");
+const fs = require("fs");
+const https = require("https");
 
 const {
+  DATA_DIR,
   getOptions,
   loadRecipesConfig,
   saveRecipesConfig,
@@ -23,7 +26,14 @@ const app = express();
 app.use(express.json({ limit: "1mb" }));
 
 // Static UI
-app.use("/", express.static(path.join(__dirname, "public")));
+app.use(
+  "/",
+  express.static(path.join(__dirname, "public"), {
+    setHeaders(res) {
+      res.setHeader("Cache-Control", "no-store");
+    },
+  }),
+);
 
 const db = openDb();
 
@@ -87,6 +97,42 @@ function formatErr(e) {
     String(e);
 
   return { status, message, retry_after, body };
+}
+
+function httpsGetJson(url, headers = {}) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const req = https.request(
+      {
+        method: "GET",
+        hostname: u.hostname,
+        path: u.pathname + u.search,
+        headers,
+      },
+      (res) => {
+        let data = "";
+        res.on("data", (c) => (data += c));
+        res.on("end", () => {
+          let body = null;
+          try {
+            body = data ? JSON.parse(data) : {};
+          } catch {
+            body = { raw: data };
+          }
+          if (res.statusCode >= 200 && res.statusCode < 300) {
+            resolve({ status: res.statusCode, body });
+          } else {
+            const err = new Error("spotify_http_error");
+            err.status = res.statusCode;
+            err.body = body;
+            reject(err);
+          }
+        });
+      },
+    );
+    req.on("error", reject);
+    req.end();
+  });
 }
 
 function requireToken(req, res, next) {
@@ -293,6 +339,92 @@ app.post(
     }
   },
 );
+
+/* ---------------- Spotify genre seeds (for UI picker) ---------------- */
+
+const GENRE_SEEDS_CACHE = path.join(
+  DATA_DIR,
+  "cache",
+  "spotify_genre_seeds.json",
+);
+const GENRE_SEEDS_TTL_MS = 24 * 60 * 60 * 1000;
+
+function readJsonFileSafe(p) {
+  try {
+    if (!fs.existsSync(p)) return null;
+    return JSON.parse(fs.readFileSync(p, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+app.get("/api/spotify/genre-seeds", async (req, res) => {
+  const sp = createClient();
+  try {
+    const okTok = await ensureAccessToken(sp);
+    if (!okTok.ok)
+      return res.status(400).json({ ok: false, error: "not_authorized" });
+
+    const force = String(req.query.force || "").toLowerCase();
+    const forceRefresh = force === "1" || force === "true" || force === "yes";
+
+    const now = Date.now();
+
+    if (!forceRefresh) {
+      const cached = readJsonFileSafe(GENRE_SEEDS_CACHE);
+      if (
+        cached &&
+        Array.isArray(cached.genres) &&
+        cached.genres.length &&
+        cached.fetched_at &&
+        now - Number(cached.fetched_at) < GENRE_SEEDS_TTL_MS
+      ) {
+        return res.json({
+          ok: true,
+          genres: cached.genres,
+          fetched_at: cached.fetched_at,
+          cached: true,
+          count: cached.genres.length,
+        });
+      }
+    }
+
+    let genres = [];
+    try {
+      const resp = await spRetry(() => sp.getAvailableGenreSeeds());
+      genres = resp?.body?.genres || [];
+    } catch (e1) {
+      // Fallback: call Spotify endpoint directly (some spotify-web-api-node builds return 404 here)
+      const token = sp.getAccessToken();
+      if (!token) throw e1;
+      const r = await httpsGetJson(
+        "https://api.spotify.com/v1/recommendations/available-genre-seeds",
+        { Authorization: `Bearer ${token}` },
+      );
+      genres = r?.body?.genres || [];
+    }
+
+    try {
+      fs.mkdirSync(path.dirname(GENRE_SEEDS_CACHE), { recursive: true });
+      fs.writeFileSync(
+        GENRE_SEEDS_CACHE,
+        JSON.stringify({ fetched_at: now, genres }, null, 2),
+        "utf8",
+      );
+    } catch (_) {}
+
+    res.json({
+      ok: true,
+      genres,
+      fetched_at: now,
+      cached: false,
+      count: genres.length,
+    });
+  } catch (e) {
+    const fe = formatErr(e);
+    res.status(500).json({ ok: false, error: fe });
+  }
+});
 
 app.get("/api/config", async (req, res) => {
   res.json({ ok: true, config: loadRecipesConfig() });

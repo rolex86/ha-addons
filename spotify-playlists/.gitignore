@@ -30,3 +30,8 @@ Thumbs.db
 
 # --- HA build artifacts (optional) ---
 *.tar
+
+# local dev helpers
+/app/run-local.ps1
+/app/run-local.cmd
+

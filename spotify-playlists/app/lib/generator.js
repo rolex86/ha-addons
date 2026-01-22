@@ -156,6 +156,17 @@ function getRecipeFilters(recipe) {
           .map((x) => x.trim())
           .filter(Boolean)
       : [];
+
+  // If true, tracks where we fail to determine artist genres may still pass
+  // include/include_exclude filters.
+  const allowUnknownGenres =
+    f.allow_unknown_genres === undefined || f.allow_unknown_genres === null
+      ? true
+      : f.allow_unknown_genres === true ||
+        f.allow_unknown_genres === "true" ||
+        f.allow_unknown_genres === "1" ||
+        f.allow_unknown_genres === 1;
+
   return {
     explicit: explicitPolicy,
     year_min:
@@ -178,6 +189,7 @@ function getRecipeFilters(recipe) {
     genres_mode: genresMode,
     genres_include: genresInclude,
     genres_exclude: genresExclude,
+    allow_unknown_genres: allowUnknownGenres,
   };
 }
 
@@ -279,7 +291,9 @@ function getDiscovery(recipe) {
     audiodb_country: String(d.audiodb_country ?? ""),
     audiodb_limit: Number(d.audiodb_limit ?? 30),
     audiodb_fill:
-      d.audiodb_fill === null || d.audiodb_fill === "" || d.audiodb_fill === undefined
+      d.audiodb_fill === null ||
+      d.audiodb_fill === "" ||
+      d.audiodb_fill === undefined
         ? null
         : Number(d.audiodb_fill),
 
@@ -733,9 +747,7 @@ async function tastediveGetSimilarArtists(seedArtists, limit) {
   if (!key) return [];
 
   const seeds = Array.isArray(seedArtists)
-    ? seedArtists
-        .map((x) => String(x || "").trim())
-        .filter(Boolean)
+    ? seedArtists.map((x) => String(x || "").trim()).filter(Boolean)
     : [];
   if (!seeds.length) return [];
 
@@ -803,7 +815,10 @@ function songkickLocationSearchUrl(query) {
   return `https://api.songkick.com/api/3.0/search/locations.json?${usp.toString()}`;
 }
 
-function songkickMetroCalendarUrl(metroAreaId, { min_date, max_date, page, per_page } = {}) {
+function songkickMetroCalendarUrl(
+  metroAreaId,
+  { min_date, max_date, page, per_page } = {},
+) {
   const usp = new URLSearchParams({
     apikey: songkickKey(),
   });
@@ -921,8 +936,12 @@ function genresWanted(filters) {
   const mode = String(filters.genres_mode || "ignore").toLowerCase();
   if (mode === "ignore") return false;
 
-  const inc = Array.isArray(filters.genres_include) ? filters.genres_include : [];
-  const exc = Array.isArray(filters.genres_exclude) ? filters.genres_exclude : [];
+  const inc = Array.isArray(filters.genres_include)
+    ? filters.genres_include
+    : [];
+  const exc = Array.isArray(filters.genres_exclude)
+    ? filters.genres_exclude
+    : [];
   return inc.length > 0 || exc.length > 0;
 }
 
@@ -999,6 +1018,8 @@ async function filterByGenresIfNeeded(sp, tracks, filters, cache, meta) {
     return tracks;
   }
 
+  let unknownTotal = 0;
+  let unknownKept = 0;
   const out = [];
   for (const t of tracks || []) {
     const arts = Array.isArray(t?.artists) ? t.artists : [];
@@ -1009,8 +1030,16 @@ async function filterByGenresIfNeeded(sp, tracks, filters, cache, meta) {
       if (Array.isArray(g)) genres.push(...g);
     }
 
-    const hasInclude = includeP.length ? anyGenreMatch(genres, includeP) : true;
-    const hasExclude = excludeP.length ? anyGenreMatch(genres, excludeP) : false;
+    const isUnknown = (genres || []).length === 0;
+    if (isUnknown) unknownTotal += 1;
+
+    let hasInclude = includeP.length ? anyGenreMatch(genres, includeP) : true;
+    // Allow unknown genres to pass include/include_exclude (opt-in per recipe)
+    if (isUnknown && filters?.allow_unknown_genres) hasInclude = true;
+
+    const hasExclude = excludeP.length
+      ? anyGenreMatch(genres, excludeP)
+      : false;
 
     // include-only
     if (mode === "include" && !hasInclude) continue;
@@ -1028,11 +1057,12 @@ async function filterByGenresIfNeeded(sp, tracks, filters, cache, meta) {
       if (hasExclude) continue;
     }
 
+    if (isUnknown && filters?.allow_unknown_genres) unknownKept += 1;
     out.push(t);
   }
 
   meta?.notes?.push(
-    `genre_filter:${mode}:in=${includeP.length}:ex=${excludeP.length}:kept=${out.length}/${(tracks || []).length}`,
+    `genre_filter:${mode}:in=${includeP.length}:ex=${excludeP.length}:unknown_allow=${filters?.allow_unknown_genres ? 1 : 0}:unknown_kept=${unknownKept}/${unknownTotal}:kept=${out.length}/${(tracks || []).length}`,
   );
   return out;
 }
@@ -1072,9 +1102,19 @@ function scoreSpotifyTrackCandidate(item, artistName, trackName) {
   return score;
 }
 
-async function spotifySearchTrackId(sp, artistName, trackName, market, limit = 5) {
-  const a = String(artistName || "").replaceAll('"', " ").trim();
-  const t = String(trackName || "").replaceAll('"', " ").trim();
+async function spotifySearchTrackId(
+  sp,
+  artistName,
+  trackName,
+  market,
+  limit = 5,
+) {
+  const a = String(artistName || "")
+    .replaceAll('"', " ")
+    .trim();
+  const t = String(trackName || "")
+    .replaceAll('"', " ")
+    .trim();
   if (!a || !t) return null;
 
   const q = `artist:"${a}" track:"${t}"`;
@@ -1168,7 +1208,13 @@ async function spotifyGetArtistAlbumTrackIds(sp, artistId, market, disc) {
   return uniqIds(trackIds);
 }
 
-async function discoverWithAudioDbTrending({ sp, market, excludedSet, recipe, meta }) {
+async function discoverWithAudioDbTrending({
+  sp,
+  market,
+  excludedSet,
+  recipe,
+  meta,
+}) {
   const disc = getDiscovery(recipe);
 
   if (!disc.enabled || !disc.use_audiodb_trending) {
@@ -1327,14 +1373,19 @@ async function discoverWithLastFm({ sp, market, excludedSet, recipe, meta }) {
       if (rawId && /^\d+$/.test(rawId)) metroId = Number(rawId);
 
       if (!metroId && disc.songkick_location_query) {
-        metroId = await songkickResolveMetroAreaId(disc.songkick_location_query);
+        metroId = await songkickResolveMetroAreaId(
+          disc.songkick_location_query,
+        );
         if (metroId) meta?.notes?.push(`songkick_location_resolved:${metroId}`);
       }
 
       if (!metroId) {
         meta?.notes?.push("songkick_missing_metro_area");
       } else {
-        const days = Math.max(1, Math.min(365, Number(disc.songkick_days_ahead || 30)));
+        const days = Math.max(
+          1,
+          Math.min(365, Number(disc.songkick_days_ahead || 30)),
+        );
         const minDate = new Date();
         const maxDate = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
 
@@ -1672,7 +1723,8 @@ async function generateTracksWithMeta({ sp, recipe, market, excludedSet }) {
     meta.counts.lastfm_selected = state.chosen.length - before;
 
     if (state.chosen.length >= need) {
-      meta.used_provider = meta.counts.audiodb_selected > 0 ? "mixed" : "discovery";
+      meta.used_provider =
+        meta.counts.audiodb_selected > 0 ? "mixed" : "discovery";
       return { tracks: state.chosen.slice(0, need), meta };
     }
   } else {

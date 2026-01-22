@@ -11,6 +11,18 @@ let pollTimer = null;
 let lastLogI = 0;
 let currentRunId = null;
 
+// Spotify genre seeds cache for Genre Picker UI
+let SPOTIFY_GENRE_SEEDS = null; // array of strings
+let SPOTIFY_GENRE_SEEDS_META = {
+  loaded_at: null,
+  fetched_at: null,
+  cached: null,
+  count: 0,
+};
+
+// Auto-roots cache (derived from SPOTIFY_GENRE_SEEDS)
+let AUTO_ROOTS_CACHE = null;
+
 /* ---------------- helpers ---------------- */
 
 function setMsg(text, kind) {
@@ -92,6 +104,186 @@ function splitComma(v) {
     .split(",")
     .map((x) => x.trim())
     .filter(Boolean);
+}
+
+function normalizeForMatch(s) {
+  return String(s || "")
+    .toLowerCase()
+    .replace(/\(.*?\)/g, " ")
+    .replace(/\[.*?\]/g, " ")
+    .replace(/feat\.?/g, " ")
+    .replace(/ft\.?/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function uniqCaseInsensitive(arr) {
+  const out = [];
+  const seen = new Set();
+  for (const x of Array.isArray(arr) ? arr : []) {
+    const s = String(x || "").trim();
+    if (!s) continue;
+    const k = s.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(s);
+  }
+  return out;
+}
+
+// Curated root genres (hand-picked, stable & readable)
+const CURATED_ROOTS = [
+  "rock",
+  "metal",
+  "pop",
+  "hip hop",
+  "electronic",
+  "house",
+  "techno",
+  "trance",
+  "drum and bass",
+  "dubstep",
+  "ambient",
+  "jazz",
+  "classical",
+  "reggae",
+  "latin",
+  "rnb",
+  "soul",
+  "funk",
+  "punk",
+  "blues",
+  "folk",
+  "country",
+];
+
+function computeAutoRootsFromSeeds(seeds) {
+  if (!Array.isArray(seeds) || !seeds.length) return [];
+
+  // Very small stopword list for tokenization
+  const stop = new Set([
+    "and",
+    "the",
+    "of",
+    "for",
+    "to",
+    "a",
+    "an",
+    "la",
+    "le",
+    "de",
+    "da",
+    "do",
+    "del",
+    "los",
+    "las",
+    "y",
+  ]);
+
+  const allowShort = new Set([
+    "rnb",
+    "edm",
+    "ska",
+    "emo",
+    "idm",
+    "jpop",
+    "kpop",
+  ]);
+
+  const tokenCounts = new Map();
+  const bigramCounts = new Map();
+
+  for (const s of seeds) {
+    const norm = normalizeForMatch(s);
+    if (!norm) continue;
+    const tokens = norm.split(/\s+/).filter(Boolean);
+
+    for (const t of tokens) {
+      if (stop.has(t)) continue;
+      if (t.length < 3 && !allowShort.has(t)) continue;
+      tokenCounts.set(t, (tokenCounts.get(t) || 0) + 1);
+    }
+
+    for (let i = 0; i < tokens.length - 1; i++) {
+      const a = tokens[i];
+      const b = tokens[i + 1];
+      if (!a || !b) continue;
+      if (stop.has(a) || stop.has(b)) continue;
+      if (
+        (a.length < 2 && !allowShort.has(a)) ||
+        (b.length < 2 && !allowShort.has(b))
+      )
+        continue;
+
+      const bi = `${a} ${b}`;
+      bigramCounts.set(bi, (bigramCounts.get(bi) || 0) + 1);
+    }
+  }
+
+  const candidates = [];
+
+  // Prefer meaningful phrases if frequent enough
+  const MIN_PHRASE = 10;
+  for (const [p, c] of bigramCounts.entries()) {
+    if (c < MIN_PHRASE) continue;
+    // Filter obvious noise words
+    if (
+      p.startsWith("deep ") ||
+      p.startsWith("classic ") ||
+      p.startsWith("modern ")
+    )
+      continue;
+    candidates.push({ k: p, c: c + 0.25 }); // tiny boost for phrases
+  }
+
+  const MIN_TOKEN = 18;
+  for (const [t, c] of tokenCounts.entries()) {
+    if (c < MIN_TOKEN) continue;
+    if (["deep", "classic", "modern", "new", "old"].includes(t)) continue;
+    candidates.push({ k: t, c });
+  }
+
+  // Ensure a few useful multi-word roots exist if Spotify uses them
+  const normAll = seeds.map((x) => normalizeForMatch(x)).join(" | ");
+  if (normAll.includes("hip hop")) candidates.push({ k: "hip hop", c: 999 });
+  if (normAll.includes("drum bass") || normAll.includes("drum and bass"))
+    candidates.push({ k: "drum and bass", c: 998 });
+  if (normAll.includes("k pop") || normAll.includes("kpop"))
+    candidates.push({ k: "k pop", c: 997 });
+
+  // Sort by frequency desc, then alpha
+  candidates.sort((a, b) => b.c - a.c || a.k.localeCompare(b.k));
+
+  // Deduplicate and cap
+  const roots = [];
+  const seen = new Set();
+  for (const it of candidates) {
+    const k = String(it.k || "").trim();
+    if (!k) continue;
+    const kk = k.toLowerCase();
+    if (seen.has(kk)) continue;
+    seen.add(kk);
+    roots.push(k);
+    if (roots.length >= 24) break;
+  }
+
+  return roots;
+}
+
+function getRootsByMode(mode) {
+  const m = String(mode || "curated").toLowerCase();
+  if (m !== "auto") return CURATED_ROOTS;
+
+  if (!Array.isArray(SPOTIFY_GENRE_SEEDS) || !SPOTIFY_GENRE_SEEDS.length) {
+    return CURATED_ROOTS;
+  }
+
+  if (!AUTO_ROOTS_CACHE) {
+    AUTO_ROOTS_CACHE = computeAutoRootsFromSeeds(SPOTIFY_GENRE_SEEDS);
+  }
+  return AUTO_ROOTS_CACHE && AUTO_ROOTS_CACHE.length
+    ? AUTO_ROOTS_CACHE
+    : CURATED_ROOTS;
 }
 
 function ensurePath(obj, path) {
@@ -298,8 +490,6 @@ function helpFor(k) {
           <div class="helpExample"><strong>Příklad:</strong> <code>5</code></div>
         `,
       );
-
-
 
     case "discovery.use_tastedive":
       return helpBlock(
@@ -574,6 +764,27 @@ function helpFor(k) {
         `,
       );
 
+    case "filters.allow_unknown_genres":
+      return helpBlock(
+        "Allow unknown genres",
+        `
+          <div>Když Spotify u interpreta nevrátí žádné žánry (prázdné), tak track může i tak projít filtrem.</div>
+          <div>Užitečné hlavně pro režimy <code>include</code>/<code>include_exclude</code>, aby ses nepřipravil o dobré tracky.</div>
+        `,
+      );
+
+    case "filters.genres_root_mode":
+      return helpBlock(
+        "Root genres",
+        `
+          <div>Jen pro UI picker: jak se mají nabídnout “hlavní” žánry.</div>
+          <ul>
+            <li><code>curated</code> = ručně vybraný seznam (stabilní, přehledný)</li>
+            <li><code>auto</code> = odvozeno z reálných Spotify genre seeds (může obsahovat i méně užitečné položky)</li>
+          </ul>
+        `,
+      );
+
     case "history.scope":
       return helpBlock(
         "History scope (no-repeat)",
@@ -646,7 +857,6 @@ function normalizeRecipe(r) {
   if (!r.history || typeof r.history !== "object") r.history = {};
   if (!r.recommendations || typeof r.recommendations !== "object")
     r.recommendations = {};
-
 
   const d = r.discovery;
 
@@ -724,6 +934,10 @@ function normalizeRecipe(r) {
   if (r.filters.genres_mode == null) r.filters.genres_mode = "ignore";
   if (!Array.isArray(r.filters.genres_include)) r.filters.genres_include = [];
   if (!Array.isArray(r.filters.genres_exclude)) r.filters.genres_exclude = [];
+  if (r.filters.allow_unknown_genres == null)
+    r.filters.allow_unknown_genres = true;
+  if (r.filters.genres_root_mode == null)
+    r.filters.genres_root_mode = "curated";
 
   // Per-recipe history scope override
   if (r.history.scope == null) r.history.scope = "inherit"; // inherit|per_recipe|global
@@ -980,7 +1194,9 @@ function recipeBadges(r) {
     : "";
   const hs = r.history?.scope || "inherit";
   const histBadge =
-    hs && hs !== "inherit" ? `<span class="riBadge">hist:${escapeHtml(hs)}</span>` : "";
+    hs && hs !== "inherit"
+      ? `<span class="riBadge">hist:${escapeHtml(hs)}</span>`
+      : "";
   return `
     <span class="riBadge">${tracks} tracks</span>
     <span class="riBadge">${escapeHtml(provider)}</span>
@@ -1470,6 +1686,58 @@ function renderRecipeEditor(r) {
         )}" placeholder="death metal, hardstyle">
         ${helpFor("filters.genres_exclude")}
       </label>
+
+      <div class="field span2">
+        <div class="label">Genre picker (Spotify seeds)</div>
+
+        <div class="gpPanel genrePicker" data-recipe-id="${escapeHtml(r.id)}">
+          <div class="gpRow">
+            <button type="button" class="gpBtn" data-gp-action="load">Load from Spotify</button>
+            <button type="button" class="gpBtn" data-gp-action="refresh">Refresh</button>
+            <span class="pill warn" data-gp-role="status">not loaded</span>
+          </div>
+
+          <div class="gpRow">
+            <label class="gpInline">
+              <span>Root mode</span>
+              <select data-k="filters.genres_root_mode" class="gpSelect">
+                <option value="curated" ${
+                  (filters.genres_root_mode || "curated") === "curated"
+                    ? "selected"
+                    : ""
+                }>curated</option>
+                <option value="auto" ${
+                  (filters.genres_root_mode || "") === "auto" ? "selected" : ""
+                }>auto</option>
+              </select>
+            </label>
+
+            <label class="gpInline">
+              <span>Allow unknown</span>
+              <select data-k="filters.allow_unknown_genres" class="gpSelect">
+                <option value="true" ${
+                  filters.allow_unknown_genres !== false ? "selected" : ""
+                }>true</option>
+                <option value="false" ${
+                  filters.allow_unknown_genres === false ? "selected" : ""
+                }>false</option>
+              </select>
+            </label>
+
+            <input class="gpSearch" data-gp-role="search" placeholder="Search genres (Spotify seeds)…" value="">
+          </div>
+
+          <div class="gpLabel">Roots (click cycles: include → exclude → ignore)</div>
+          <div class="gpPills" data-gp-role="roots"></div>
+
+          <div class="gpLabel">Sub-genres (Spotify seeds)</div>
+          <div class="gpPills" data-gp-role="seeds"></div>
+        </div>
+
+        ${helpFor("filters.genres_root_mode")}
+        ${helpFor("filters.allow_unknown_genres")}
+      </div>
+
     </div>
 
     <div class="section-title">Diversity</div>
@@ -1557,7 +1825,8 @@ function saveRecipeFromBlock(recipeId) {
       k === "recommendations.enabled" ||
       k === "sources.liked" ||
       k === "sources.top_tracks.enabled" ||
-      k === "diversity.avoid_same_artist_in_row"
+      k === "diversity.avoid_same_artist_in_row" ||
+      k === "filters.allow_unknown_genres"
     ) {
       setValueByPath(r, k, asBool(v));
       return;
@@ -1618,6 +1887,341 @@ function saveRecipeFromBlock(recipeId) {
 
   // Remove accidental old keys if user had "limits"
   // (engine uses diversity, but we don't break the config)
+}
+
+/* ---------------- genre picker (Spotify seeds) ---------------- */
+
+function debounce(fn, ms) {
+  let t = null;
+  return (...args) => {
+    if (t) clearTimeout(t);
+    t = setTimeout(() => fn(...args), ms);
+  };
+}
+
+async function loadSpotifyGenreSeeds({ force = false } = {}) {
+  const url = force
+    ? "/api/spotify/genre-seeds?force=1"
+    : "/api/spotify/genre-seeds";
+  const data = await api(url);
+
+  const genres = Array.isArray(data?.genres) ? data.genres : [];
+  // Keep stable ordering for UI + search
+  genres.sort((a, b) => String(a).localeCompare(String(b)));
+
+  SPOTIFY_GENRE_SEEDS = genres;
+  SPOTIFY_GENRE_SEEDS_META = {
+    loaded_at: Date.now(),
+    fetched_at: data?.fetched_at || null,
+    cached: data?.cached === true,
+    count: genres.length,
+  };
+
+  // Recompute auto roots after refresh
+  AUTO_ROOTS_CACHE = null;
+
+  return genres;
+}
+
+function getGenreListsFromBlock(block) {
+  const incEl = block?.querySelector('input[data-k="filters.genres_include"]');
+  const excEl = block?.querySelector('input[data-k="filters.genres_exclude"]');
+
+  const include = splitComma(incEl?.value || "");
+  const exclude = splitComma(excEl?.value || "");
+
+  return { incEl, excEl, include, exclude };
+}
+
+function setGenreListsToBlock(block, include, exclude) {
+  const { incEl, excEl } = getGenreListsFromBlock(block);
+
+  const inc = uniqCaseInsensitive(include);
+  const exc = uniqCaseInsensitive(exclude);
+
+  if (incEl) incEl.value = inc.join(", ");
+  if (excEl) excEl.value = exc.join(", ");
+
+  // Helpful: if user starts selecting pills while mode is ignore,
+  // auto-switch to a matching mode. But don't override when user already chose a mode.
+  const modeEl = block?.querySelector('select[data-k="filters.genres_mode"]');
+  if (modeEl) {
+    const cur = String(modeEl.value || "ignore").toLowerCase();
+    const computed =
+      inc.length && exc.length
+        ? "include_exclude"
+        : inc.length
+          ? "include"
+          : exc.length
+            ? "exclude"
+            : "ignore";
+
+    if (computed === "ignore") modeEl.value = "ignore";
+    else if (cur === "ignore") modeEl.value = computed;
+  }
+}
+
+function genreState(genre, include, exclude) {
+  const g = String(genre || "")
+    .trim()
+    .toLowerCase();
+  if (!g) return 0;
+  if (
+    (include || []).some(
+      (x) =>
+        String(x || "")
+          .trim()
+          .toLowerCase() === g,
+    )
+  )
+    return 1;
+  if (
+    (exclude || []).some(
+      (x) =>
+        String(x || "")
+          .trim()
+          .toLowerCase() === g,
+    )
+  )
+    return -1;
+  return 0;
+}
+
+// ignore -> include -> exclude -> ignore
+function toggleGenreInBlock(block, genre) {
+  const g = String(genre || "").trim();
+  if (!g) return;
+
+  const { include, exclude } = getGenreListsFromBlock(block);
+
+  const lower = g.toLowerCase();
+  const hasInc = include.some(
+    (x) =>
+      String(x || "")
+        .trim()
+        .toLowerCase() === lower,
+  );
+  const hasExc = exclude.some(
+    (x) =>
+      String(x || "")
+        .trim()
+        .toLowerCase() === lower,
+  );
+
+  // remove from both first
+  const inc2 = include.filter(
+    (x) =>
+      String(x || "")
+        .trim()
+        .toLowerCase() !== lower,
+  );
+  const exc2 = exclude.filter(
+    (x) =>
+      String(x || "")
+        .trim()
+        .toLowerCase() !== lower,
+  );
+
+  if (!hasInc && !hasExc) {
+    // -> include
+    inc2.push(g);
+  } else if (hasInc) {
+    // include -> exclude
+    exc2.push(g);
+  } else {
+    // exclude -> ignore (already removed)
+  }
+
+  setGenreListsToBlock(block, inc2, exc2);
+}
+
+function countSeedsForRoot(root) {
+  if (!Array.isArray(SPOTIFY_GENRE_SEEDS) || !SPOTIFY_GENRE_SEEDS.length)
+    return null;
+
+  const rn = normalizeForMatch(root);
+  if (!rn) return null;
+
+  let c = 0;
+  for (const s of SPOTIFY_GENRE_SEEDS) {
+    const sn = normalizeForMatch(s);
+    if (!sn) continue;
+    if (sn.includes(rn) || rn.includes(sn)) c += 1;
+  }
+  return c;
+}
+
+function populateGenrePicker(gp) {
+  if (!gp) return;
+
+  const block = gp.closest(".recipeBlock");
+  const statusEl = gp.querySelector('[data-gp-role="status"]');
+  const rootsEl = gp.querySelector('[data-gp-role="roots"]');
+  const seedsEl = gp.querySelector('[data-gp-role="seeds"]');
+  const searchEl = gp.querySelector('[data-gp-role="search"]');
+  const rootModeEl = gp.querySelector(
+    'select[data-k="filters.genres_root_mode"]',
+  );
+
+  const { include, exclude } = getGenreListsFromBlock(block);
+
+  // Status
+  if (!Array.isArray(SPOTIFY_GENRE_SEEDS) || !SPOTIFY_GENRE_SEEDS.length) {
+    if (statusEl) {
+      statusEl.className = "pill warn";
+      statusEl.textContent = "not loaded";
+    }
+    if (rootsEl) {
+      const roots = getRootsByMode(rootModeEl?.value || "curated");
+      rootsEl.innerHTML = roots
+        .map((g) => {
+          const st = genreState(g, include, exclude);
+          const cls = st === 1 ? "ok" : st === -1 ? "err" : "";
+          return `<button type="button" class="pill gpPill ${cls}" data-genre="${escapeHtml(
+            g,
+          )}">${escapeHtml(g)}</button>`;
+        })
+        .join("");
+    }
+    if (seedsEl) {
+      seedsEl.innerHTML = `<div class="muted small">Load Spotify genre seeds to get a full searchable list.</div>`;
+    }
+    return;
+  }
+
+  if (statusEl) {
+    statusEl.className = "pill ok";
+    const cached = SPOTIFY_GENRE_SEEDS_META.cached ? "cached" : "live";
+    const when = SPOTIFY_GENRE_SEEDS_META.fetched_at
+      ? new Date(SPOTIFY_GENRE_SEEDS_META.fetched_at).toLocaleString()
+      : "-";
+    statusEl.textContent = `genres: ${SPOTIFY_GENRE_SEEDS_META.count} (${cached}) • ${when}`;
+  }
+
+  // Roots
+  const roots = getRootsByMode(rootModeEl?.value || "curated");
+  if (rootsEl) {
+    rootsEl.innerHTML = roots
+      .map((g) => {
+        const st = genreState(g, include, exclude);
+        const cls = st === 1 ? "ok" : st === -1 ? "err" : "";
+        const c = countSeedsForRoot(g);
+        const cnt = Number.isFinite(Number(c))
+          ? `<span class="gpCount">${Number(c)}</span>`
+          : "";
+        return `<button type="button" class="pill gpPill ${cls}" data-genre="${escapeHtml(
+          g,
+        )}">${escapeHtml(g)}${cnt}</button>`;
+      })
+      .join("");
+  }
+
+  // Seeds list
+  const qRaw = String(searchEl?.value || "").trim();
+  const q = normalizeForMatch(qRaw);
+
+  let matches = SPOTIFY_GENRE_SEEDS;
+  if (q) {
+    matches = SPOTIFY_GENRE_SEEDS.filter((g) =>
+      normalizeForMatch(g).includes(q),
+    );
+  }
+
+  const limit = 220;
+  const shown = matches.slice(0, limit);
+
+  const hint = q
+    ? `Matches: ${shown.length}/${matches.length}`
+    : `Showing: ${shown.length}/${SPOTIFY_GENRE_SEEDS.length}`;
+
+  if (seedsEl) {
+    seedsEl.innerHTML = `
+      <div class="gpHint">${escapeHtml(hint)}</div>
+      ${shown
+        .map((g) => {
+          const st = genreState(g, include, exclude);
+          const cls = st === 1 ? "ok" : st === -1 ? "err" : "";
+          return `<button type="button" class="pill gpPill ${cls}" data-genre="${escapeHtml(
+            g,
+          )}">${escapeHtml(g)}</button>`;
+        })
+        .join("")}
+    `;
+  }
+}
+
+function wireGenrePickers() {
+  document.querySelectorAll(".genrePicker").forEach((gp) => {
+    // always refresh content (e.g., after SaveOne or manual edits)
+    populateGenrePicker(gp);
+
+    if (gp.dataset.wired === "1") return;
+    gp.dataset.wired = "1";
+
+    const block = gp.closest(".recipeBlock");
+
+    // Search filter
+    const searchEl = gp.querySelector('[data-gp-role="search"]');
+    if (searchEl) {
+      searchEl.addEventListener(
+        "input",
+        debounce(() => populateGenrePicker(gp), 120),
+      );
+    }
+
+    // Root mode changes re-render roots
+    const rootModeEl = gp.querySelector(
+      'select[data-k="filters.genres_root_mode"]',
+    );
+    if (rootModeEl) {
+      rootModeEl.addEventListener("change", () => {
+        AUTO_ROOTS_CACHE = null;
+        populateGenrePicker(gp);
+      });
+    }
+
+    // Manual input edits -> repaint pill states
+    const incEl = block?.querySelector(
+      'input[data-k="filters.genres_include"]',
+    );
+    const excEl = block?.querySelector(
+      'input[data-k="filters.genres_exclude"]',
+    );
+    if (incEl) incEl.addEventListener("change", () => populateGenrePicker(gp));
+    if (excEl) excEl.addEventListener("change", () => populateGenrePicker(gp));
+
+    gp.addEventListener("click", async (e) => {
+      const btn = e.target.closest("button[data-gp-action]");
+      if (btn) {
+        const action = btn.getAttribute("data-gp-action");
+        try {
+          if (action === "load") {
+            await loadSpotifyGenreSeeds({ force: false });
+            setMsg("Genre seeds loaded from Spotify.", "ok");
+            populateGenrePicker(gp);
+          }
+          if (action === "refresh") {
+            await loadSpotifyGenreSeeds({ force: true });
+            setMsg("Genre seeds refreshed from Spotify.", "ok");
+            populateGenrePicker(gp);
+          }
+        } catch (err) {
+          setMsg(
+            `Genre seeds fetch failed: ${safeStr(err?.body || err?.message)}`,
+            "err",
+          );
+        }
+        return;
+      }
+
+      const pill = e.target.closest("button.gpPill");
+      if (pill) {
+        const genre = pill.getAttribute("data-genre");
+        toggleGenreInBlock(block, genre);
+        populateGenrePicker(gp);
+      }
+    });
+  });
 }
 
 function renderAccordion() {
@@ -1749,6 +2353,9 @@ function renderAccordion() {
       }
     });
   });
+
+  // Wire & populate per-recipe genre picker UI
+  wireGenrePickers();
 }
 
 /* ---------------- buttons ---------------- */

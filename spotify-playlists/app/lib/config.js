@@ -146,6 +146,12 @@ function normalizeRecipe(recipe) {
   if (!Array.isArray(f.genres_include)) f.genres_include = [];
   if (!Array.isArray(f.genres_exclude)) f.genres_exclude = [];
 
+  // If enabled, tracks with no artist genres may pass include/include_exclude.
+  if (f.allow_unknown_genres == null) f.allow_unknown_genres = true;
+
+  // UI-only: how to display root genre pills (curated|auto)
+  if (f.genres_root_mode == null) f.genres_root_mode = "curated";
+
   // ---- per-recipe history scope override (optional) ----
   // If missing or set to "inherit", addon options history.scope is used.
   if (!r.history || typeof r.history !== "object") r.history = {};

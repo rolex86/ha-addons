@@ -1,21 +1,25 @@
 name: Spotify Playlist Builder
 slug: spotify-playlists
 description: Generate/update Spotify playlists from recipes (no-repeat history), triggered via HA automation.
-version: "0.1.2"
+version: "0.1.3"
 url: https://github.com/rolex86/ha-addons
 arch:
   - aarch64
   - amd64
   - armv7
   - i386
+
 startup: services
 init: false
 
+webui: "http://[HOST]:[PORT:7790]/"
+panel_icon: mdi:view-dashboard
+panel_title: "Spotify playlist generator UI"
+
 ports:
   7790/tcp: 7790
-
 ports_description:
-  7790/tcp: Config UI + API
+  7790/tcp: "Web UI + API"
 
 map:
   - data:rw

@@ -23,10 +23,13 @@
           <h2>Status</h2>
 
           <div class="btns">
-            <button id="btnReload">Reload</button>
-            <button id="btnAuth" class="primary">Authorize Spotify</button>
-            <button id="btnRun" class="primary">Run</button>
-            <button id="btnClearLogs" class="danger">Clear logs</button>
+            <button id="btnReload">Načíst znovu</button>
+            <button id="btnAuth" class="primary">Autorizovat Spotify</button>
+            <button id="btnRun" class="primary">Spustit</button>
+            <button id="btnClearLogs" class="danger">Vymazat logy</button>
+            <button id="btnClearHistoryGlobal" class="danger">
+              Smazat globální historii
+            </button>
           </div>
 
           <div class="kv">
@@ -34,11 +37,11 @@
             <div class="v" id="stPort">-</div>
             <div class="k">Base URL</div>
             <div class="v" id="stBase">-</div>
-            <div class="k">Market</div>
+            <div class="k">Trh (market)</div>
             <div class="v" id="stMarket">-</div>
-            <div class="k">Auth</div>
+            <div class="k">Autorizace</div>
             <div class="v" id="stAuth">-</div>
-            <div class="k">Last run</div>
+            <div class="k">Poslední běh</div>
             <div class="v" id="stLastRun">-</div>
           </div>
 
@@ -46,7 +49,7 @@
 
           <div class="row runrow">
             <span class="pill" id="runState">idle</span>
-            <span class="small">Live logs (polling)</span>
+            <span class="small">Live logy (polling)</span>
           </div>
 
           <pre id="logBox"></pre>
@@ -61,8 +64,8 @@
           </div>
 
           <div class="small muted" style="margin-top: 10px">
-            “Pokaždé jiné skladby” řeší historii + (pokud je zapnuto v backendu)
-            i kontrolu obsahu cílového playlistu. Pokud ti to opakuje, koukni do
+            “Pokaždé jiné skladby” řeší historie + (pokud je zapnuto v backendu)
+            i kontrola obsahu cílového playlistu. Pokud ti to opakuje, koukni do
             logů na <code>excluded=...</code>.
           </div>
 
@@ -104,8 +107,8 @@
               <div style="margin-top: 6px">
                 <strong>4) Autorizuj přes loopback URL:</strong><br />
                 otevři v prohlížeči <code>http://127.0.0.1:7790</code> → klikni
-                <strong>Authorize Spotify</strong> → potvrď souhlas. Callback se
-                vrátí přes tunel na HA.
+                <strong>Autorizovat Spotify</strong> → potvrď souhlas. Callback
+                se vrátí přes tunel na HA.
               </div>
 
               <div style="margin-top: 6px">
@@ -122,16 +125,16 @@
         <div class="card">
           <div class="row configrow">
             <div>
-              <h2>Recipes</h2>
+              <h2>Recepty</h2>
               <div class="small muted">
                 Ukládá se do <code>/data/config.json</code>.
               </div>
             </div>
 
             <div class="btns">
-              <button id="btnAdd" class="primary">Add</button>
-              <button id="btnSaveAll" class="primary">Save all</button>
-              <button id="btnLoad">Load</button>
+              <button id="btnAdd" class="primary">Přidat</button>
+              <button id="btnSaveAll" class="primary">Uložit vše</button>
+              <button id="btnLoad">Načíst</button>
             </div>
           </div>
 
@@ -157,7 +160,7 @@
               </div>
 
               <div style="margin-top: 6px">
-                <strong>Recommendations (Spotify):</strong> zapni
+                <strong>Doporučení (Spotify):</strong> zapni
                 <code>recommendations.enabled</code> a nastav
                 <code>seed genres</code> (např. <code>rock, techno</code>). To
                 se použije na doplnění do počtu, když discovery nestačí.
@@ -172,7 +175,7 @@
               </div>
 
               <div style="margin-top: 6px">
-                <strong>Diversity:</strong>
+                <strong>Pestrost:</strong>
                 <code>max_per_artist</code>, <code>max_per_album</code> a
                 <code>avoid_same_artist_in_row</code> pomáhá, aby playlist nebyl
                 “monotónní”.

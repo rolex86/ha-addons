@@ -46,18 +46,46 @@ async function httpJsonRetry(url, { maxRetries = 5, baseDelayMs = 500 } = {}) {
 
   while (true) {
     try {
-      const r = await fetch(url, { method: "GET" });
+      const r = await fetch(url, {
+        method: "GET",
+        redirect: "follow",
+        headers: {
+          accept: "application/json",
+          "user-agent": "spotify-playlists-ha-addon/1.0",
+        },
+      });
+
+      // retry na rate-limit / 5xx
       if (r.status === 429 || r.status >= 500) {
         const ra = r.headers.get("retry-after");
         const retryAfterMs = ra ? Number(ra) * 1000 : null;
-        if (attempt >= maxRetries) throw new Error(`HTTP ${r.status}`);
+
+        if (attempt >= maxRetries) {
+          const body = await r.text().catch(() => "");
+          throw new Error(
+            `HTTP ${r.status} (retries exhausted) for ${url}: ${body.slice(0, 300)}`,
+          );
+        }
+
         const backoff = Math.round(baseDelayMs * Math.pow(2, attempt));
         await sleep(retryAfterMs ?? backoff);
         attempt += 1;
         continue;
       }
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      return await r.json();
+
+      const body = await r.text().catch(() => "");
+
+      if (!r.ok) {
+        throw new Error(`HTTP ${r.status} for ${url}: ${body.slice(0, 300)}`);
+      }
+
+      try {
+        return JSON.parse(body || "{}");
+      } catch {
+        throw new Error(
+          `Invalid JSON for ${url}: ${(body || "").slice(0, 300)}`,
+        );
+      }
     } catch (e) {
       if (attempt >= maxRetries) throw e;
       const backoff = Math.round(baseDelayMs * Math.pow(2, attempt));
@@ -742,26 +770,123 @@ function tastediveUrl(params) {
   return `https://tastedive.com/api/similar?${usp.toString()}`;
 }
 
-async function tastediveGetSimilarArtists(seedArtists, limit) {
+function fnv1a32(str) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return h >>> 0;
+}
+
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function shuffleDeterministic(arr, seedStr) {
+  const a = arr.slice();
+  const rnd = mulberry32(fnv1a32(String(seedStr || "seed")));
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(rnd() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+async function tastediveGetSimilarArtists(
+  seedArtists,
+  targetTotal = 80,
+  opts = {},
+) {
   const key = tastediveKey();
   if (!key) return [];
 
-  const seeds = Array.isArray(seedArtists)
+  const seedsRaw = Array.isArray(seedArtists)
     ? seedArtists.map((x) => String(x || "").trim()).filter(Boolean)
     : [];
-  if (!seeds.length) return [];
+  if (!seedsRaw.length) return [];
 
-  const url = tastediveUrl({
-    q: seeds.join(","),
-    type: "music",
-    limit: String(limit || 50),
-    info: "0",
-    k: key,
-  });
+  // TasteDive per-request limit: MUST be < 20 → safest 19
+  const perReq = 19;
 
-  const js = await httpJsonRetry(url);
-  const items = js?.Similar?.Results || [];
-  return items.map((r) => r?.Name).filter(Boolean);
+  // cílový počet z UI (kolik interpretů celkem)
+  const total = Math.max(1, Math.min(500, Number(targetTotal || 80)));
+
+  // kolik requestů potřebujeme (ať je to šetrné)
+  const needed = Math.max(1, Math.ceil(total / perReq));
+
+  // tvrdý strop requestů (ať tě UI omylem nezabije)
+  const maxQueries = Math.max(1, Math.min(30, Number(opts.maxQueries ?? 12)));
+
+  const seedKey = String(opts.seedKey || "");
+  const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+  const shuffleKey = seedKey ? `${seedKey}|${today}` : today;
+
+  // Promíchat seed interprety deterministicky (podle recipe + dne)
+  const seeds = shuffleDeterministic(seedsRaw, shuffleKey);
+
+  // vybereme N seedů pro dotazy
+  const querySeeds = seeds.slice(0, Math.min(seeds.length, needed, maxQueries));
+
+  // Váhování: interpret, který se opakuje napříč dotazy, dostane vyšší score
+  const counts = new Map(); // normName -> count
+  const canon = new Map(); // normName -> displayName
+
+  const seedSet = new Set(seedsRaw.map((s) => s.toLowerCase()));
+
+  for (const seed of querySeeds) {
+    const url = tastediveUrl({
+      q: seed,
+      type: "music",
+      limit: String(perReq),
+      info: "0",
+      k: key,
+    });
+
+    const js = await httpJsonRetry(url);
+
+    // TasteDive může vracet různé casingy:
+    const items =
+      js?.Similar?.Results ||
+      js?.Similar?.results ||
+      js?.similar?.Results ||
+      js?.similar?.results ||
+      [];
+
+    for (const r of items) {
+      const name = String(r?.Name ?? r?.name ?? "").trim();
+      if (!name) continue;
+
+      const norm = name.toLowerCase();
+
+      // nevracej seed interprety zpátky jako doporučení
+      if (seedSet.has(norm)) continue;
+
+      counts.set(norm, (counts.get(norm) || 0) + 1);
+      if (!canon.has(norm)) canon.set(norm, name);
+    }
+  }
+
+  if (!counts.size) return [];
+
+  // Seřadit podle váhy (výskytů), ties rozseknout deterministicky
+  const rnd = mulberry32(fnv1a32(`ties|${shuffleKey}`));
+  const scored = [...counts.entries()].map(([norm, c]) => ({
+    name: canon.get(norm) || norm,
+    count: c,
+    tie: rnd(),
+  }));
+
+  scored.sort((a, b) => b.count - a.count || a.tie - b.tie);
+
+  return scored.slice(0, total).map((x) => x.name);
 }
 
 /* -------- TheAudioDB charts / trending -------- */
@@ -1107,40 +1232,52 @@ async function spotifySearchTrackId(
   artistName,
   trackName,
   market,
-  limit = 5,
+  limit = 8,
 ) {
-  const a = String(artistName || "")
+  const aRaw = String(artistName || "")
     .replaceAll('"', " ")
     .trim();
-  const t = String(trackName || "")
+  const tRaw = String(trackName || "")
     .replaceAll('"', " ")
     .trim();
-  if (!a || !t) return null;
+  if (!aRaw || !tRaw) return null;
 
-  const q = `artist:"${a}" track:"${t}"`;
-  const lim = Math.max(1, Math.min(50, Number(limit || 5)));
+  // očistit track (feat/remaster/brackets často rozbijí match)
+  const a = aRaw.replace(/\s+/g, " ").trim();
+  const t = tRaw
+    .replace(/\s+/g, " ")
+    .replace(/\s*\(.*?\)\s*/g, " ")
+    .replace(/\s*\[.*?\]\s*/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 
-  const resp = await spRetry(() =>
-    sp.searchTracks(q, { market, limit: lim, offset: 0 }),
-  );
+  const lim = Math.max(1, Math.min(50, Number(limit || 8)));
 
-  const items = resp.body?.tracks?.items || [];
-  if (!items.length) return null;
+  const queries = [`artist:"${a}" track:"${t}"`, `${a} ${t}`, `"${t}"`];
 
-  let best = null;
-  let bestScore = -1;
-  for (const it of items) {
-    const sc = scoreSpotifyTrackCandidate(it, a, t);
-    if (sc > bestScore) {
-      bestScore = sc;
-      best = it;
+  for (const q of queries) {
+    const resp = await spRetry(() =>
+      sp.searchTracks(q, { market, limit: lim, offset: 0 }),
+    );
+
+    const items = resp.body?.tracks?.items || [];
+    if (!items.length) continue;
+
+    let best = null;
+    let bestScore = -1;
+    for (const it of items) {
+      const sc = scoreSpotifyTrackCandidate(it, a, t);
+      if (sc > bestScore) {
+        bestScore = sc;
+        best = it;
+      }
     }
+
+    const threshold = q.startsWith('artist:"') ? 60 : 50;
+    if (bestScore >= threshold) return best?.id || null;
   }
 
-  // Safety: if nothing looks like a decent match, return null
-  if (bestScore < 60) return null;
-
-  return best?.id || null;
+  return null;
 }
 
 async function spotifyGetFullTracks(sp, ids, market) {
@@ -1234,8 +1371,20 @@ async function discoverWithAudioDbTrending({
   let pairs = [];
   try {
     pairs = await audiodbGetTrendingTracks(country, limit);
-  } catch {
+
+    // fallback, když pro zemi nic není
+    if (!pairs.length && country !== "us") {
+      pairs = await audiodbGetTrendingTracks("us", limit);
+      meta?.notes?.push("audiodb_fallback_us");
+    }
+
+    if (!pairs.length && country !== "gb") {
+      pairs = await audiodbGetTrendingTracks("gb", limit);
+      meta?.notes?.push("audiodb_fallback_gb");
+    }
+  } catch (e) {
     meta?.notes?.push("audiodb_fetch_failed");
+    console.warn("[audiodb] failed:", e?.message || e);
     return [];
   }
 
@@ -1351,14 +1500,26 @@ async function discoverWithLastFm({ sp, market, excludedSet, recipe, meta }) {
 
   if (hasTaste && seeds.length) {
     try {
-      const sim = await tastediveGetSimilarArtists(
-        seeds,
-        Math.max(1, Math.min(200, disc.tastedive_limit || 80)),
+      const tdTarget = Math.max(
+        1,
+        Math.min(200, Number(disc.tastedive_limit ?? 80)),
       );
-      similarAll.push(...sim);
-      meta?.notes?.push("tastedive_used");
-    } catch {
+
+      const sim = await tastediveGetSimilarArtists(seeds, tdTarget, {
+        seedKey: String(recipe?.id || "recipe"),
+        // volitelné: když v configu nemáš, nech to být
+        maxQueries: disc.tastedive_max_queries,
+      });
+
+      if (sim.length) {
+        similarAll.push(...sim);
+        meta?.notes?.push("tastedive_used");
+      } else {
+        meta?.notes?.push("tastedive_no_results");
+      }
+    } catch (e) {
       meta?.notes?.push("tastedive_fetch_failed");
+      console.warn("[tastedive] failed:", e?.message || e);
     }
   } else if (hasTaste && !seeds.length) {
     meta?.notes?.push("tastedive_requires_seed_artists");
@@ -1618,8 +1779,10 @@ async function generateTracksWithMeta({ sp, recipe, market, excludedSet }) {
           recipe,
           meta,
         });
-      } catch {
+      } catch (e) {
         meta.notes.push("audiodb_discovery_failed");
+        console.warn("[audiodb] discovery wrapper failed:", e?.message || e);
+        if (e?.stack) console.warn(e.stack);
         chartTracks = [];
       }
 
@@ -1681,8 +1844,10 @@ async function generateTracksWithMeta({ sp, recipe, market, excludedSet }) {
         recipe,
         meta,
       });
-    } catch {
+    } catch (e) {
       meta.notes.push("discovery_failed");
+      console.warn("[discovery] failed:", e?.message || e);
+      if (e?.stack) console.warn(e.stack);
       discovered = [];
     }
 

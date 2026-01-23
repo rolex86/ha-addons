@@ -187,9 +187,20 @@ async function prune(
   );
 }
 
+async function clearScope(db, { historyScope, recipeId }) {
+  const key = scopeKey({ historyScope, recipeId });
+  await dbRun(db, `DELETE FROM history WHERE scope_key=?`, [key]);
+}
+
+async function clearAll(db) {
+  await dbRun(db, `DELETE FROM history`, []);
+}
+
 module.exports = {
   openDb,
   getExcludedSet,
   recordUsed,
   prune,
+  clearScope,
+  clearAll,
 };

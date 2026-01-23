@@ -2272,16 +2272,12 @@ function renderAccordion() {
             <div class="row" style="justify-content: space-between; align-items:center; margin-bottom:10px;">
               <div class="small muted">Edituješ přímo tento recipe. Uložení je až po “Save all”.</div>
               <div class="btns">
-                <button class="danger" data-action="delete" data-id="${escapeHtml(
-                  r.id,
-                )}">Delete</button>
-                <button data-action="dup" data-id="${escapeHtml(
-                  r.id,
-                )}">Duplicate</button>
-                <button class="primary" data-action="saveone" data-id="${escapeHtml(
-                  r.id,
-                )}">Save recipe</button>
-              </div>
+  <button class="danger" data-action="clearhist" data-id="${escapeHtml(r.id)}">Clear history</button>
+  <button class="danger" data-action="delete" data-id="${escapeHtml(r.id)}">Delete</button>
+  <button data-action="dup" data-id="${escapeHtml(r.id)}">Duplicate</button>
+  <button class="primary" data-action="saveone" data-id="${escapeHtml(r.id)}">Save recipe</button>
+</div>
+
             </div>
 
             ${renderRecipeEditor(r)}
@@ -2293,7 +2289,7 @@ function renderAccordion() {
 
   // wire actions
   list.querySelectorAll("[data-action]").forEach((el) => {
-    el.addEventListener("click", (e) => {
+    el.addEventListener("click", async (e) => {
       const action = el.getAttribute("data-action");
       const id = el.getAttribute("data-id");
       if (!id) return;
@@ -2316,6 +2312,31 @@ function renderAccordion() {
         saveRecipeFromBlock(id);
         setMsg("Recipe uložen do UI. Teď dej Save all.", "ok");
         renderAccordion();
+        return;
+      }
+
+      if (action === "clearhist") {
+        const r = getRecipeById(id);
+        if (!r) return;
+
+        const title = r.name || r.id;
+        if (!confirm(`Smazat historii jen pro recipe "${title}"?`)) return;
+
+        try {
+          await api("/api/history/clear-scope", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ history_scope: "recipe", recipe_id: id }),
+          });
+          setMsg(`Historie pro "${title}" smazána.`, "ok");
+        } catch (err) {
+          setMsg(
+            `Smazání historie selhalo: ${err.status || ""} ${safeStr(
+              err.body || err.message,
+            )}`,
+            "err",
+          );
+        }
         return;
       }
 
@@ -2432,6 +2453,25 @@ $("btnClearLogs").addEventListener("click", async () => {
   } catch (e) {
     setMsg(
       `Clear logs failed: ${e.status || ""} ${safeStr(e.body || e.message)}`,
+      "err",
+    );
+  }
+});
+
+$("btnClearHistoryGlobal").addEventListener("click", async () => {
+  if (!confirm("Clear GLOBAL history (shared across recipes)?")) return;
+  try {
+    await api("/api/history/clear-scope", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ history_scope: "global" }),
+    });
+    setMsg("Global history cleared.", "ok");
+  } catch (e) {
+    setMsg(
+      `Clear global history failed: ${e.status || ""} ${safeStr(
+        e.body || e.message,
+      )}`,
       "err",
     );
   }

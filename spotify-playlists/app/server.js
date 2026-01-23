@@ -16,7 +16,15 @@ const {
   saveTokens,
   loadTokens,
 } = require("./lib/spotify");
-const { openDb, getExcludedSet, recordUsed, prune } = require("./lib/history");
+const {
+  openDb,
+  getExcludedSet,
+  recordUsed,
+  prune,
+  clearScope,
+  clearAll,
+} = require("./lib/history");
+
 const {
   generateTracksWithMeta,
   replacePlaylistItems,
@@ -437,6 +445,55 @@ app.post("/api/config", async (req, res) => {
   if (!Array.isArray(cfg.recipes)) cfg.recipes = [];
   saveRecipesConfig(cfg);
   res.json({ ok: true });
+});
+
+/* ---------------- history maintenance ---------------- */
+
+// Clear history for ONE scope (global OR a specific recipe scope)
+app.post("/api/history/clear-scope", requireToken, async (req, res) => {
+  try {
+    const history_scope = String(req.body?.history_scope || "").trim(); // "global" | "recipe"
+    const recipe_id = String(req.body?.recipe_id || "").trim();
+
+    if (!history_scope) {
+      return res
+        .status(400)
+        .json({ ok: false, error: "missing_history_scope" });
+    }
+
+    if (history_scope !== "global" && history_scope !== "recipe") {
+      return res
+        .status(400)
+        .json({ ok: false, error: "invalid_history_scope" });
+    }
+
+    if (history_scope === "recipe" && !recipe_id) {
+      return res.status(400).json({ ok: false, error: "missing_recipe_id" });
+    }
+
+    await clearScope(db, {
+      historyScope: history_scope, // musí být "global" nebo "recipe"
+      recipeId: recipe_id || "n/a", // pro global se nepoužije
+    });
+
+    res.json({ ok: true });
+  } catch (e) {
+    console.warn("[history] clear-scope failed:", e?.message || e);
+    if (e?.stack) console.warn(e.stack);
+    res.status(500).json({ ok: false, error: "history_clear_failed" });
+  }
+});
+
+// Clear EVERYTHING (all scopes)
+app.post("/api/history/clear-all", requireToken, async (req, res) => {
+  try {
+    await clearAll(db);
+    res.json({ ok: true });
+  } catch (e) {
+    console.warn("[history] clear-all failed:", e?.message || e);
+    if (e?.stack) console.warn(e.stack);
+    res.status(500).json({ ok: false, error: "history_clear_failed" });
+  }
 });
 
 // OAuth start

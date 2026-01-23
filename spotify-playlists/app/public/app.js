@@ -2272,10 +2272,10 @@ function renderAccordion() {
             <div class="row" style="justify-content: space-between; align-items:center; margin-bottom:10px;">
               <div class="small muted">Edituješ přímo tento recipe. Uložení je až po “Save all”.</div>
               <div class="btns">
-  <button class="danger" data-action="clearhist" data-id="${escapeHtml(r.id)}">Clear history</button>
-  <button class="danger" data-action="delete" data-id="${escapeHtml(r.id)}">Delete</button>
-  <button data-action="dup" data-id="${escapeHtml(r.id)}">Duplicate</button>
-  <button class="primary" data-action="saveone" data-id="${escapeHtml(r.id)}">Save recipe</button>
+  <button class="danger" data-action="clearhist" data-id="${escapeHtml(r.id)}">Vymazat historii</button>
+  <button class="danger" data-action="delete" data-id="${escapeHtml(r.id)}">Smazat</button>
+  <button data-action="dup" data-id="${escapeHtml(r.id)}">Kopírovat</button>
+  <button class="primary" data-action="saveone" data-id="${escapeHtml(r.id)}">Uložit recept</button>
 </div>
 
             </div>

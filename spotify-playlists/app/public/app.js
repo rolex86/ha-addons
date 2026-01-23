@@ -10,6 +10,7 @@ let openId = null;
 let pollTimer = null;
 let lastLogI = 0;
 let currentRunId = null;
+let RAW_OPEN = {};
 
 // Spotify genre seeds cache for Genre Picker UI
 let SPOTIFY_GENRE_SEEDS = null; // array of strings
@@ -59,6 +60,12 @@ function safeStr(x) {
   } catch {
     return String(x);
   }
+}
+
+function setAuthButtonVisible(isAuthorized) {
+  const btn = $("btnAuth");
+  if (!btn) return;
+  btn.style.display = isAuthorized ? "none" : "";
 }
 
 function fmtTs(ts) {
@@ -1109,12 +1116,19 @@ function startPolling() {
 
 async function loadStatus() {
   const st = await api("/api/status");
+
   $("stPort").textContent = st.port ?? "-";
   $("stBase").textContent = st.base_url ?? "-";
   $("stMarket").textContent = st.market ?? "-";
-  $("stAuth").textContent = st.auth?.has_refresh_token
+
+  const isAuthed = !!st.auth?.has_refresh_token;
+
+  $("stAuth").textContent = isAuthed
     ? `OK (refreshed ${fmtTs(st.auth.refreshed_at)})`
     : "NOT AUTHORIZED";
+
+  // schovej/ukaž tlačítko "Authorize Spotify"
+  setAuthButtonVisible(isAuthed);
 
   $("stLastRun").textContent = st.last_run?.at
     ? `${fmtTs(st.last_run.at)} • ok=${st.last_run.ok}`
@@ -2238,6 +2252,7 @@ function renderAccordion() {
       normalizeRecipe(r);
 
       const isOpen = r.id === openId;
+      const isRawOpen = !!RAW_OPEN[r.id];
       const name = escapeHtml(r.name || "Recipe");
       const pid = escapeHtml(r.target_playlist_id || "");
       const caret = isOpen ? "▾" : "▸";
@@ -2272,12 +2287,37 @@ function renderAccordion() {
             <div class="row" style="justify-content: space-between; align-items:center; margin-bottom:10px;">
               <div class="small muted">Edituješ přímo tento recipe. Uložení je až po “Save all”.</div>
               <div class="btns">
-  <button data-action="dup" data-id="${escapeHtml(r.id)}">Kopírovat</button>
-  <button class="danger" data-action="clearhist" data-id="${escapeHtml(r.id)}">Vymazat historii</button>
-  <button class="danger" data-action="delete" data-id="${escapeHtml(r.id)}">Smazat</button>
-  <button class="primary" data-action="saveone" data-id="${escapeHtml(r.id)}">Uložit recept</button>
-</div>
+                <button data-action="dup" data-id="${escapeHtml(r.id)}">Kopírovat</button>
+                <button data-action="rawtoggle" data-id="${escapeHtml(r.id)}">RAW</button>
+                <button class="danger" data-action="clearhist" data-id="${escapeHtml(r.id)}">Vymazat historii</button>
+                <button class="danger" data-action="delete" data-id="${escapeHtml(r.id)}">Smazat</button>
+                <button class="primary" data-action="saveone" data-id="${escapeHtml(r.id)}">Uložit recept</button>
+              </div>
+            </div>
 
+            <div class="rawBox" ${
+              isRawOpen ? "" : 'style="display:none"'
+            } data-rawbox-id="${escapeHtml(r.id)}">
+              <div class="small muted" style="margin:10px 0 6px">
+                RAW JSON (zkopíruj / pošli / uprav a dej „Použít“)
+              </div>
+
+              <textarea class="rawTextarea" data-raw-text data-id="${escapeHtml(
+                r.id,
+              )}" spellcheck="false">${escapeHtml(
+                JSON.stringify(r, null, 2),
+              )}</textarea>
+
+              <div class="btns" style="margin-top:8px">
+                <button data-action="rawcopy" data-id="${escapeHtml(
+                  r.id,
+                )}">Kopírovat</button>
+                <button class="primary" data-action="rawapply" data-id="${escapeHtml(
+                  r.id,
+                )}">Použít</button>
+              </div>
+
+              <div class="hr" style="margin-top:12px"></div>
             </div>
 
             ${renderRecipeEditor(r)}
@@ -2294,11 +2334,108 @@ function renderAccordion() {
       const id = el.getAttribute("data-id");
       if (!id) return;
 
+      // RAW toggle (jen UI, žádné ukládání)
+      if (action === "rawtoggle") {
+        RAW_OPEN[id] = !RAW_OPEN[id];
+        renderAccordion();
+        return;
+      }
+
+      // Copy RAW JSON
+      if (action === "rawcopy") {
+        const ta = document.querySelector(
+          `textarea[data-raw-text][data-id="${CSS.escape(id)}"]`,
+        );
+        const txt = ta?.value || "";
+        if (!txt.trim()) {
+          setMsg("RAW JSON je prázdný.", "warn");
+          return;
+        }
+
+        try {
+          if (navigator.clipboard?.writeText) {
+            await navigator.clipboard.writeText(txt);
+          } else {
+            ta?.focus();
+            ta?.select();
+            document.execCommand("copy");
+          }
+          setMsg("Zkopírováno do schránky.", "ok");
+        } catch (err) {
+          setMsg("Kopírování selhalo.", "err");
+        }
+        return;
+      }
+
+      // Apply RAW JSON -> přepíše recipe v CURRENT_CONFIG a rerender
+      if (action === "rawapply") {
+        const ta = document.querySelector(
+          `textarea[data-raw-text][data-id="${CSS.escape(id)}"]`,
+        );
+        const txt = ta?.value || "";
+
+        let obj;
+        try {
+          obj = JSON.parse(txt);
+        } catch (err) {
+          setMsg("Neplatný JSON (nejde parsovat).", "err");
+          return;
+        }
+
+        const newId = String(obj?.id || "").trim();
+        if (!newId) {
+          setMsg("RAW JSON musí obsahovat pole 'id'.", "err");
+          return;
+        }
+
+        const idx = (CURRENT_CONFIG.recipes || []).findIndex(
+          (x) => x.id === id,
+        );
+        if (idx < 0) {
+          setMsg("Recipe nenalezen (v UI).", "err");
+          return;
+        }
+
+        if (newId !== id) {
+          const collision = (CURRENT_CONFIG.recipes || []).some(
+            (x) => x.id === newId && x.id !== id,
+          );
+          if (collision) {
+            setMsg(`ID '${newId}' už existuje.`, "err");
+            return;
+          }
+          if (
+            !confirm(
+              `Měníš id receptu:\n\n${id} → ${newId}\n\nChceš pokračovat?`,
+            )
+          ) {
+            return;
+          }
+        }
+
+        try {
+          normalizeRecipe(obj);
+          CURRENT_CONFIG.recipes[idx] = obj;
+
+          // přenést RAW state při změně id
+          if (newId !== id) {
+            RAW_OPEN[newId] = RAW_OPEN[id];
+            delete RAW_OPEN[id];
+            if (openId === id) openId = newId;
+          }
+
+          renderAccordion();
+          setMsg("Recipe přepsán z RAW JSON. Nezapomeň Save all.", "ok");
+        } catch (err) {
+          setMsg(`Normalize selhalo: ${safeStr(err?.message || err)}`, "err");
+        }
+        return;
+      }
+
       if (action === "toggle") {
         openId = openId === id ? null : id;
         renderAccordion();
 
-        // pokud se otevřel, sroluj ho do view
         if (openId === id) {
           const block = document.querySelector(
             `.recipeBlock[data-id="${CSS.escape(id)}"]`,
@@ -2357,7 +2494,6 @@ function renderAccordion() {
         const r = getRecipeById(id);
         if (!r) return;
 
-        // vezmi poslední změny z editoru
         saveRecipeFromBlock(id);
 
         const copy = JSON.parse(JSON.stringify(r));

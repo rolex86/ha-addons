@@ -635,14 +635,31 @@ app.post("/api/run", requireToken, async (req, res) => {
 
       logRun("info", `Recipe ${recipe.id}: preparing excluded set...`);
 
-      // 1) history-based exclude
-      const historyExcluded = await getExcludedSet(db, {
-        historyScope: effectiveHistoryScope,
-        recipeId: recipe.id,
-        mode: opts.history.mode,
-        rollingDays: opts.history.rolling_days,
-        lifetimeCap: opts.history.lifetime_cap,
-      });
+      const need = Number(recipe.track_count ?? 50);
+
+      // 1) history-based exclude (can be disabled per-recipe)
+      let historyExcluded = new Set();
+      const histCfg =
+        recipe?.history && typeof recipe.history === "object"
+          ? recipe.history
+          : {};
+      const historyEnabled = histCfg.enabled !== false;
+
+      const rollingDaysEffective =
+        histCfg.rolling_days != null &&
+        Number.isFinite(Number(histCfg.rolling_days))
+          ? Number(histCfg.rolling_days)
+          : opts.history.rolling_days;
+
+      if (historyEnabled) {
+        historyExcluded = await getExcludedSet(db, {
+          historyScope: effectiveHistoryScope,
+          recipeId: recipe.id,
+          mode: opts.history.mode,
+          rollingDays: rollingDaysEffective,
+          lifetimeCap: opts.history.lifetime_cap,
+        });
+      }
 
       // 2) playlist-content exclude (robust no-repeat even after DB reset)
       const playlistExcluded = await fetchPlaylistTrackIdSet(
@@ -652,7 +669,7 @@ app.post("/api/run", requireToken, async (req, res) => {
       );
 
       // union
-      const excludedSet = new Set([...historyExcluded, ...playlistExcluded]);
+      let excludedSet = new Set([...historyExcluded, ...playlistExcluded]);
 
       logRun(
         "debug",
@@ -661,12 +678,87 @@ app.post("/api/run", requireToken, async (req, res) => {
 
       logRun("info", `Recipe ${recipe.id}: generating tracks...`);
 
-      const { tracks, meta } = await generateTracksWithMeta({
+      let { tracks, meta } = await generateTracksWithMeta({
         sp,
         recipe,
         market: opts.market,
         excludedSet,
+        historyOnlySet: historyExcluded,
       });
+
+      // Auto-flush history when it blocks too much of the sources pool (per-recipe only)
+      const af =
+        histCfg.auto_flush && typeof histCfg.auto_flush === "object"
+          ? histCfg.auto_flush
+          : {};
+
+      if (
+        historyEnabled &&
+        af.enabled === true &&
+        effectiveHistoryScope !== "per_recipe"
+      ) {
+        logRun(
+          "warn",
+          `Recipe ${recipe.id}: auto-flush is enabled but scope=${effectiveHistoryScope}. Ignoring (only per_recipe is safe).`,
+        );
+      }
+
+      const autoFlushEnabled =
+        historyEnabled &&
+        effectiveHistoryScope === "per_recipe" &&
+        af.enabled === true;
+
+      if (autoFlushEnabled) {
+        const poolTotal = Number(meta?.counts?.sources_pool_total || 0);
+        const poolAfter = Number(
+          meta?.counts?.sources_pool_after_excluded || 0,
+        );
+        const hits = Number(meta?.counts?.sources_pool_history_hits || 0);
+
+        const thresholdPct = Number.isFinite(Number(af.threshold_pct))
+          ? Number(af.threshold_pct)
+          : 80;
+        const minPool = Number.isFinite(Number(af.min_pool))
+          ? Number(af.min_pool)
+          : 200;
+
+        const pct = poolTotal > 0 ? (hits / poolTotal) * 100 : 0;
+        const poolTooSmall = poolAfter < Math.max(need * 5, minPool);
+
+        if (
+          poolTotal >= minPool &&
+          hits > 0 &&
+          pct >= thresholdPct &&
+          poolTooSmall
+        ) {
+          logRun(
+            "warn",
+            `Recipe ${recipe.id}: auto-flush history (hits=${hits}/${poolTotal} = ${pct.toFixed(
+              1,
+            )}%, after_excluded=${poolAfter}).`,
+          );
+
+          await clearScope(db, {
+            historyScope: effectiveHistoryScope,
+            recipeId: recipe.id,
+          });
+
+          historyExcluded = new Set();
+          excludedSet = new Set([...playlistExcluded]);
+
+          const retry = await generateTracksWithMeta({
+            sp,
+            recipe,
+            market: opts.market,
+            excludedSet,
+            historyOnlySet: historyExcluded,
+          });
+
+          tracks = retry.tracks;
+          meta = retry.meta;
+          if (meta?.notes) meta.notes.push("history_auto_flushed");
+        }
+      }
 
       const uris = tracks.map((t) => `spotify:track:${t.id}`);
 
@@ -704,19 +796,21 @@ app.post("/api/run", requireToken, async (req, res) => {
 
       logRun("info", `Recipe ${recipe.id}: playlist updated OK.`);
 
-      await recordUsed(db, {
-        historyScope: effectiveHistoryScope,
-        recipeId: recipe.id,
-        trackIds: tracks.map((t) => t.id),
-      });
+      if (historyEnabled) {
+        await recordUsed(db, {
+          historyScope: effectiveHistoryScope,
+          recipeId: recipe.id,
+          trackIds: tracks.map((t) => t.id),
+        });
 
-      await prune(db, {
-        historyScope: effectiveHistoryScope,
-        recipeId: recipe.id,
-        mode: opts.history.mode,
-        rollingDays: opts.history.rolling_days,
-        lifetimeCap: opts.history.lifetime_cap,
-      });
+        await prune(db, {
+          historyScope: effectiveHistoryScope,
+          recipeId: recipe.id,
+          mode: opts.history.mode,
+          rollingDays: rollingDaysEffective,
+          lifetimeCap: opts.history.lifetime_cap,
+        });
+      }
 
       runResults.push({
         recipe_id: recipe.id,

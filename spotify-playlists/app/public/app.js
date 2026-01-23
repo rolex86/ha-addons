@@ -806,6 +806,50 @@ function helpFor(k) {
           </div>
         `,
       );
+    case "history.enabled":
+      return helpBlock(
+        "History enabled",
+        `
+          <div>Když <code>false</code>, historie se pro recipe vůbec nepoužije (může se opakovat).</div>
+          <div>Když <code>true</code>, chová se to jako doteď (no-repeat).</div>
+        `,
+      );
+
+    case "history.rolling_days":
+      return helpBlock(
+        "Rolling days (override)",
+        `
+          <div>Kolik dní držet historii pro tohle recipe.</div>
+          <div>Prázdné = použije se globální nastavení z addon options (<code>history.rolling_days</code>).</div>
+        `,
+      );
+
+    case "history.auto_flush.enabled":
+      return helpBlock(
+        "Auto-flush history",
+        `
+          <div>Když je historie “příliš plná”, umí se sama vyčistit.</div>
+          <div>Doporučené používat jen se scope <code>per_recipe</code>.</div>
+        `,
+      );
+
+    case "history.auto_flush.threshold_pct":
+      return helpBlock(
+        "Auto-flush threshold %",
+        `
+          <div>Pokud historie blokuje ≥ X % zdrojového poolu (sources), může se vyflushnout.</div>
+          <div class="helpExample"><strong>Příklad:</strong> <code>80</code></div>
+        `,
+      );
+
+    case "history.auto_flush.min_pool":
+      return helpBlock(
+        "Auto-flush min pool",
+        `
+          <div>Auto-flush se začne vyhodnocovat až když má pool aspoň tolik tracků (aby to nedělalo falešné poplachy na malých poolech).</div>
+          <div class="helpExample"><strong>Příklad:</strong> <code>200</code></div>
+        `,
+      );
 
     // Diversity
     case "diversity.max_per_artist":
@@ -949,6 +993,19 @@ function normalizeRecipe(r) {
   // Per-recipe history scope override
   if (r.history.scope == null) r.history.scope = "inherit"; // inherit|per_recipe|global
 
+  // Per-recipe history retention (optional)
+  if (r.history.enabled == null) r.history.enabled = true;
+  if (r.history.rolling_days === undefined) r.history.rolling_days = null; // null => inherit addon options
+
+  if (!r.history.auto_flush || typeof r.history.auto_flush !== "object")
+    r.history.auto_flush = {};
+  if (r.history.auto_flush.enabled == null)
+    r.history.auto_flush.enabled = false;
+  if (r.history.auto_flush.threshold_pct == null)
+    r.history.auto_flush.threshold_pct = 80;
+  if (r.history.auto_flush.min_pool == null)
+    r.history.auto_flush.min_pool = 200;
+
   // Diversity defaults
   if (r.diversity.max_per_artist === undefined) r.diversity.max_per_artist = 2;
   if (r.diversity.max_per_album === undefined) r.diversity.max_per_album = null;
@@ -1046,7 +1103,14 @@ function recipeTemplate() {
     },
 
     history: {
+      enabled: true,
       scope: "inherit", // inherit|per_recipe|global
+      rolling_days: null, // null => inherit addon options
+      auto_flush: {
+        enabled: false,
+        threshold_pct: 80,
+        min_pool: 200,
+      },
     },
 
     diversity: {
@@ -1226,6 +1290,7 @@ function renderRecipeEditor(r) {
   const sources = r.sources || {};
   const filters = r.filters || {};
   const hist = r.history || {};
+  const hflush = hist.auto_flush || {};
   const diversity = r.diversity || {};
   const adv = r.advanced || {};
   const reco = r.recommendations || {};
@@ -1255,8 +1320,17 @@ function renderRecipeEditor(r) {
       </label>
     </div>
 
-    <div class="section-title">History / No-repeat</div>
+        <div class="section-title">History / No-repeat</div>
     <div class="formgrid">
+      <label class="field">
+        <div class="label">Enabled</div>
+        <select data-k="history.enabled">
+          <option value="true" ${hist.enabled !== false ? "selected" : ""}>true</option>
+          <option value="false" ${hist.enabled === false ? "selected" : ""}>false</option>
+        </select>
+        ${helpFor("history.enabled")}
+      </label>
+
       <label class="field">
         <div class="label">History scope</div>
         <select data-k="history.scope">
@@ -1272,7 +1346,56 @@ function renderRecipeEditor(r) {
         </select>
         ${helpFor("history.scope")}
       </label>
+
+      <label class="field">
+        <div class="label">Rolling days (override)</div>
+        <input
+          data-k="history.rolling_days"
+          type="number"
+          min="1"
+          max="3650"
+          value="${hist.rolling_days == null ? "" : Number(hist.rolling_days)}"
+          placeholder="(inherit)"
+        >
+        ${helpFor("history.rolling_days")}
+      </label>
+
+      <label class="field">
+        <div class="label">Auto-flush (only per_recipe)</div>
+        <select data-k="history.auto_flush.enabled">
+          <option value="true" ${hflush.enabled === true ? "selected" : ""}>true</option>
+          <option value="false" ${hflush.enabled !== true ? "selected" : ""}>false</option>
+        </select>
+        ${helpFor("history.auto_flush.enabled")}
+      </label>
+
+      <label class="field">
+        <div class="label">Auto-flush threshold %</div>
+        <input
+          data-k="history.auto_flush.threshold_pct"
+          type="number"
+          min="1"
+          max="100"
+          value="${hflush.threshold_pct == null ? "" : Number(hflush.threshold_pct)}"
+          placeholder="80"
+        >
+        ${helpFor("history.auto_flush.threshold_pct")}
+      </label>
+
+      <label class="field">
+        <div class="label">Auto-flush min pool</div>
+        <input
+          data-k="history.auto_flush.min_pool"
+          type="number"
+          min="0"
+          max="50000"
+          value="${hflush.min_pool == null ? "" : Number(hflush.min_pool)}"
+          placeholder="200"
+        >
+        ${helpFor("history.auto_flush.min_pool")}
+      </label>
     </div>
+
 
     <div class="section-title">Discovery (Last.fm)</div>
     <div class="formgrid">
@@ -1832,6 +1955,8 @@ function saveRecipeFromBlock(recipeId) {
     if (
       k === "discovery.enabled" ||
       k === "discovery.use_tastedive" ||
+      k === "history.enabled" ||
+      k === "history.auto_flush.enabled" ||
       k === "discovery.use_audiodb_trending" ||
       k === "discovery.use_songkick_events" ||
       k === "discovery.include_seed_artists" ||
@@ -1849,6 +1974,9 @@ function saveRecipeFromBlock(recipeId) {
     if (
       k === "filters.year_min" ||
       k === "filters.year_max" ||
+      k === "history.rolling_days" ||
+      k === "history.auto_flush.threshold_pct" ||
+      k === "history.auto_flush.min_pool" ||
       k === "filters.tempo_min" ||
       k === "filters.tempo_max" ||
       k === "discovery.min_track_popularity" ||

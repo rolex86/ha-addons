@@ -702,16 +702,43 @@ async function poolFromRecommendations({
     meta?.notes?.push("tempo_enrich_failed_recommendations");
   }
 
+  // Baseline pool (filters + dedup, but WITHOUT exclusion) so server.js can judge
+  // how much of the available sources are blocked by history.
+  let poolAll = [];
+  try {
+    poolAll = applyFiltersAndDedup(raw, {
+      excludedSet: new Set(),
+      filters,
+      popularity: null,
+    });
+  } catch {
+    poolAll = [];
+  }
+
+  // Now apply real excludedSet (history + playlist + already-chosen, etc.)
   let candidates = applyFiltersAndDedup(raw, {
     excludedSet: excludedSet || new Set(),
     filters,
     popularity: null,
   });
 
-  shuffleInPlace(candidates);
+  // Telemetry for auto-flush
+  if (meta && meta.counts) {
+    meta.counts.sources_pool_total = poolAll.length;
+    meta.counts.sources_pool_after_excluded = candidates.length;
 
-  // Return pool; final diversity selection happens centrally across providers
-  return candidates.slice(0, Math.max(trackCount * 8, 400));
+    if (historyOnlySet && historyOnlySet.size && poolAll.length) {
+      let hits = 0;
+      for (const t of poolAll) {
+        const id = t && t.id;
+        if (id && historyOnlySet.has(id)) hits += 1;
+      }
+      meta.counts.sources_pool_history_hits = hits;
+    }
+  }
+
+  shuffleInPlace(candidates);
+  return candidates.slice(0, Math.max(trackCount * 10, 600));
 }
 
 /* -------- Last.fm discovery -------- */
@@ -1658,7 +1685,14 @@ async function discoverWithLastFm({ sp, market, excludedSet, recipe, meta }) {
 
 /* -------- sources fallback (playlists/liked/top/search) -------- */
 
-async function poolFromSources({ sp, recipe, market, excludedSet, meta }) {
+async function poolFromSources({
+  sp,
+  recipe,
+  market,
+  excludedSet,
+  historyOnlySet,
+  meta,
+}) {
   const sources = getRecipeSources(recipe);
   const filters = getRecipeFilters(recipe);
 
@@ -1740,7 +1774,13 @@ async function poolFromSources({ sp, recipe, market, excludedSet, meta }) {
 
 /* -------- public API -------- */
 
-async function generateTracksWithMeta({ sp, recipe, market, excludedSet }) {
+async function generateTracksWithMeta({
+  sp,
+  recipe,
+  market,
+  excludedSet,
+  historyOnlySet,
+}) {
   const need = Number(recipe.track_count ?? 50);
 
   const meta = {
@@ -1752,7 +1792,13 @@ async function generateTracksWithMeta({ sp, recipe, market, excludedSet }) {
       lastfm_selected: 0,
       reco_selected: 0,
       sources_selected: 0,
+
+      // debug/telemetry for history auto-flush (computed in poolFromSources)
+      sources_pool_total: 0,
+      sources_pool_after_excluded: 0,
+      sources_pool_history_hits: 0,
     },
+
     notes: [],
   };
 
@@ -1952,6 +1998,7 @@ async function generateTracksWithMeta({ sp, recipe, market, excludedSet }) {
           ...(excludedSet || []),
           ...state.chosen.map((t) => t.id),
         ]),
+        historyOnlySet,
         meta,
       });
 

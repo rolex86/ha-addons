@@ -157,6 +157,28 @@ function normalizeRecipe(recipe) {
   if (!r.history || typeof r.history !== "object") r.history = {};
   if (r.history.scope == null) r.history.scope = "inherit"; // inherit|per_recipe|global
 
+  // Per-recipe history retention (optional)
+  // enabled: true/false (default true)
+  // rolling_days: number|null (override addon options.history.rolling_days)
+  // auto_flush: if enabled, clears history when too much of the sources pool is blocked by history
+  r.history.enabled = toBoolOr(r.history.enabled, true);
+
+  const rdOv = r.history.rolling_days;
+  r.history.rolling_days =
+    rdOv === "" || rdOv === undefined || rdOv === null
+      ? null
+      : toNumOr(rdOv, null);
+
+  if (!r.history.auto_flush || typeof r.history.auto_flush !== "object")
+    r.history.auto_flush = {};
+  r.history.auto_flush.enabled = toBoolOr(r.history.auto_flush.enabled, false);
+  r.history.auto_flush.threshold_pct = toNumOr(
+    r.history.auto_flush.threshold_pct,
+    80,
+  );
+  // Only evaluate auto-flush if sources pool is at least this big (avoids tiny-pool false positives)
+  r.history.auto_flush.min_pool = toNumOr(r.history.auto_flush.min_pool, 200);
+
   // ---- diversity/limits (back-compat) ----
   // Some configs had `limits`, some `diversity`. Keep both but ensure `diversity` is present.
   if (!r.diversity || typeof r.diversity !== "object") r.diversity = {};

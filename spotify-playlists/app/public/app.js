@@ -364,6 +364,15 @@ function helpFor(k) {
         `,
       );
 
+    case "enabled":
+      return helpBlock(
+        "K čemu je to?",
+        `
+      <div>Když je <code>false</code>, recipe se při běžném běhu (<code>/api/run</code> bez výběru) přeskočí.</div>
+      <div>Ruční tlačítko “Spustit jen tento” ho spustí i když je disabled.</div>
+    `,
+      );
+
     // Discovery
     case "discovery.enabled":
       return helpBlock(
@@ -898,6 +907,8 @@ function helpFor(k) {
 
 function normalizeRecipe(r) {
   if (!r || typeof r !== "object") return r;
+  // Per-recipe enable/disable (default: enabled)
+  if (r.enabled == null) r.enabled = true;
 
   // ensure objects
   if (!r.discovery || typeof r.discovery !== "object") r.discovery = {};
@@ -1038,6 +1049,7 @@ function recipeTemplate() {
     name: "Daily playlist",
     target_playlist_id: "",
     track_count: 50,
+    enabled: true,
 
     discovery: {
       enabled: false,
@@ -1255,6 +1267,14 @@ async function runNow() {
   });
 }
 
+async function runOne(recipeId) {
+  return await api("/api/run", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ recipe_id: recipeId }),
+  });
+}
+
 /* ---------------- accordion rendering ---------------- */
 
 function getRecipeById(id) {
@@ -1302,6 +1322,16 @@ function renderRecipeEditor(r) {
         <input data-k="name" value="${escapeHtml(r.name || "")}">
         ${helpFor("name")}
       </label>
+      
+      <label class="field">
+  <div class="label">Enabled</div>
+  <select data-k="enabled">
+    <option value="true" ${r.enabled !== false ? "selected" : ""}>true</option>
+    <option value="false" ${r.enabled === false ? "selected" : ""}>false</option>
+  </select>
+  ${helpFor("enabled")}
+</label>
+
 
       <label class="field">
         <div class="label">Target playlist ID (nebo URL)</div>
@@ -1953,6 +1983,7 @@ function saveRecipeFromBlock(recipeId) {
     }
 
     if (
+      k === "enabled" ||
       k === "discovery.enabled" ||
       k === "discovery.use_tastedive" ||
       k === "history.enabled" ||
@@ -2419,6 +2450,7 @@ function renderAccordion() {
                 <button data-action="rawtoggle" data-id="${escapeHtml(r.id)}">RAW</button>
                 <button class="danger" data-action="clearhist" data-id="${escapeHtml(r.id)}">Vymazat historii</button>
                 <button class="danger" data-action="delete" data-id="${escapeHtml(r.id)}">Smazat</button>
+                <button data-action="runone" data-id="${escapeHtml(r.id)}">Spustit jen tento</button>
                 <button class="primary" data-action="saveone" data-id="${escapeHtml(r.id)}">Uložit recept</button>
               </div>
             </div>
@@ -2569,6 +2601,37 @@ function renderAccordion() {
             `.recipeBlock[data-id="${CSS.escape(id)}"]`,
           );
           block?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+        return;
+      }
+
+      if (action === "runone") {
+        const r = getRecipeById(id);
+        const title = r?.name || id;
+
+        try {
+          setMsg("", "");
+          $("logBox").textContent = "";
+          lastLogI = 0;
+
+          startPolling();
+
+          await runOne(id);
+
+          await pollLogs();
+          await loadStatus();
+
+          setMsg(
+            `Spuštěno: jen tento recept (${safeStr(title)}). Viz logy výše.`,
+            "ok",
+          );
+        } catch (e) {
+          await pollLogs();
+          await loadStatus().catch(() => {});
+          setMsg(
+            `Run failed: ${e.status || ""} ${safeStr(e.body || e.message)}`,
+            "err",
+          );
         }
         return;
       }

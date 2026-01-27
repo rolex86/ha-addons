@@ -607,13 +607,32 @@ app.post("/api/run", requireToken, async (req, res) => {
     }
 
     const cfg = loadRecipesConfig();
-    const recipes = cfg.recipes || [];
+    let recipes = cfg.recipes || [];
+
+    logRun("info", `Loaded recipes (total): ${recipes.length}`);
+
+    // Optional: run only selected recipe(s) (manual run from UI)
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const requestedIds = Array.isArray(body.recipe_ids)
+      ? body.recipe_ids.map((x) => String(x))
+      : body.recipe_id
+        ? [String(body.recipe_id)]
+        : null;
+
+    if (requestedIds && requestedIds.length) {
+      recipes = recipes.filter((r) => requestedIds.includes(String(r.id)));
+      logRun("info", `Run requested only recipes: ${requestedIds.join(", ")}`);
+    } else {
+      // Default run (automation / Run all): only enabled recipes
+      recipes = recipes.filter((r) => r?.enabled !== false);
+      logRun("info", `Run all enabled recipes: ${recipes.length}`);
+    }
+
     const runResults = [];
 
-    logRun("info", `Loaded recipes: ${recipes.length}`);
-
     for (const recipe of recipes) {
-      if (!recipe?.id) continue;
+      // Failsafe: in default mode, never run disabled recipes
+      if (!requestedIds && recipe?.enabled === false) continue;
 
       // History scope can be overridden per recipe (history.scope)
       // Values: inherit | per_recipe | global

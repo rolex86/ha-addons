@@ -38,6 +38,8 @@ function normalizeRecipe(recipe) {
   if (!r.name) r.name = "Recipe";
   if (!r.target_playlist_id) r.target_playlist_id = "";
   r.track_count = toNumOr(r.track_count, 50);
+  // Per-recipe enable/disable (default: enabled)
+  r.enabled = toBoolOr(r.enabled, true);
 
   // ---- discovery ----
   if (!r.discovery || typeof r.discovery !== "object") r.discovery = {};

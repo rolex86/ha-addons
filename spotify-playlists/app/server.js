@@ -10,6 +10,9 @@ const {
   loadRecipesConfig,
   saveRecipesConfig,
 } = require("./lib/config");
+
+const { loadCatalog } = require("./lib/genre_catalog");
+
 const {
   createClient,
   ensureAccessToken,
@@ -431,6 +434,45 @@ app.get("/api/spotify/genre-seeds", async (req, res) => {
   } catch (e) {
     const fe = formatErr(e);
     res.status(500).json({ ok: false, error: fe });
+  }
+});
+
+/* ---------------- Observed genres catalog ---------------- */
+
+app.get("/api/genres/catalog", (req, res) => {
+  const limit = Math.max(
+    1,
+    Math.min(2000, parseInt(req.query.limit || "200", 10)),
+  );
+  const minCount = Math.max(1, parseInt(req.query.min_count || "1", 10));
+
+  try {
+    const cat = loadCatalog();
+    const entries = Object.entries(cat.genres || {})
+      .map(([name, v]) => ({
+        name,
+        count: v?.count ?? 0,
+        first_seen: v?.first_seen ?? null,
+        last_seen: v?.last_seen ?? null,
+      }))
+      .filter((x) => x.count >= minCount)
+      .sort((a, b) => b.count - a.count)
+      .slice(0, limit);
+
+    res.json({
+      version: cat.version ?? 1,
+      updated_at: cat.updated_at ?? null,
+      total: entries.length,
+      items: entries,
+    });
+  } catch (e) {
+    res.status(200).json({
+      version: 1,
+      updated_at: null,
+      total: 0,
+      items: [],
+      error: "catalog_unavailable",
+    });
   }
 });
 

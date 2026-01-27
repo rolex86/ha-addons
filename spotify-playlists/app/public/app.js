@@ -1910,6 +1910,20 @@ function renderRecipeEditor(r) {
         ${helpFor("filters.genres_exclude")}
       </label>
 
+            <label class="field">
+        <div class="label">Allow unknown genres</div>
+        <select data-k="filters.allow_unknown_genres">
+          <option value="true" ${
+            filters.allow_unknown_genres !== false ? "selected" : ""
+          }>true</option>
+          <option value="false" ${
+            filters.allow_unknown_genres === false ? "selected" : ""
+          }>false</option>
+        </select>
+        ${helpFor("filters.allow_unknown_genres")}
+      </label>
+
+
       <div class="field span2">
         <div class="label">Genre picker (Spotify seeds)</div>
 
@@ -1921,19 +1935,21 @@ function renderRecipeEditor(r) {
           </div>
 
           <div class="gpRow">
-            <label class="gpInline">
-              <span>Root mode</span>
-              <select data-k="filters.genres_root_mode" class="gpSelect">
-                <option value="curated" ${
-                  (filters.genres_root_mode || "curated") === "curated"
-                    ? "selected"
-                    : ""
-                }>curated</option>
-                <option value="auto" ${
-                  (filters.genres_root_mode || "") === "auto" ? "selected" : ""
-                }>auto</option>
-              </select>
-            </label>
+  <label class="gpInline">
+    <span>Root mode</span>
+    <select data-k="filters.genres_root_mode" class="gpSelect">
+      <option value="curated" ${
+        (filters.genres_root_mode || "curated") === "curated" ? "selected" : ""
+      }>curated</option>
+      <option value="auto" ${
+        (filters.genres_root_mode || "") === "auto" ? "selected" : ""
+      }>auto</option>
+    </select>
+  </label>
+
+  <input class="gpSearch" data-gp-role="search" placeholder="Search genres (Spotify seeds)…" value="">
+</div>
+
 
             <label class="gpInline">
               <span>Allow unknown</span>
@@ -1958,7 +1974,6 @@ function renderRecipeEditor(r) {
         </div>
 
         ${helpFor("filters.genres_root_mode")}
-        ${helpFor("filters.allow_unknown_genres")}
       </div>
 
     </div>

@@ -3,6 +3,9 @@ const $ = (id) => document.getElementById(id);
 
 let CURRENT_CONFIG = { recipes: [] };
 
+// Snapshot configu tak, jak je na serveru (po Load / Save all)
+let SERVER_CONFIG_SNAPSHOT = "";
+
 // accordion: který recipe je rozbalený
 let openId = null;
 
@@ -84,6 +87,56 @@ function escapeHtml(s) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
+}
+
+function setMsgHtml(html, kind) {
+  const el = $("msg");
+  if (!html) {
+    el.style.display = "none";
+    el.innerHTML = "";
+    return;
+  }
+  el.style.display = "";
+  el.innerHTML = html;
+  el.className = "msg " + (kind || "");
+}
+
+function promptUnsavedRun() {
+  return new Promise((resolve) => {
+    const html = `
+      <div style="display:flex; flex-direction:column; gap:10px;">
+        <div style="font-weight:800;">Neuložené změny</div>
+        <div style="line-height:1.55;">
+          Máš neuložené změny v konfiguraci (neproběhl <strong>Save all</strong>).<br/>
+          <strong>Run</strong> použije poslední uložený config na serveru.
+        </div>
+        <div style="display:flex; flex-wrap:wrap; gap:10px; margin-top:2px;">
+          <button id="btnUnsavedSaveRun" class="primary">Uložit vše a spustit</button>
+          <button id="btnUnsavedRunAnyway">Spustit i tak</button>
+          <button id="btnUnsavedCancel">Zrušit</button>
+        </div>
+      </div>
+    `;
+
+    setMsgHtml(html, "warn");
+
+    const once = (id, value) => {
+      const b = $(id);
+      if (!b) return;
+      b.addEventListener(
+        "click",
+        () => {
+          setMsgHtml("", "");
+          resolve(value);
+        },
+        { once: true },
+      );
+    };
+
+    once("btnUnsavedSaveRun", "save_run");
+    once("btnUnsavedRunAnyway", "run_anyway");
+    once("btnUnsavedCancel", "cancel");
+  });
 }
 
 function rid() {
@@ -1238,6 +1291,8 @@ async function loadConfig() {
   }
 
   renderAccordion();
+
+  SERVER_CONFIG_SNAPSHOT = JSON.stringify(CURRENT_CONFIG);
 }
 
 async function saveAll() {
@@ -1247,6 +1302,7 @@ async function saveAll() {
     body: JSON.stringify({ config: CURRENT_CONFIG }),
   });
   setMsg("Uloženo.", "ok");
+  SERVER_CONFIG_SNAPSHOT = JSON.stringify(CURRENT_CONFIG);
 }
 
 async function authStart() {
@@ -2608,6 +2664,40 @@ function renderAccordion() {
       if (action === "runone") {
         const r = getRecipeById(id);
         const title = r?.name || id;
+
+        // Promítni změny z aktuálně otevřeného editoru do CURRENT_CONFIG (jen lokálně)
+        if (openId) saveRecipeFromBlock(openId);
+
+        // Detekce neuložených změn oproti server snapshotu
+        const hasUnsaved =
+          SERVER_CONFIG_SNAPSHOT &&
+          JSON.stringify(CURRENT_CONFIG) !== SERVER_CONFIG_SNAPSHOT;
+
+        if (hasUnsaved) {
+          let choice = "cancel";
+          try {
+            choice = await promptUnsavedRun();
+          } catch {
+            choice = "cancel";
+          }
+
+          if (choice === "cancel") {
+            setMsg("Zrušeno.", "ok");
+            return;
+          }
+
+          if (choice === "save_run") {
+            try {
+              await saveAll(); // uloží na server + aktualizuje snapshot (díky kroku #3)
+            } catch (e) {
+              setMsg(
+                `Save all failed: ${e.status || ""} ${safeStr(e.body || e.message)}`,
+                "err",
+              );
+              return;
+            }
+          }
+        }
 
         try {
           setMsg("", "");

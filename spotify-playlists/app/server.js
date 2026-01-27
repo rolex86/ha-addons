@@ -30,6 +30,8 @@ const {
   replacePlaylistItems,
 } = require("./lib/generator");
 
+const { queryCatalog, loadCatalog } = require("./lib/genre_catalog");
+
 const app = express();
 app.use(express.json({ limit: "1mb" }));
 
@@ -436,6 +438,22 @@ app.get("/api/spotify/genre-seeds", async (req, res) => {
 
 app.get("/api/config", async (req, res) => {
   res.json({ ok: true, config: loadRecipesConfig() });
+});
+
+app.get("/api/genres/catalog", (req, res) => {
+  try {
+    loadCatalog();
+
+    const limit = req.query.limit != null ? Number(req.query.limit) : 200;
+    const min_count =
+      req.query.min_count != null ? Number(req.query.min_count) : 1;
+    const q = req.query.q != null ? String(req.query.q) : "";
+
+    const out = queryCatalog({ limit, min_count, q });
+    res.json(out);
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e?.message || String(e) });
+  }
 });
 
 app.post("/api/config", async (req, res) => {

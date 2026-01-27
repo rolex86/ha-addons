@@ -1,4 +1,7 @@
 // app/lib/generator.js
+
+const { observeGenres } = require("./genre_catalog");
+
 // Generator with:
 // - Spotify API retry/backoff on 429/5xx
 // - Optional Last.fm discovery via LASTFM_API_KEY
@@ -1162,12 +1165,22 @@ async function filterByGenresIfNeeded(sp, tracks, filters, cache, meta) {
     }
   }
 
+  // Observed genres catalog: best-effort collection (does not affect filtering)
   try {
-    await spotifyGetArtistGenresCached(sp, artistIds, cache);
+    const seen = new Set();
+    const all = [];
+
+    for (const id of artistIds) {
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+
+      const g = cache.get(id);
+      if (Array.isArray(g) && g.length) all.push(...g);
+    }
+
+    observeGenres(all);
   } catch {
-    meta?.notes?.push("genre_fetch_failed");
-    // Don't hard-fail generation – just skip genre filtering.
-    return tracks;
+    // ignore catalog errors – never break generation
   }
 
   let unknownTotal = 0;

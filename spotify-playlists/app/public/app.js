@@ -1924,54 +1924,45 @@ function renderRecipeEditor(r) {
       </label>
 
 
-      <div class="field span2">
-        <div class="label">Genre picker (Spotify seeds)</div>
+            <div class="field span2">
+        <div class="label">Observed genres</div>
 
-        <div class="gpPanel genrePicker" data-recipe-id="${escapeHtml(r.id)}">
-          <div class="gpRow">
-            <button type="button" class="gpBtn" data-gp-action="load">Load from Spotify</button>
-            <button type="button" class="gpBtn" data-gp-action="refresh">Refresh</button>
-            <span class="pill warn" data-gp-role="status">not loaded</span>
-          </div>
+        <div class="ogPanel observedGenres" data-recipe-id="${escapeHtml(r.id)}">
+          <div class="ogRow">
+            <button type="button" class="ogBtn" data-og-action="load">Load</button>
+            <span class="pill warn" data-og-role="status">not loaded</span>
 
-          <div class="gpRow">
-  <label class="gpInline">
-    <span>Root mode</span>
-    <select data-k="filters.genres_root_mode" class="gpSelect">
-      <option value="curated" ${
-        (filters.genres_root_mode || "curated") === "curated" ? "selected" : ""
-      }>curated</option>
-      <option value="auto" ${
-        (filters.genres_root_mode || "") === "auto" ? "selected" : ""
-      }>auto</option>
-    </select>
-  </label>
+            <label class="ogInline">
+              <span>Min count</span>
+              <input class="ogInput" data-og-role="minCount" type="number" min="1" value="3">
+            </label>
 
-  <input class="gpSearch" data-gp-role="search" placeholder="Search genres (Spotify seeds)…" value="">
-</div>
+            <label class="ogInline">
+              <span>Limit</span>
+              <input class="ogInput" data-og-role="limit" type="number" min="1" max="2000" value="200">
+            </label>
 
-
-            <label class="gpInline">
-              <span>Allow unknown</span>
-              <select data-k="filters.allow_unknown_genres" class="gpSelect">
-                <option value="true" ${
-                  filters.allow_unknown_genres !== false ? "selected" : ""
-                }>true</option>
-                <option value="false" ${
-                  filters.allow_unknown_genres === false ? "selected" : ""
-                }>false</option>
+            <label class="ogInline">
+              <span>Add to</span>
+              <select class="ogSelect" data-og-role="target">
+                <option value="include">genres_include</option>
+                <option value="exclude">genres_exclude</option>
               </select>
             </label>
 
-            <input class="gpSearch" data-gp-role="search" placeholder="Search genres (Spotify seeds)…" value="">
+            <input class="ogSearch" data-og-role="search" placeholder="Search observed genres…" value="">
           </div>
 
-          <div class="gpLabel">Roots (click cycles: include → exclude → ignore)</div>
-          <div class="gpPills" data-gp-role="roots"></div>
+          <div class="ogMeta" data-og-role="meta"></div>
+          <div class="ogList" data-og-role="list"></div>
 
-          <div class="gpLabel">Sub-genres (Spotify seeds)</div>
-          <div class="gpPills" data-gp-role="seeds"></div>
+          <div class="ogActions">
+            <button type="button" class="ogBtn" data-og-action="addSelected">Add selected</button>
+            <button type="button" class="ogBtn" data-og-action="clearSelected">Clear selection</button>
+          </div>
         </div>
+      </div>
+
 
         ${helpFor("filters.genres_root_mode")}
       </div>
@@ -2468,6 +2459,230 @@ function wireGenrePickers() {
   });
 }
 
+/* ---------------- Observed genres (catalog) ---------------- */
+
+function fmtEpochSec(ts) {
+  if (!ts) return "-";
+  try {
+    return new Date(Number(ts) * 1000).toLocaleString();
+  } catch {
+    return String(ts);
+  }
+}
+
+function getOgEls(panel) {
+  return {
+    statusEl: panel.querySelector('[data-og-role="status"]'),
+    metaEl: panel.querySelector('[data-og-role="meta"]'),
+    listEl: panel.querySelector('[data-og-role="list"]'),
+    searchEl: panel.querySelector('[data-og-role="search"]'),
+    minCountEl: panel.querySelector('[data-og-role="minCount"]'),
+    limitEl: panel.querySelector('[data-og-role="limit"]'),
+    targetEl: panel.querySelector('[data-og-role="target"]'),
+  };
+}
+
+function renderObservedGenres(panel) {
+  const { statusEl, metaEl, listEl, searchEl } = getOgEls(panel);
+  const items = panel._ogItems || [];
+  const sel = panel._ogSel || new Set();
+
+  const qRaw = String(searchEl?.value || "").trim();
+  const q = normalizeForMatch(qRaw);
+
+  let matches = items;
+  if (q) {
+    matches = items.filter((x) => normalizeForMatch(x.name).includes(q));
+  }
+
+  const limitShown = 240;
+  const shown = matches.slice(0, limitShown);
+
+  // meta
+  if (metaEl) {
+    const upd = panel._ogUpdatedAt ? fmtEpochSec(panel._ogUpdatedAt) : "-";
+    metaEl.textContent = q
+      ? `Matches: ${shown.length}/${matches.length} • total loaded: ${items.length} • updated: ${upd}`
+      : `Showing: ${shown.length}/${items.length} • updated: ${upd}`;
+  }
+
+  if (!listEl) return;
+
+  listEl.innerHTML = shown
+    .map((x, idx) => {
+      const isSel = sel.has(x.name);
+      const cls = isSel ? "sel" : "";
+      return `
+        <button type="button"
+          class="pill ogPill ${cls}"
+          data-og-idx="${idx}"
+          data-og-name="${escapeHtml(x.name)}">
+          ${escapeHtml(x.name)}
+          <span class="ogCount">${Number(x.count || 0)}</span>
+        </button>
+      `;
+    })
+    .join("");
+
+  // status
+  if (statusEl) {
+    if (!items.length) {
+      statusEl.className = "pill warn";
+      statusEl.textContent = "empty";
+    } else {
+      statusEl.className = "pill ok";
+      statusEl.textContent = `loaded: ${items.length}`;
+    }
+  }
+
+  // store current visible list for shift-select mapping
+  panel._ogShown = shown;
+}
+
+async function loadObservedGenres(panel, { force } = { force: false }) {
+  const { statusEl, minCountEl, limitEl } = getOgEls(panel);
+
+  const minCount = Math.max(1, Number(minCountEl?.value || 1));
+  const limit = Math.max(1, Math.min(2000, Number(limitEl?.value || 200)));
+
+  if (statusEl) {
+    statusEl.className = "pill warn";
+    statusEl.textContent = "loading…";
+  }
+
+  const qs = `?limit=${encodeURIComponent(limit)}&min_count=${encodeURIComponent(
+    minCount,
+  )}`;
+
+  const data = await api(`/api/genres/catalog${qs}`);
+  const items = Array.isArray(data?.items) ? data.items : [];
+
+  panel._ogItems = items
+    .map((x) => ({
+      name: String(x.name || "").trim(),
+      count: Number(x.count || 0),
+      first_seen: x.first_seen ?? null,
+      last_seen: x.last_seen ?? null,
+    }))
+    .filter((x) => x.name);
+
+  panel._ogUpdatedAt = data?.updated_at ?? null;
+
+  if (!panel._ogSel) panel._ogSel = new Set();
+  panel._ogLastClicked = null;
+
+  renderObservedGenres(panel);
+}
+
+function addSelectedObservedToInput(panel) {
+  const { targetEl } = getOgEls(panel);
+  const target = targetEl?.value === "exclude" ? "exclude" : "include";
+
+  const block = panel.closest(".recipeBlock");
+  if (!block) return;
+
+  const key =
+    target === "exclude"
+      ? 'input[data-k="filters.genres_exclude"]'
+      : 'input[data-k="filters.genres_include"]';
+
+  const input = block.querySelector(key);
+  if (!input) return;
+
+  const sel = panel._ogSel || new Set();
+  const add = Array.from(sel);
+
+  const existing = splitComma(input.value);
+  const merged = uniqCaseInsensitive([...existing, ...add]);
+
+  input.value = merged.join(", ");
+  input.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+function clearObservedSelection(panel) {
+  if (panel._ogSel) panel._ogSel.clear();
+  panel._ogLastClicked = null;
+  renderObservedGenres(panel);
+}
+
+function wireObservedGenresPanels() {
+  document.querySelectorAll(".observedGenres").forEach((panel) => {
+    if (panel.dataset.wired === "1") {
+      // re-render (e.g., after saveone / rerender)
+      renderObservedGenres(panel);
+      return;
+    }
+    panel.dataset.wired = "1";
+
+    panel._ogItems = panel._ogItems || [];
+    panel._ogSel = panel._ogSel || new Set();
+    panel._ogShown = panel._ogShown || [];
+    panel._ogLastClicked = null;
+
+    const { searchEl } = getOgEls(panel);
+    if (searchEl) {
+      searchEl.addEventListener(
+        "input",
+        debounce(() => renderObservedGenres(panel), 120),
+      );
+    }
+
+    panel.addEventListener("click", async (e) => {
+      const btn = e.target.closest("button[data-og-action]");
+      if (btn) {
+        const action = btn.getAttribute("data-og-action");
+        try {
+          if (action === "load") {
+            await loadObservedGenres(panel, { force: false });
+            setMsg("Observed genres loaded.", "ok");
+          }
+          if (action === "addSelected") {
+            addSelectedObservedToInput(panel);
+            setMsg("Added selected genres.", "ok");
+          }
+          if (action === "clearSelected") {
+            clearObservedSelection(panel);
+          }
+        } catch (err) {
+          setMsg(
+            `Observed genres failed: ${safeStr(err?.body || err?.message)}`,
+            "err",
+          );
+        }
+        return;
+      }
+
+      const pill = e.target.closest("button.ogPill");
+      if (!pill) return;
+
+      const name = pill.getAttribute("data-og-name");
+      if (!name) return;
+
+      const shown = panel._ogShown || [];
+      const idx = Number(pill.getAttribute("data-og-idx"));
+
+      // Shift-select range (within current shown list)
+      if (e.shiftKey && panel._ogLastClicked != null && Number.isFinite(idx)) {
+        const a = Math.max(0, Math.min(panel._ogLastClicked, idx));
+        const b = Math.max(0, Math.max(panel._ogLastClicked, idx));
+        for (let i = a; i <= b; i++) {
+          const it = shown[i];
+          if (it?.name) panel._ogSel.add(it.name);
+        }
+      } else {
+        if (panel._ogSel.has(name)) panel._ogSel.delete(name);
+        else panel._ogSel.add(name);
+        panel._ogLastClicked = Number.isFinite(idx) ? idx : null;
+      }
+
+      renderObservedGenres(panel);
+    });
+
+    // Initial paint
+    renderObservedGenres(panel);
+  });
+}
+
 function renderAccordion() {
   const list = $("recipeList");
   const recipes = CURRENT_CONFIG.recipes || [];
@@ -2807,8 +3022,8 @@ function renderAccordion() {
     });
   });
 
-  // Wire & populate per-recipe genre picker UI
-  wireGenrePickers();
+  // Wire per-recipe observed genres UI
+  wireObservedGenresPanels();
 }
 
 /* ---------------- buttons ---------------- */

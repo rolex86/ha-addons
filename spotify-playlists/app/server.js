@@ -10,9 +10,6 @@ const {
   loadRecipesConfig,
   saveRecipesConfig,
 } = require("./lib/config");
-
-const { loadCatalog } = require("./lib/genre_catalog");
-
 const {
   createClient,
   ensureAccessToken,
@@ -32,6 +29,8 @@ const {
   generateTracksWithMeta,
   replacePlaylistItems,
 } = require("./lib/generator");
+
+const { queryCatalog, loadCatalog } = require("./lib/genre_catalog");
 
 const app = express();
 app.use(express.json({ limit: "1mb" }));
@@ -437,47 +436,24 @@ app.get("/api/spotify/genre-seeds", async (req, res) => {
   }
 });
 
-/* ---------------- Observed genres catalog ---------------- */
-
-app.get("/api/genres/catalog", (req, res) => {
-  const limit = Math.max(
-    1,
-    Math.min(2000, parseInt(req.query.limit || "200", 10)),
-  );
-  const minCount = Math.max(1, parseInt(req.query.min_count || "1", 10));
-
-  try {
-    const cat = loadCatalog();
-    const entries = Object.entries(cat.genres || {})
-      .map(([name, v]) => ({
-        name,
-        count: v?.count ?? 0,
-        first_seen: v?.first_seen ?? null,
-        last_seen: v?.last_seen ?? null,
-      }))
-      .filter((x) => x.count >= minCount)
-      .sort((a, b) => b.count - a.count)
-      .slice(0, limit);
-
-    res.json({
-      version: cat.version ?? 1,
-      updated_at: cat.updated_at ?? null,
-      total: entries.length,
-      items: entries,
-    });
-  } catch (e) {
-    res.status(200).json({
-      version: 1,
-      updated_at: null,
-      total: 0,
-      items: [],
-      error: "catalog_unavailable",
-    });
-  }
-});
-
 app.get("/api/config", async (req, res) => {
   res.json({ ok: true, config: loadRecipesConfig() });
+});
+
+app.get("/api/genres/catalog", (req, res) => {
+  try {
+    loadCatalog();
+
+    const limit = req.query.limit != null ? Number(req.query.limit) : 200;
+    const min_count =
+      req.query.min_count != null ? Number(req.query.min_count) : 1;
+    const q = req.query.q != null ? String(req.query.q) : "";
+
+    const out = queryCatalog({ limit, min_count, q });
+    res.json(out);
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e?.message || String(e) });
+  }
 });
 
 app.post("/api/config", async (req, res) => {

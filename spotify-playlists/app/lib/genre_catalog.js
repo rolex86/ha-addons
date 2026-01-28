@@ -1,109 +1,153 @@
 // app/lib/genre_catalog.js
 const fs = require("fs");
 const path = require("path");
-const { DATA_DIR } = require("./config");
 
+const DATA_DIR = process.env.DATA_DIR || "/data";
 const CATALOG_PATH = path.join(DATA_DIR, "genres_catalog.json");
 
-let _loaded = false;
-let _dirty = false;
+// in-memory singleton
 let _catalog = null;
+let _dirty = false;
 
-function nowSec() {
-  return Math.floor(Date.now() / 1000);
+function nowMs() {
+  return Date.now();
 }
 
-function emptyCatalog() {
-  return {
-    version: 1,
-    updated_at: nowSec(),
-    genres: {},
-  };
+function readJsonSafe(p, fallback) {
+  try {
+    if (!fs.existsSync(p)) return fallback;
+    const raw = fs.readFileSync(p, "utf8");
+    return JSON.parse(raw || "null") ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function normalizeGenreName(g) {
+  const s = String(g || "").trim();
+  if (!s) return null;
+  // Spotify genres bývají lowercase, ale pro jistotu normalizujeme key
+  return s.toLowerCase();
+}
+
+function ensureCatalogLoaded() {
+  if (_catalog) return;
+
+  const loaded = readJsonSafe(CATALOG_PATH, null);
+
+  // validace / default
+  if (
+    loaded &&
+    typeof loaded === "object" &&
+    loaded.version === 1 &&
+    loaded.genres &&
+    typeof loaded.genres === "object"
+  ) {
+    _catalog = loaded;
+    if (typeof _catalog.updated_at !== "number") _catalog.updated_at = 0;
+  } else {
+    _catalog = {
+      version: 1,
+      updated_at: 0,
+      genres: {}, // { "trance": {count, first_seen, last_seen} }
+    };
+  }
 }
 
 function loadCatalog() {
-  if (_loaded && _catalog) return _catalog;
-
-  try {
-    const raw = fs.readFileSync(CATALOG_PATH, "utf8");
-    const parsed = raw ? JSON.parse(raw) : null;
-
-    if (
-      parsed &&
-      typeof parsed === "object" &&
-      parsed.version === 1 &&
-      parsed.genres &&
-      typeof parsed.genres === "object"
-    ) {
-      _catalog = parsed;
-    } else {
-      _catalog = emptyCatalog();
-    }
-  } catch (e) {
-    // missing file / invalid json => start fresh
-    _catalog = emptyCatalog();
-  }
-
-  _loaded = true;
-  _dirty = false;
+  ensureCatalogLoaded();
   return _catalog;
 }
 
-function observeGenres(genres) {
-  if (!Array.isArray(genres) || genres.length === 0) return;
+function observeGenres(genresArray) {
+  ensureCatalogLoaded();
+  const ts = nowMs();
 
-  const cat = loadCatalog();
-  const ts = nowSec();
+  if (!Array.isArray(genresArray) || genresArray.length === 0) return 0;
 
-  // normalize + dedupe within batch
-  const batch = new Set();
-  for (const g of genres) {
-    const s = String(g ?? "")
-      .trim()
-      .toLowerCase();
-    if (!s) continue;
-    batch.add(s);
-  }
+  let addedOrUpdated = 0;
 
-  if (batch.size === 0) return;
+  for (const g of genresArray) {
+    const key = normalizeGenreName(g);
+    if (!key) continue;
 
-  for (const key of batch) {
-    const existing = cat.genres[key];
+    const existing = _catalog.genres[key];
     if (!existing) {
-      cat.genres[key] = { count: 1, first_seen: ts, last_seen: ts };
-      _dirty = true;
+      _catalog.genres[key] = { count: 1, first_seen: ts, last_seen: ts };
+      addedOrUpdated += 1;
       continue;
     }
 
-    // defensive: keep format stable even if old file is weird
-    if (typeof existing.count !== "number") existing.count = 0;
-    if (typeof existing.first_seen !== "number") existing.first_seen = ts;
-
-    existing.count += 1;
+    // update
+    existing.count = Number(existing.count || 0) + 1;
+    if (!existing.first_seen) existing.first_seen = ts;
     existing.last_seen = ts;
+    addedOrUpdated += 1;
+  }
+
+  if (addedOrUpdated > 0) {
+    _catalog.updated_at = ts;
     _dirty = true;
   }
+
+  return addedOrUpdated;
 }
 
-function flushCatalog() {
-  if (!_loaded || !_catalog) loadCatalog();
+function queryCatalog({ limit = 200, min_count = 1, q = "" } = {}) {
+  ensureCatalogLoaded();
+
+  const lim = Math.max(1, Math.min(5000, Number(limit) || 200));
+  const minc = Math.max(1, Number(min_count) || 1);
+  const qs = String(q || "")
+    .trim()
+    .toLowerCase();
+
+  const items = Object.entries(_catalog.genres)
+    .map(([name, v]) => ({
+      name,
+      count: Number(v?.count || 0),
+      first_seen: Number(v?.first_seen || 0),
+      last_seen: Number(v?.last_seen || 0),
+    }))
+    .filter((x) => x.count >= minc)
+    .filter((x) => (qs ? x.name.includes(qs) : true))
+    .sort((a, b) => {
+      if (b.count !== a.count) return b.count - a.count;
+      return a.name.localeCompare(b.name);
+    })
+    .slice(0, lim);
+
+  return {
+    ok: true,
+    version: _catalog.version,
+    updated_at: _catalog.updated_at,
+    total_genres: Object.keys(_catalog.genres).length,
+    items,
+  };
+}
+
+function saveCatalog() {
+  ensureCatalogLoaded();
   if (!_dirty) return false;
 
-  try {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-    _catalog.updated_at = nowSec();
-    fs.writeFileSync(CATALOG_PATH, JSON.stringify(_catalog, null, 2), "utf8");
-    _dirty = false;
-    return true;
-  } catch (e) {
-    // do not throw (we don't want to break a run because of disk write)
-    return false;
-  }
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+
+  const tmp = `${CATALOG_PATH}.tmp`;
+  const data = JSON.stringify(_catalog, null, 2);
+
+  // atomic-ish write
+  fs.writeFileSync(tmp, data, "utf8");
+  fs.renameSync(tmp, CATALOG_PATH);
+
+  _dirty = false;
+  return true;
 }
 
 module.exports = {
+  DATA_DIR,
   CATALOG_PATH,
   loadCatalog,
   observeGenres,
-  flushCatalog,
+  queryCatalog,
+  saveCatalog,
 };

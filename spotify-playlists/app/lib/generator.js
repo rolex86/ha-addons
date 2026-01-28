@@ -1,7 +1,4 @@
 // app/lib/generator.js
-
-const { observeGenres, flushCatalog } = require("./genre_catalog");
-
 // Generator with:
 // - Spotify API retry/backoff on 429/5xx
 // - Optional Last.fm discovery via LASTFM_API_KEY
@@ -13,6 +10,8 @@ const { observeGenres, flushCatalog } = require("./genre_catalog");
 // - Diversity constraints enforced ACROSS the whole final list:
 //   max_per_artist, max_per_album, avoid_same_artist_in_row
 // - Tempo filtering via Spotify audio features when needed
+
+const { loadCatalog, observeGenres, saveCatalog } = require("./genre_catalog");
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
@@ -41,6 +40,25 @@ async function spRetry(fn, { maxRetries = 6, baseDelayMs = 400 } = {}) {
       await sleep(waitMs);
       attempt += 1;
     }
+  }
+}
+
+const DEBUG_STEPS = process.env.DEBUG_STEPS === "1";
+
+function step(meta, msg) {
+  if (!DEBUG_STEPS) return;
+  const ts = new Date().toISOString();
+  const rid = meta?.recipe_id || "-";
+  console.log(`[steps] ${ts} [${rid}] ${msg}`);
+}
+
+async function timeStep(meta, label, fn) {
+  const t0 = Date.now();
+  step(meta, `START ${label}`);
+  try {
+    return await fn();
+  } finally {
+    step(meta, `END   ${label} (+${Date.now() - t0}ms)`);
   }
 }
 
@@ -1141,6 +1159,57 @@ async function spotifyGetArtistGenresCached(sp, artistIds, cache) {
   }
 }
 
+async function observeGenresFromCandidates(sp, tracks, cache, meta, label) {
+  // šetrné limity: chceme katalog plnit, ale nechceme přidusit Spotify API
+  const TAKE_TRACKS = 120; // dřív 250
+  const TAKE_ARTISTS_PER_TRACK = 1; // dřív 2
+  const MAX_UNIQUE_ARTISTS = 200; // hard cap na jeden observe (šetří 429)
+
+  const arr = Array.isArray(tracks) ? tracks : [];
+  if (!arr.length) return 0;
+
+  const sample = arr.slice(0, TAKE_TRACKS);
+
+  // collect + dedupe + cap
+  const idsSet = new Set();
+  for (const t of sample) {
+    const arts = Array.isArray(t?.artists) ? t.artists : [];
+    for (const a of arts.slice(0, TAKE_ARTISTS_PER_TRACK)) {
+      if (a?.id) idsSet.add(a.id);
+      if (idsSet.size >= MAX_UNIQUE_ARTISTS) break;
+    }
+    if (idsSet.size >= MAX_UNIQUE_ARTISTS) break;
+  }
+
+  const artistIds = Array.from(idsSet);
+  if (!artistIds.length) return 0;
+
+  try {
+    await spotifyGetArtistGenresCached(sp, artistIds, cache);
+  } catch {
+    meta?.notes?.push("genres_observe_fetch_failed");
+    return 0;
+  }
+
+  const allGenres = [];
+  // projdeme jen ty artistIds, co jsme chtěli (cache už má missing dofetchované)
+  for (const id of artistIds) {
+    const gs = cache.get(id);
+    if (Array.isArray(gs) && gs.length) allGenres.push(...gs);
+  }
+
+  if (!allGenres.length) return 0;
+
+  const updates = observeGenres(allGenres);
+
+  if (updates > 0 && label) {
+    // jen krátká poznámka (ať to nespamuje)
+    meta?.notes?.push(`genres_observed:${label}:${updates}`);
+  }
+
+  return updates;
+}
+
 async function filterByGenresIfNeeded(sp, tracks, filters, cache, meta) {
   if (!genresWanted(filters)) return tracks;
 
@@ -1165,22 +1234,13 @@ async function filterByGenresIfNeeded(sp, tracks, filters, cache, meta) {
     }
   }
 
-  // Observed genres catalog: best-effort collection (does not affect filtering)
   try {
-    const seen = new Set();
-    const all = [];
-
-    for (const id of artistIds) {
-      if (!id || seen.has(id)) continue;
-      seen.add(id);
-
-      const g = cache.get(id);
-      if (Array.isArray(g) && g.length) all.push(...g);
-    }
-
-    observeGenres(all);
+    const uniqArtistIds = uniqIds(artistIds);
+    await spotifyGetArtistGenresCached(sp, uniqArtistIds, cache);
   } catch {
-    // ignore catalog errors – never break generation
+    meta?.notes?.push("genre_fetch_failed");
+    // Don't hard-fail generation – just skip genre filtering.
+    return tracks;
   }
 
   let unknownTotal = 0;
@@ -1795,16 +1855,20 @@ async function generateTracksWithMeta({
   historyOnlySet,
 }) {
   const need = Number(recipe.track_count ?? 50);
+  loadCatalog();
+  let observedUpdatesTotal = 0;
 
   const meta = {
     need,
     provider: "sources",
     used_provider: "sources",
+    recipe_id: recipe?.id || recipe?.recipe_id || recipe?.name || "unknown",
     counts: {
       audiodb_selected: 0,
       lastfm_selected: 0,
       reco_selected: 0,
       sources_selected: 0,
+      observed_genres_updates: 0,
 
       // debug/telemetry for history auto-flush (computed in poolFromSources)
       sources_pool_total: 0,
@@ -1832,13 +1896,15 @@ async function generateTracksWithMeta({
       if (disc.use_audiodb_trending) {
         let chartTracks = [];
         try {
-          chartTracks = await discoverWithAudioDbTrending({
-            sp,
-            market,
-            excludedSet,
-            recipe,
-            meta,
-          });
+          chartTracks = await timeStep(meta, "audiodb:discover", () =>
+            discoverWithAudioDbTrending({
+              sp,
+              market,
+              excludedSet,
+              recipe,
+              meta,
+            }),
+          );
         } catch (e) {
           meta.notes.push("audiodb_discovery_failed");
           console.warn("[audiodb] discovery wrapper failed:", e?.message || e);
@@ -1848,7 +1914,9 @@ async function generateTracksWithMeta({
 
         // tempo enrichment if needed
         try {
-          const enr = await enrichTempoIfNeeded(sp, chartTracks, filters);
+          const enr = await timeStep(meta, "audiodb:tempo_enrich", () =>
+            enrichTempoIfNeeded(sp, chartTracks, filters),
+          );
           chartTracks = enr.tracks || chartTracks;
         } catch {
           meta.notes.push("tempo_enrich_failed_audiodb");
@@ -1861,13 +1929,22 @@ async function generateTracksWithMeta({
           popularity: null,
         });
 
-        // optional genre filtering
-        chartTracks = await filterByGenresIfNeeded(
-          sp,
-          chartTracks,
-          filters,
-          genreCache,
+        observedUpdatesTotal += await timeStep(
           meta,
+          "genres:observe:audiodb",
+          () =>
+            observeGenresFromCandidates(
+              sp,
+              chartTracks,
+              genreCache,
+              meta,
+              "audiodb",
+            ),
+        );
+
+        // optional genre filtering
+        chartTracks = await timeStep(meta, "genres:filter:audiodb", () =>
+          filterByGenresIfNeeded(sp, chartTracks, filters, genreCache, meta),
         );
 
         // keep chart ordering (do not shuffle)
@@ -1894,16 +1971,18 @@ async function generateTracksWithMeta({
       // 1b) Similar-artist discovery (Last.fm + optional TasteDive)
       let discovered = [];
       try {
-        discovered = await discoverWithLastFm({
-          sp,
-          market,
-          excludedSet: new Set([
-            ...(excludedSet || []),
-            ...state.chosen.map((t) => t.id),
-          ]),
-          recipe,
-          meta,
-        });
+        discovered = await timeStep(meta, "lastfm:discover", () =>
+          discoverWithLastFm({
+            sp,
+            market,
+            excludedSet: new Set([
+              ...(excludedSet || []),
+              ...state.chosen.map((t) => t.id),
+            ]),
+            recipe,
+            meta,
+          }),
+        );
       } catch (e) {
         meta.notes.push("discovery_failed");
         console.warn("[discovery] failed:", e?.message || e);
@@ -1913,7 +1992,9 @@ async function generateTracksWithMeta({
 
       // tempo enrichment if needed
       try {
-        const enr = await enrichTempoIfNeeded(sp, discovered, filters);
+        const enr = await timeStep(meta, "discovery:tempo_enrich", () =>
+          enrichTempoIfNeeded(sp, discovered, filters),
+        );
         discovered = enr.tracks || discovered;
       } catch {
         meta.notes.push("tempo_enrich_failed_discovery");
@@ -1932,13 +2013,22 @@ async function generateTracksWithMeta({
         },
       });
 
-      // optional genre filtering
-      discovered = await filterByGenresIfNeeded(
-        sp,
-        discovered,
-        filters,
-        genreCache,
+      observedUpdatesTotal += await timeStep(
         meta,
+        "genres:observe:discovery",
+        () =>
+          observeGenresFromCandidates(
+            sp,
+            discovered,
+            genreCache,
+            meta,
+            "discovery",
+          ),
+      );
+
+      // optional genre filtering
+      discovered = await timeStep(meta, "genres:filter:discovery", () =>
+        filterByGenresIfNeeded(sp, discovered, filters, genreCache, meta),
       );
 
       if (disc.strategy === "deep_cuts") shuffleInPlace(discovered);
@@ -1963,24 +2053,30 @@ async function generateTracksWithMeta({
 
       let recoPool = [];
       try {
-        recoPool = await poolFromRecommendations({
-          sp,
-          recipe,
-          market,
-          excludedSet: new Set([
-            ...(excludedSet || []),
-            ...state.chosen.map((t) => t.id),
-          ]),
-          meta,
-        });
-
-        recoPool = await filterByGenresIfNeeded(
-          sp,
-          recoPool,
-          filters,
-          genreCache,
-          meta,
+        recoPool = await timeStep(meta, "reco:pool", () =>
+          poolFromRecommendations({
+            sp,
+            recipe,
+            market,
+            excludedSet: new Set([
+              ...(excludedSet || []),
+              ...state.chosen.map((t) => t.id),
+            ]),
+            meta,
+          }),
         );
+
+        observedUpdatesTotal += await timeStep(
+          meta,
+          "genres:observe:reco",
+          () =>
+            observeGenresFromCandidates(sp, recoPool, genreCache, meta, "reco"),
+        );
+
+        recoPool = await timeStep(meta, "genres:filter:reco", () =>
+          filterByGenresIfNeeded(sp, recoPool, filters, genreCache, meta),
+        );
+
         shuffleInPlace(recoPool);
       } catch {
         meta.notes.push("recommendations_failed");
@@ -2004,25 +2100,37 @@ async function generateTracksWithMeta({
 
       let srcPool = [];
       try {
-        srcPool = await poolFromSources({
-          sp,
-          recipe,
-          market,
-          excludedSet: new Set([
-            ...(excludedSet || []),
-            ...state.chosen.map((t) => t.id),
-          ]),
-          historyOnlySet,
-          meta,
-        });
-
-        srcPool = await filterByGenresIfNeeded(
-          sp,
-          srcPool,
-          filters,
-          genreCache,
-          meta,
+        srcPool = await timeStep(meta, "sources:pool", () =>
+          poolFromSources({
+            sp,
+            recipe,
+            market,
+            excludedSet: new Set([
+              ...(excludedSet || []),
+              ...state.chosen.map((t) => t.id),
+            ]),
+            historyOnlySet,
+            meta,
+          }),
         );
+
+        observedUpdatesTotal += await timeStep(
+          meta,
+          "genres:observe:sources",
+          () =>
+            observeGenresFromCandidates(
+              sp,
+              srcPool,
+              genreCache,
+              meta,
+              "sources",
+            ),
+        );
+
+        srcPool = await timeStep(meta, "genres:filter:sources", () =>
+          filterByGenresIfNeeded(sp, srcPool, filters, genreCache, meta),
+        );
+
         shuffleInPlace(srcPool);
       } catch {
         meta.notes.push("sources_failed");
@@ -2045,10 +2153,15 @@ async function generateTracksWithMeta({
 
     return { tracks: state.chosen.slice(0, need), meta };
   } finally {
+    if (observedUpdatesTotal > 0) {
+      meta.notes?.push(`genres_observed_total_updates:${observedUpdatesTotal}`);
+      meta.counts.observed_genres_updates = observedUpdatesTotal;
+    }
+
     try {
-      flushCatalog();
+      await saveCatalog();
     } catch {
-      // ignore – never break generation because of catalog flush
+      meta.notes?.push("genres_catalog_save_failed");
     }
   }
 }

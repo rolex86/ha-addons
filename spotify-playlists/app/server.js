@@ -28,6 +28,7 @@ const {
 const {
   generateTracksWithMeta,
   replacePlaylistItems,
+  updateGenresCatalogFromTracks,
 } = require("./lib/generator");
 
 const { queryCatalog, loadCatalog } = require("./lib/genre_catalog");
@@ -56,6 +57,8 @@ let lastRun = {
 
 // --- run lock ---
 let runInProgress = false;
+// Serialize post-write genre catalog updates to avoid concurrent saveCatalog() writes
+let genresCatalogQueue = Promise.resolve();
 
 // --- run logger (in-memory ring buffer) ---
 const RUN_LOG_MAX = 1500;
@@ -832,6 +835,46 @@ app.post("/api/run", requireToken, async (req, res) => {
       });
 
       logRun("info", `Recipe ${recipe.id}: playlist updated OK.`);
+      // Post-write (non-blocking): fetch artist genres & update observed catalog.
+      // IMPORTANT: do NOT await — playlist write has higher priority.
+      const thisRunId = runState.run_id;
+
+      genresCatalogQueue = genresCatalogQueue
+        .then(async () => {
+          // token refresh is ok here; it's post-write anyway
+          const sp2 = createClient();
+          const okTok2 = await ensureAccessToken(sp2);
+          if (!okTok2.ok) throw new Error("not_authorized_post_write");
+          saveTokens(sp2);
+
+          const updates = await updateGenresCatalogFromTracks({
+            sp: sp2,
+            tracks,
+            meta,
+            label: `recipe:${recipe.id}`,
+          });
+
+          if (updates > 0) {
+            logRun(
+              "info",
+              `Recipe ${recipe.id}: genres catalog updated (+${updates}).`,
+              thisRunId,
+            );
+          } else {
+            logRun(
+              "debug",
+              `Recipe ${recipe.id}: genres catalog update done.`,
+              thisRunId,
+            );
+          }
+        })
+        .catch((e) => {
+          logRun(
+            "warn",
+            `Recipe ${recipe.id}: genres catalog update failed: ${e?.message || e}`,
+            thisRunId,
+          );
+        });
 
       if (historyEnabled) {
         await recordUsed(db, {

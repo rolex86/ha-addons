@@ -1489,7 +1489,7 @@ async function spotifyGetArtistAlbumTrackIds(sp, artistId, market, disc, meta) {
         limit: Math.max(1, Math.min(50, disc.albums_limit_fetch)),
         offset: 0,
       }),
-    { label: "getArtistAlbums", meta: null },
+    { label: "getArtistAlbums", maxRetries: 0, meta },
   );
 
   let albums = albumsResp.body?.items || [];
@@ -1510,7 +1510,7 @@ async function spotifyGetArtistAlbumTrackIds(sp, artistId, market, disc, meta) {
     while (true) {
       const tr = await spRetry(
         () => sp.getAlbumTracks(albumId, { limit, offset }),
-        { label: "getAlbumTracks", meta },
+        { label: "getAlbumTracks", meta, maxRetries: 0 },
       );
 
       const items = tr.body?.items || [];
@@ -1830,13 +1830,23 @@ async function discoverWithLastFm({ sp, market, excludedSet, recipe, meta }) {
         );
       }
 
-      const ids = await spotifyGetArtistAlbumTrackIds(
-        sp,
-        a.id,
-        market,
-        disc,
-        meta,
-      );
+      let ids = [];
+      try {
+        ids = await spotifyGetArtistAlbumTrackIds(sp, a.id, market, disc, meta);
+      } catch (e) {
+        const status = e?.statusCode || e?.status;
+
+        if (status === 429) {
+          step(
+            meta,
+            `rate-limit on getArtistAlbums -> shrinking discovery for this run (stop after ${ids.length} ids so far)`,
+          );
+          meta?.notes?.push("spotify_rate_limited_artist_albums");
+          break; // zmenšíme discovery: přestaneme zpracovávat další artisty
+        }
+
+        throw e; // ostatní chyby chceme pořád vidět a řešit
+      }
 
       if (!ids.length) continue;
 

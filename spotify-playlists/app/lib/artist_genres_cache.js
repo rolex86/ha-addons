@@ -8,6 +8,10 @@ const ARTISTS_PATH = path.join(DATA_DIR, "artist_genres.json");
 let _store = null;
 let _dirty = false;
 
+function fmtMb(bytes) {
+  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+}
+
 function nowMs() {
   return Date.now();
 }
@@ -112,6 +116,18 @@ function saveArtistGenresStore() {
   fs.renameSync(tmp, ARTISTS_PATH);
 
   _dirty = false;
+
+  // Stats (for visibility)
+  try {
+    const artistsCount = Object.keys(_store.artists || {}).length;
+    const st = fs.statSync(ARTISTS_PATH);
+    console.info(
+      `[artist-genres] saved artists=${artistsCount} size=${fmtMb(st.size)}`,
+    );
+  } catch {
+    // ignore stats errors
+  }
+
   return true;
 }
 

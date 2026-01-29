@@ -63,6 +63,7 @@ let genresCatalogQueue = Promise.resolve();
 // --- run logger (in-memory ring buffer) ---
 const RUN_LOG_MAX = 1500;
 let runSeq = 0;
+let runLogI = 0; // monotonic log line index (survives trimming)
 
 let runState = {
   running: false,
@@ -75,18 +76,67 @@ let runState = {
 
 let runLogs = []; // { i, ts, run_id, level, msg }
 
-function logRun(level, msg, run_id = runState.run_id) {
+// --- log level handling (trace/debug/info/warn/error) ---
+const LOG_RANK = { trace: 10, debug: 20, info: 30, warn: 40, error: 50 };
+
+function normLevel(x) {
+  const s = String(x || "info").toLowerCase();
+  return LOG_RANK[s] ? s : "info";
+}
+function rank(level) {
+  return LOG_RANK[normLevel(level)] ?? LOG_RANK.info;
+}
+
+// Read current desired level from options (fallback to env)
+function currentLogLevel() {
+  // getOptions() už v server.js máš – používáš ho jinde
+  const opts = getOptions?.() || {};
+  return normLevel(opts.log_level || process.env.LOG_LEVEL || "info");
+}
+
+function shouldPrint(level) {
+  // tiskni, pokud je zpráva stejně/víc “závažná” než nastavený práh
+  // trace (10) => tiskne vše; info (30) => netiskne debug/trace
+  return rank(level) >= rank(currentLogLevel());
+}
+
+function logRun(level, msg, extraOrRunId = null) {
+  const lvl = normLevel(level);
+
+  // allow calling: logRun("info","...", runIdNumber)
+  // or:          logRun("info","...", {anyExtra})
+  const run_id =
+    typeof extraOrRunId === "number"
+      ? extraOrRunId
+      : (runState?.run_id ?? null);
+
+  const extra =
+    extraOrRunId &&
+    typeof extraOrRunId === "object" &&
+    !Array.isArray(extraOrRunId)
+      ? extraOrRunId
+      : {};
+
   const line = {
-    i: runLogs.length ? runLogs[runLogs.length - 1].i + 1 : 1,
+    i: ++runLogI,
     ts: Date.now(),
     run_id,
-    level,
-    msg: String(msg),
+    level: lvl,
+    msg: String(msg || ""),
+    ...extra,
   };
+
   runLogs.push(line);
-  if (runLogs.length > RUN_LOG_MAX) runLogs = runLogs.slice(-RUN_LOG_MAX);
-  console.log(`[runlog][${level}] ${line.msg}`);
-  return line;
+
+  // ring buffer trim (keep newest)
+  if (runLogs.length > RUN_LOG_MAX) {
+    runLogs.splice(0, runLogs.length - RUN_LOG_MAX);
+  }
+
+  // console output is filtered by log_level
+  if (shouldPrint(lvl)) {
+    console.log(`[runlog][${lvl}] ${line.msg}`);
+  }
 }
 
 function formatErr(e) {
@@ -608,6 +658,8 @@ app.post("/api/run", requireToken, async (req, res) => {
   };
 
   logRun("info", `Run started (run_id=${runState.run_id})`);
+  logRun("debug", `log_level=${String(opts?.log_level || "info")}`);
+  process.env.LOG_LEVEL = currentLogLevel();
 
   try {
     const okTok = await ensureAccessToken(sp);
@@ -723,12 +775,16 @@ app.post("/api/run", requireToken, async (req, res) => {
 
       logRun("info", `Recipe ${recipe.id}: generating tracks...`);
 
+      const ll = String(opts?.log_level || "info").toLowerCase();
+      const debugSteps = ll === "debug" || ll === "trace";
+
       let { tracks, meta } = await generateTracksWithMeta({
         sp,
         recipe,
         market: opts.market,
         excludedSet,
         historyOnlySet: historyExcluded,
+        debugSteps,
       });
 
       // Auto-flush history when it blocks too much of the sources pool (per-recipe only)

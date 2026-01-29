@@ -91,7 +91,27 @@ async function withTimeout(promise, ms, label = "operation") {
   }
 }
 
-async function spRetry(fn, { maxRetries = 6, baseDelayMs = 400 } = {}) {
+const LOG_RANK = { trace: 10, debug: 20, info: 30, warn: 40, error: 50 };
+function normLevel(x) {
+  const s = String(x || "info").toLowerCase();
+  return LOG_RANK[s] ? s : "info";
+}
+function rank(level) {
+  return LOG_RANK[normLevel(level)] ?? LOG_RANK.info;
+}
+function shouldLog(level) {
+  const cur = normLevel(process.env.LOG_LEVEL || "info");
+  return rank(level) >= rank(cur);
+}
+function spLog(level, msg) {
+  if (!shouldLog(level)) return;
+  console.log(`[spotify][${normLevel(level)}] ${msg}`);
+}
+
+async function spRetry(
+  fn,
+  { maxRetries = 6, baseDelayMs = 400, label = "" } = {},
+) {
   let attempt = 0;
 
   while (true) {
@@ -105,13 +125,38 @@ async function spRetry(fn, { maxRetries = 6, baseDelayMs = 400 } = {}) {
         status === 429 || status === 502 || status === 503 || status === 504;
 
       if (!isRetryable || attempt >= maxRetries) {
+        spLog(
+          "debug",
+          `FAIL ${label ? `[${label}] ` : ""}status=${status ?? "?"} attempt=${attempt}/${maxRetries} retryable=${isRetryable ? 1 : 0}`,
+        );
         throw e;
       }
 
-      const raMs = fe.retry_after ? Number(fe.retry_after) * 1000 : null;
-      const backoff = Math.round(baseDelayMs * Math.pow(2, attempt));
-      await sleep(raMs ?? backoff);
+      let raMs = null;
+      if (fe.retry_after != null) {
+        const n = Number(fe.retry_after);
+        if (Number.isFinite(n)) {
+          // heuristika: > 1000 už bude nejspíš ms
+          raMs = n > 1000 ? n : n * 1000;
+        }
+      }
 
+      const backoff = Math.round(baseDelayMs * Math.pow(2, attempt));
+      const waitMs = raMs ?? backoff;
+
+      if (status === 429) {
+        spLog(
+          "trace",
+          `429 rate-limit ${label ? `[${label}] ` : ""}attempt=${attempt + 1}/${maxRetries} retryAfter=${Math.round(waitMs / 1000)}s (${waitMs}ms)`,
+        );
+      } else {
+        spLog(
+          "debug",
+          `HTTP ${status} retry ${label ? `[${label}] ` : ""}attempt=${attempt + 1}/${maxRetries} waitMs=${waitMs}`,
+        );
+      }
+
+      await sleep(waitMs);
       attempt += 1;
     }
   }

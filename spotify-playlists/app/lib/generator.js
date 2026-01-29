@@ -18,11 +18,32 @@ const {
   saveArtistGenresStore,
 } = require("./artist_genres_cache");
 
+const LOG_RANK = { trace: 10, debug: 20, info: 30, warn: 40, error: 50 };
+function normLevel(x) {
+  const s = String(x || "info").toLowerCase();
+  return LOG_RANK[s] ? s : "info";
+}
+function rank(level) {
+  return LOG_RANK[normLevel(level)] ?? LOG_RANK.info;
+}
+function shouldLog(level) {
+  const cur = normLevel(process.env.LOG_LEVEL || "info");
+  return rank(level) >= rank(cur);
+}
+function genLog(level, meta, msg) {
+  if (!shouldLog(level)) return;
+  const rid = meta?.recipe_id || meta?.recipe?.id || "-";
+  console.log(`[gen][${normLevel(level)}][${rid}] ${msg}`);
+}
+
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-async function spRetry(fn, { maxRetries = 6, baseDelayMs = 400 } = {}) {
+async function spRetry(
+  fn,
+  { maxRetries = 6, baseDelayMs = 400, label = "", meta = null } = {},
+) {
   let attempt = 0;
 
   while (true) {
@@ -32,15 +53,42 @@ async function spRetry(fn, { maxRetries = 6, baseDelayMs = 400 } = {}) {
       const status = e?.statusCode || e?.status;
       const headers = e?.headers || e?.response?.headers;
       const ra = headers?.["retry-after"] || headers?.["Retry-After"];
-      const retryAfterMs = ra ? Number(ra) * 1000 : null;
+
+      // Retry-After is seconds per spec, but be tolerant if already ms
+      let retryAfterMs = null;
+      if (ra != null) {
+        const n = Number(ra);
+        if (Number.isFinite(n)) retryAfterMs = n > 1000 ? n : n * 1000;
+      }
 
       const isRetryable =
         status === 429 || status === 502 || status === 503 || status === 504;
 
-      if (!isRetryable || attempt >= maxRetries) throw e;
+      if (!isRetryable || attempt >= maxRetries) {
+        genLog(
+          "debug",
+          meta,
+          `spRetry FAIL ${label ? `[${label}] ` : ""}status=${status ?? "?"} attempt=${attempt}/${maxRetries} retryable=${isRetryable ? 1 : 0}`,
+        );
+        throw e;
+      }
 
       const backoff = Math.round(baseDelayMs * Math.pow(2, attempt));
       const waitMs = retryAfterMs ?? backoff;
+
+      if (status === 429) {
+        genLog(
+          "trace",
+          meta,
+          `spRetry 429 ${label ? `[${label}] ` : ""}attempt=${attempt + 1}/${maxRetries} retryAfter=${Math.round(waitMs / 1000)}s (${waitMs}ms)`,
+        );
+      } else {
+        genLog(
+          "debug",
+          meta,
+          `spRetry HTTP ${status} ${label ? `[${label}] ` : ""}attempt=${attempt + 1}/${maxRetries} waitMs=${waitMs}`,
+        );
+      }
 
       await sleep(waitMs);
       attempt += 1;
@@ -48,10 +96,15 @@ async function spRetry(fn, { maxRetries = 6, baseDelayMs = 400 } = {}) {
   }
 }
 
-const DEBUG_STEPS = process.env.DEBUG_STEPS === "1";
+function stepsOn(meta) {
+  // 1) prefer flag poslaný ze serveru (podle log_level)
+  if (meta?.debugSteps === true) return true;
+  // 2) fallback pro lokální dev
+  return process.env.DEBUG_STEPS === "1";
+}
 
 function step(meta, msg) {
-  if (!DEBUG_STEPS) return;
+  if (!stepsOn(meta)) return;
   const ts = new Date().toISOString();
   const rid = meta?.recipe_id || "-";
   console.log(`[steps] ${ts} [${rid}] ${msg}`);
@@ -1088,11 +1141,13 @@ async function songkickGetUpcomingEventArtists({
   return artists;
 }
 
-async function spotifySearchArtistId(sp, artistName, market) {
+async function spotifySearchArtistId(sp, artistName, market, meta) {
   const q = `artist:"${artistName}"`;
-  const resp = await spRetry(() =>
-    sp.searchArtists(q, { market, limit: 1, offset: 0 }),
+  const resp = await spRetry(
+    () => sp.searchArtists(q, { market, limit: 1, offset: 0 }),
+    { label: "searchArtists", meta },
   );
+
   const a0 = resp.body?.artists?.items?.[0];
   return a0?.id || null;
 }
@@ -1377,8 +1432,9 @@ async function spotifySearchTrackId(
   const queries = [`artist:"${a}" track:"${t}"`, `${a} ${t}`, `"${t}"`];
 
   for (const q of queries) {
-    const resp = await spRetry(() =>
-      sp.searchTracks(q, { market, limit: lim, offset: 0 }),
+    const resp = await spRetry(
+      () => sp.searchTracks(q, { market, limit: lim, offset: 0 }),
+      { label: "searchTracks", meta: null },
     );
 
     const items = resp.body?.tracks?.items || [];
@@ -1424,14 +1480,16 @@ async function spotifyFilterOutSavedTracks(sp, trackIds) {
   return out;
 }
 
-async function spotifyGetArtistAlbumTrackIds(sp, artistId, market, disc) {
-  const albumsResp = await spRetry(() =>
-    sp.getArtistAlbums(artistId, {
-      include_groups: "album,single",
-      market,
-      limit: Math.max(1, Math.min(50, disc.albums_limit_fetch)),
-      offset: 0,
-    }),
+async function spotifyGetArtistAlbumTrackIds(sp, artistId, market, disc, meta) {
+  const albumsResp = await spRetry(
+    () =>
+      sp.getArtistAlbums(artistId, {
+        include_groups: "album,single",
+        market,
+        limit: Math.max(1, Math.min(50, disc.albums_limit_fetch)),
+        offset: 0,
+      }),
+    { label: "getArtistAlbums", meta: null },
   );
 
   let albums = albumsResp.body?.items || [];
@@ -1450,9 +1508,11 @@ async function spotifyGetArtistAlbumTrackIds(sp, artistId, market, disc) {
     let offset = 0;
     const limit = 50;
     while (true) {
-      const tr = await spRetry(() =>
-        sp.getAlbumTracks(albumId, { limit, offset }),
+      const tr = await spRetry(
+        () => sp.getAlbumTracks(albumId, { limit, offset }),
+        { label: "getAlbumTracks", meta },
       );
+
       const items = tr.body?.items || [];
       for (const t of items) {
         if (t?.id) trackIds.push(t.id);
@@ -1603,6 +1663,8 @@ async function discoverWithLastFm({ sp, market, excludedSet, recipe, meta }) {
     );
 
     seeds = (top.body?.items || []).map((a) => a?.name).filter(Boolean);
+    genLog("debug", meta, `seeds(top artists) count=${seeds.length}`);
+
     if (!seeds.length) {
       meta?.notes?.push("no_top_artists");
       // Still allow Songkick-only discovery
@@ -1691,6 +1753,10 @@ async function discoverWithLastFm({ sp, market, excludedSet, recipe, meta }) {
   if (disc.include_seed_artists && seeds.length)
     artistPool = uniq([...seeds, ...artistPool]);
   artistPool = artistPool.slice(0, Math.max(5, disc.take_artists));
+  step(
+    meta,
+    `lastfm:discover artistPool=${artistPool.length} take_artists=${disc.take_artists}`,
+  );
 
   if (!artistPool.length) {
     meta?.notes?.push("no_artist_pool");
@@ -1730,18 +1796,48 @@ async function discoverWithLastFm({ sp, market, excludedSet, recipe, meta }) {
     }
   } else {
     const artistIds = [];
+    let i = 0;
+
     for (const name of artistPool) {
-      const aid = await spotifySearchArtistId(sp, name, market);
+      i += 1;
+      const aid = await spotifySearchArtistId(sp, name, market, meta);
       if (aid) artistIds.push({ name, id: aid });
+
+      if (i % 25 === 0 || i === artistPool.length) {
+        step(
+          meta,
+          `spotifySearchArtistId progress ${i}/${artistPool.length} hits=${artistIds.length}`,
+        );
+      }
     }
 
     if (!artistIds.length) {
       meta?.notes?.push("spotify_artist_search_no_hits");
       return [];
     }
+    step(
+      meta,
+      `spotifyGetArtistAlbumTrackIds start artists=${artistIds.length} strategy=${strategy}`,
+    );
 
+    let j = 0;
     for (const a of artistIds) {
-      const ids = await spotifyGetArtistAlbumTrackIds(sp, a.id, market, disc);
+      j += 1;
+      if (j % 10 === 0 || j === artistIds.length) {
+        step(
+          meta,
+          `spotifyGetArtistAlbumTrackIds progress ${j}/${artistIds.length}`,
+        );
+      }
+
+      const ids = await spotifyGetArtistAlbumTrackIds(
+        sp,
+        a.id,
+        market,
+        disc,
+        meta,
+      );
+
       if (!ids.length) continue;
 
       const pickN = Math.max(1, disc.tracks_per_artist * 8);
@@ -1874,6 +1970,7 @@ async function generateTracksWithMeta({
   market,
   excludedSet,
   historyOnlySet,
+  debugSteps = false,
 }) {
   const need = Number(recipe.track_count ?? 50);
 
@@ -1881,6 +1978,7 @@ async function generateTracksWithMeta({
     need,
     provider: "sources",
     used_provider: "sources",
+    debugSteps: Boolean(debugSteps),
     recipe_id: recipe?.id || recipe?.recipe_id || recipe?.name || "unknown",
     counts: {
       audiodb_selected: 0,

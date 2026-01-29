@@ -1231,6 +1231,11 @@ async function filterByGenresIfNeeded(
 
   const includeP = normalizeGenrePatterns(filters.genres_include);
   const excludeP = normalizeGenrePatterns(filters.genres_exclude);
+  const allowUnknown =
+    filters?.allow_unknown_genres === undefined ||
+    filters?.allow_unknown_genres === null
+      ? true
+      : Boolean(filters.allow_unknown_genres);
 
   // If the user filled both include + exclude lists, apply both even if they
   // selected include/exclude mode.
@@ -1275,10 +1280,7 @@ async function filterByGenresIfNeeded(
 
     let hasInclude = includeP.length ? anyGenreMatch(genres, includeP) : true;
     // Allow unknown genres to pass include/include_exclude (opt-in per recipe)
-    const allowUnknown =
-      filters?.allow_unknown_genres != null
-        ? Boolean(filters.allow_unknown_genres)
-        : true; // default = true (bez cache by include jinak vyprázdnil seznam)
+    // default = true (bez cache by include jinak vyprázdnil seznam)
     if (isUnknown && allowUnknown) hasInclude = true;
 
     const hasExclude = excludeP.length
@@ -2194,7 +2196,7 @@ async function updateGenresCatalogFromTracks({ sp, tracks, meta, label }) {
     const merged = mergeFromGenresMap(cache);
     if (merged > 0) saveArtistGenresStore();
   } catch {
-    meta?.notes?.push("artist_genres_cache_save_failed");
+    m?.notes?.push("artist_genres_cache_save_failed");
   }
 
   try {

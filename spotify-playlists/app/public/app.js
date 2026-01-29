@@ -177,6 +177,19 @@ function splitComma(v) {
     .map((x) => x.trim())
     .filter(Boolean);
 }
+function deriveGenresMode(includeStrOrArr, excludeStrOrArr) {
+  const inc = Array.isArray(includeStrOrArr)
+    ? includeStrOrArr
+    : splitComma(includeStrOrArr);
+  const exc = Array.isArray(excludeStrOrArr)
+    ? excludeStrOrArr
+    : splitComma(excludeStrOrArr);
+
+  if (inc.length && exc.length) return "include_exclude";
+  if (inc.length) return "include";
+  if (exc.length) return "exclude";
+  return "ignore";
+}
 
 function normalizeForMatch(s) {
   return String(s || "")
@@ -2203,22 +2216,10 @@ function setGenreListsToBlock(block, include, exclude) {
   if (incEl) incEl.value = inc.join(", ");
   if (excEl) excEl.value = exc.join(", ");
 
-  // Helpful: if user starts selecting pills while mode is ignore,
-  // auto-switch to a matching mode. But don't override when user already chose a mode.
+  // Auto-sync Genres mode according to include/exclude
   const modeEl = block?.querySelector('select[data-k="filters.genres_mode"]');
   if (modeEl) {
-    const cur = String(modeEl.value || "ignore").toLowerCase();
-    const computed =
-      inc.length && exc.length
-        ? "include_exclude"
-        : inc.length
-          ? "include"
-          : exc.length
-            ? "exclude"
-            : "ignore";
-
-    if (computed === "ignore") modeEl.value = "ignore";
-    else if (cur === "ignore") modeEl.value = computed;
+    modeEl.value = deriveGenresMode(inc, exc);
   }
 }
 
@@ -2337,8 +2338,20 @@ function wireGenreListInputs() {
     ensureGenreListContainers(block);
     renderGenreLists(block);
 
-    incEl.addEventListener("input", () => renderGenreLists(block));
-    excEl.addEventListener("input", () => renderGenreLists(block));
+    const sync = () => {
+      // Keep mode in sync with what user typed
+      const modeEl = block?.querySelector(
+        'select[data-k="filters.genres_mode"]',
+      );
+      if (modeEl) modeEl.value = deriveGenresMode(incEl.value, excEl.value);
+
+      renderGenreLists(block);
+    };
+
+    incEl.addEventListener("input", sync);
+    excEl.addEventListener("input", sync);
+    incEl.addEventListener("change", sync);
+    excEl.addEventListener("change", sync);
   }
 }
 

@@ -9,14 +9,36 @@ const TOKENS_PATH = path.join(DATA_DIR, "tokens.json");
 function loadTokens() {
   try {
     if (!fs.existsSync(TOKENS_PATH)) return {};
-    return JSON.parse(fs.readFileSync(TOKENS_PATH, "utf8"));
+    const raw = JSON.parse(fs.readFileSync(TOKENS_PATH, "utf8")) || {};
+
+    // New format (our app)
+    if (raw.refresh_token || raw.access_token) return raw;
+
+    // Legacy format (spotify-web-api-node dump)
+    const c = raw?._credentials;
+    if (c && (c.refreshToken || c.accessToken)) {
+      return {
+        refresh_token: c.refreshToken || "",
+        access_token: c.accessToken || "",
+        refreshed_at: raw.refreshed_at || null,
+      };
+    }
+
+    return raw;
   } catch {
     return {};
   }
 }
 
 function saveTokens(tokens) {
-  fs.writeFileSync(TOKENS_PATH, JSON.stringify(tokens, null, 2), "utf8");
+  const t = tokens || {};
+  const out = {
+    refresh_token: t.refresh_token || t?._credentials?.refreshToken || "",
+    access_token: t.access_token || t?._credentials?.accessToken || "",
+    refreshed_at: t.refreshed_at || Date.now(),
+  };
+
+  fs.writeFileSync(TOKENS_PATH, JSON.stringify(out, null, 2), "utf8");
 }
 
 function createClient() {

@@ -711,9 +711,14 @@ app.post("/api/run", requireToken, async (req, res) => {
       // union
       let excludedSet = new Set([...historyExcluded, ...playlistExcluded]);
 
+      let playlistNew = 0;
+      for (const id of playlistExcluded) {
+        if (!historyExcluded.has(id)) playlistNew += 1;
+      }
+
       logRun(
         "debug",
-        `Recipe ${recipe.id}: excluded history=${historyExcluded.size} playlist=${playlistExcluded.size} total=${excludedSet.size}`,
+        `Recipe ${recipe.id}: excluded history=${historyExcluded.size} playlist=${playlistExcluded.size} playlist_new=${playlistNew} overlap=${playlistExcluded.size - playlistNew} total=${excludedSet.size}`,
       );
 
       logRun("info", `Recipe ${recipe.id}: generating tracks...`);

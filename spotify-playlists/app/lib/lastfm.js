@@ -1,5 +1,10 @@
 // app/lib/lastfm.js
 const https = require("https");
+const DEBUG_LASTFM = process.env.DEBUG_LASTFM === "1";
+const LASTFM_MAX_TOTAL_MS = Number(process.env.LASTFM_MAX_TOTAL_MS || 60000); // 60s budget per call
+const LASTFM_MAX_RETRY_AFTER_MS = Number(
+  process.env.LASTFM_MAX_RETRY_AFTER_MS || 8000, // cap Retry-After
+);
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
@@ -13,7 +18,9 @@ function getRetryAfterMs(res) {
   const ra = res?.headers?.["retry-after"];
   if (!ra) return null;
   const n = Number(ra);
-  return Number.isFinite(n) ? n * 1000 : null;
+  if (!Number.isFinite(n)) return null;
+  const ms = n * 1000;
+  return Math.min(ms, LASTFM_MAX_RETRY_AFTER_MS);
 }
 
 function httpsGet(url, { timeoutMs = 12000, headers = {} } = {}) {
@@ -46,11 +53,28 @@ async function lastfmGet(
   apiKey,
   method,
   params = {},
-  { maxRetries = 5, baseDelayMs = 500, timeoutMs = 12000 } = {},
+  {
+    maxRetries = 5,
+    baseDelayMs = 500,
+    timeoutMs = 12000,
+    maxTotalMs = LASTFM_MAX_TOTAL_MS,
+  } = {},
 ) {
   let attempt = 0;
+  const tStart = Date.now();
 
   while (true) {
+    // hard budget (prevents "forever")
+    const spent = Date.now() - tStart;
+    if (spent > maxTotalMs) {
+      const err = new Error(
+        `Last.fm budget exceeded: ${spent}ms > ${maxTotalMs}ms (method=${method})`,
+      );
+      err.status = "budget";
+      err.body = { method, params, attempt, spent, maxTotalMs };
+      throw err;
+    }
+
     const qs = new URLSearchParams({
       method: String(method),
       api_key: String(apiKey),
@@ -66,11 +90,25 @@ async function lastfmGet(
     try {
       const { res, data } = await httpsGet(url, { timeoutMs });
 
+      if (DEBUG_LASTFM) {
+        console.log(
+          `[lastfm] method=${method} attempt=${attempt} status=${res.statusCode} timeoutMs=${timeoutMs}`,
+        );
+      }
+
       // Retry for 429 / 5xx
       if (isRetryableStatus(res.statusCode) && attempt < maxRetries) {
         const ra = getRetryAfterMs(res);
         const backoff = Math.round(baseDelayMs * Math.pow(2, attempt));
-        await sleep(ra ?? backoff);
+        const waitMs = ra ?? backoff;
+
+        if (DEBUG_LASTFM) {
+          console.log(
+            `[lastfm] RETRY method=${method} status=${res.statusCode} waitMs=${waitMs} attempt=${attempt + 1}/${maxRetries}`,
+          );
+        }
+
+        await sleep(waitMs);
         attempt += 1;
         continue;
       }
@@ -97,6 +135,13 @@ async function lastfmGet(
       // Network/timeout -> retry
       if (attempt < maxRetries) {
         const backoff = Math.round(baseDelayMs * Math.pow(2, attempt));
+
+        if (DEBUG_LASTFM) {
+          console.log(
+            `[lastfm] NET/TO retry method=${method} err="${e?.message || e}" waitMs=${backoff} attempt=${attempt + 1}/${maxRetries}`,
+          );
+        }
+
         await sleep(backoff);
         attempt += 1;
         continue;

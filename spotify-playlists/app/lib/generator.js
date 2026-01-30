@@ -11,11 +11,39 @@
 //   max_per_artist, max_per_album, avoid_same_artist_in_row
 // - Tempo filtering via Spotify audio features when needed
 
+const { loadCatalog, observeGenres, saveCatalog } = require("./genre_catalog");
+const {
+  loadArtistGenresMap,
+  mergeFromGenresMap,
+  saveArtistGenresStore,
+} = require("./artist_genres_cache");
+
+const LOG_RANK = { trace: 10, debug: 20, info: 30, warn: 40, error: 50 };
+function normLevel(x) {
+  const s = String(x || "info").toLowerCase();
+  return LOG_RANK[s] ? s : "info";
+}
+function rank(level) {
+  return LOG_RANK[normLevel(level)] ?? LOG_RANK.info;
+}
+function shouldLog(level) {
+  const cur = normLevel(process.env.LOG_LEVEL || "info");
+  return rank(level) >= rank(cur);
+}
+function genLog(level, meta, msg) {
+  if (!shouldLog(level)) return;
+  const rid = meta?.recipe_id || meta?.recipe?.id || "-";
+  console.log(`[gen][${normLevel(level)}][${rid}] ${msg}`);
+}
+
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-async function spRetry(fn, { maxRetries = 6, baseDelayMs = 400 } = {}) {
+async function spRetry(
+  fn,
+  { maxRetries = 6, baseDelayMs = 400, label = "", meta = null } = {},
+) {
   let attempt = 0;
 
   while (true) {
@@ -25,19 +53,70 @@ async function spRetry(fn, { maxRetries = 6, baseDelayMs = 400 } = {}) {
       const status = e?.statusCode || e?.status;
       const headers = e?.headers || e?.response?.headers;
       const ra = headers?.["retry-after"] || headers?.["Retry-After"];
-      const retryAfterMs = ra ? Number(ra) * 1000 : null;
+
+      // Retry-After is seconds per spec, but be tolerant if already ms
+      let retryAfterMs = null;
+      if (ra != null) {
+        const n = Number(ra);
+        if (Number.isFinite(n)) retryAfterMs = n > 1000 ? n : n * 1000;
+      }
 
       const isRetryable =
         status === 429 || status === 502 || status === 503 || status === 504;
 
-      if (!isRetryable || attempt >= maxRetries) throw e;
+      if (!isRetryable || attempt >= maxRetries) {
+        genLog(
+          "debug",
+          meta,
+          `spRetry FAIL ${label ? `[${label}] ` : ""}status=${status ?? "?"} attempt=${attempt}/${maxRetries} retryable=${isRetryable ? 1 : 0}`,
+        );
+        throw e;
+      }
 
       const backoff = Math.round(baseDelayMs * Math.pow(2, attempt));
       const waitMs = retryAfterMs ?? backoff;
 
+      if (status === 429) {
+        genLog(
+          "trace",
+          meta,
+          `spRetry 429 ${label ? `[${label}] ` : ""}attempt=${attempt + 1}/${maxRetries} retryAfter=${Math.round(waitMs / 1000)}s (${waitMs}ms)`,
+        );
+      } else {
+        genLog(
+          "debug",
+          meta,
+          `spRetry HTTP ${status} ${label ? `[${label}] ` : ""}attempt=${attempt + 1}/${maxRetries} waitMs=${waitMs}`,
+        );
+      }
+
       await sleep(waitMs);
       attempt += 1;
     }
+  }
+}
+
+function stepsOn(meta) {
+  // 1) prefer flag poslaný ze serveru (podle log_level)
+  if (meta?.debugSteps === true) return true;
+  // 2) fallback pro lokální dev
+  return process.env.DEBUG_STEPS === "1";
+}
+
+function step(meta, msg) {
+  if (!stepsOn(meta)) return;
+  const ts = new Date().toISOString();
+  const rid = meta?.recipe_id || "-";
+  console.log(`[steps] ${ts} [${rid}] ${msg}`);
+}
+
+async function timeStep(meta, label, fn) {
+  const t0 = Date.now();
+  step(meta, `START ${label}`);
+  try {
+    return await fn();
+  } finally {
+    step(meta, `END   ${label} (+${Date.now() - t0}ms)`);
   }
 }
 
@@ -663,6 +742,7 @@ async function poolFromRecommendations({
   recipe,
   market,
   excludedSet,
+  historyOnlySet,
   meta,
 }) {
   const filters = getRecipeFilters(recipe);
@@ -1061,11 +1141,13 @@ async function songkickGetUpcomingEventArtists({
   return artists;
 }
 
-async function spotifySearchArtistId(sp, artistName, market) {
+async function spotifySearchArtistId(sp, artistName, market, meta) {
   const q = `artist:"${artistName}"`;
-  const resp = await spRetry(() =>
-    sp.searchArtists(q, { market, limit: 1, offset: 0 }),
+  const resp = await spRetry(
+    () => sp.searchArtists(q, { market, limit: 1, offset: 0 }),
+    { label: "searchArtists", meta },
   );
+
   const a0 = resp.body?.artists?.items?.[0];
   return a0?.id || null;
 }
@@ -1138,7 +1220,65 @@ async function spotifyGetArtistGenresCached(sp, artistIds, cache) {
   }
 }
 
-async function filterByGenresIfNeeded(sp, tracks, filters, cache, meta) {
+async function observeGenresFromCandidates(sp, tracks, cache, meta, label) {
+  // šetrné limity: chceme katalog plnit, ale nechceme přidusit Spotify API
+  const TAKE_TRACKS = 120; // dřív 250
+  const TAKE_ARTISTS_PER_TRACK = 1; // dřív 2
+  const MAX_UNIQUE_ARTISTS = 200; // hard cap na jeden observe (šetří 429)
+
+  const arr = Array.isArray(tracks) ? tracks : [];
+  if (!arr.length) return 0;
+
+  const sample = arr.slice(0, TAKE_TRACKS);
+
+  // collect + dedupe + cap
+  const idsSet = new Set();
+  for (const t of sample) {
+    const arts = Array.isArray(t?.artists) ? t.artists : [];
+    for (const a of arts.slice(0, TAKE_ARTISTS_PER_TRACK)) {
+      if (a?.id) idsSet.add(a.id);
+      if (idsSet.size >= MAX_UNIQUE_ARTISTS) break;
+    }
+    if (idsSet.size >= MAX_UNIQUE_ARTISTS) break;
+  }
+
+  const artistIds = Array.from(idsSet);
+  if (!artistIds.length) return 0;
+
+  try {
+    await spotifyGetArtistGenresCached(sp, artistIds, cache);
+  } catch {
+    meta?.notes?.push("genres_observe_fetch_failed");
+    return 0;
+  }
+
+  const allGenres = [];
+  // projdeme jen ty artistIds, co jsme chtěli (cache už má missing dofetchované)
+  for (const id of artistIds) {
+    const gs = cache.get(id);
+    if (Array.isArray(gs) && gs.length) allGenres.push(...gs);
+  }
+
+  if (!allGenres.length) return 0;
+
+  const updates = observeGenres(allGenres);
+
+  if (updates > 0 && label) {
+    // jen krátká poznámka (ať to nespamuje)
+    meta?.notes?.push(`genres_observed:${label}:${updates}`);
+  }
+
+  return updates;
+}
+
+async function filterByGenresIfNeeded(
+  sp,
+  tracks,
+  filters,
+  cache,
+  meta,
+  opts = {},
+) {
   if (!genresWanted(filters)) return tracks;
 
   let mode = String(filters.genres_mode || "ignore").toLowerCase();
@@ -1146,6 +1286,11 @@ async function filterByGenresIfNeeded(sp, tracks, filters, cache, meta) {
 
   const includeP = normalizeGenrePatterns(filters.genres_include);
   const excludeP = normalizeGenrePatterns(filters.genres_exclude);
+  const allowUnknown =
+    filters?.allow_unknown_genres === undefined ||
+    filters?.allow_unknown_genres === null
+      ? true
+      : Boolean(filters.allow_unknown_genres);
 
   // If the user filled both include + exclude lists, apply both even if they
   // selected include/exclude mode.
@@ -1163,7 +1308,10 @@ async function filterByGenresIfNeeded(sp, tracks, filters, cache, meta) {
   }
 
   try {
-    await spotifyGetArtistGenresCached(sp, artistIds, cache);
+    const uniqArtistIds = uniqIds(artistIds);
+    if (!opts.cacheOnly) {
+      await spotifyGetArtistGenresCached(sp, uniqArtistIds, cache);
+    }
   } catch {
     meta?.notes?.push("genre_fetch_failed");
     // Don't hard-fail generation – just skip genre filtering.
@@ -1187,7 +1335,8 @@ async function filterByGenresIfNeeded(sp, tracks, filters, cache, meta) {
 
     let hasInclude = includeP.length ? anyGenreMatch(genres, includeP) : true;
     // Allow unknown genres to pass include/include_exclude (opt-in per recipe)
-    if (isUnknown && filters?.allow_unknown_genres) hasInclude = true;
+    // default = true (bez cache by include jinak vyprázdnil seznam)
+    if (isUnknown && allowUnknown) hasInclude = true;
 
     const hasExclude = excludeP.length
       ? anyGenreMatch(genres, excludeP)
@@ -1209,12 +1358,12 @@ async function filterByGenresIfNeeded(sp, tracks, filters, cache, meta) {
       if (hasExclude) continue;
     }
 
-    if (isUnknown && filters?.allow_unknown_genres) unknownKept += 1;
+    if (isUnknown && allowUnknown) unknownKept += 1;
     out.push(t);
   }
 
   meta?.notes?.push(
-    `genre_filter:${mode}:in=${includeP.length}:ex=${excludeP.length}:unknown_allow=${filters?.allow_unknown_genres ? 1 : 0}:unknown_kept=${unknownKept}/${unknownTotal}:kept=${out.length}/${(tracks || []).length}`,
+    `genre_filter:${mode}:in=${includeP.length}:ex=${excludeP.length}:unknown_allow=${allowUnknown ? 1 : 0}:unknown_kept=${unknownKept}/${unknownTotal}:kept=${out.length}/${(tracks || []).length}`,
   );
   return out;
 }
@@ -1283,8 +1432,9 @@ async function spotifySearchTrackId(
   const queries = [`artist:"${a}" track:"${t}"`, `${a} ${t}`, `"${t}"`];
 
   for (const q of queries) {
-    const resp = await spRetry(() =>
-      sp.searchTracks(q, { market, limit: lim, offset: 0 }),
+    const resp = await spRetry(
+      () => sp.searchTracks(q, { market, limit: lim, offset: 0 }),
+      { label: "searchTracks", meta: null },
     );
 
     const items = resp.body?.tracks?.items || [];
@@ -1330,14 +1480,16 @@ async function spotifyFilterOutSavedTracks(sp, trackIds) {
   return out;
 }
 
-async function spotifyGetArtistAlbumTrackIds(sp, artistId, market, disc) {
-  const albumsResp = await spRetry(() =>
-    sp.getArtistAlbums(artistId, {
-      include_groups: "album,single",
-      market,
-      limit: Math.max(1, Math.min(50, disc.albums_limit_fetch)),
-      offset: 0,
-    }),
+async function spotifyGetArtistAlbumTrackIds(sp, artistId, market, disc, meta) {
+  const albumsResp = await spRetry(
+    () =>
+      sp.getArtistAlbums(artistId, {
+        include_groups: "album,single",
+        market,
+        limit: Math.max(1, Math.min(50, disc.albums_limit_fetch)),
+        offset: 0,
+      }),
+    { label: "getArtistAlbums", maxRetries: 0, meta },
   );
 
   let albums = albumsResp.body?.items || [];
@@ -1356,9 +1508,11 @@ async function spotifyGetArtistAlbumTrackIds(sp, artistId, market, disc) {
     let offset = 0;
     const limit = 50;
     while (true) {
-      const tr = await spRetry(() =>
-        sp.getAlbumTracks(albumId, { limit, offset }),
+      const tr = await spRetry(
+        () => sp.getAlbumTracks(albumId, { limit, offset }),
+        { label: "getAlbumTracks", meta, maxRetries: 0 },
       );
+
       const items = tr.body?.items || [];
       for (const t of items) {
         if (t?.id) trackIds.push(t.id);
@@ -1509,6 +1663,8 @@ async function discoverWithLastFm({ sp, market, excludedSet, recipe, meta }) {
     );
 
     seeds = (top.body?.items || []).map((a) => a?.name).filter(Boolean);
+    genLog("debug", meta, `seeds(top artists) count=${seeds.length}`);
+
     if (!seeds.length) {
       meta?.notes?.push("no_top_artists");
       // Still allow Songkick-only discovery
@@ -1597,6 +1753,10 @@ async function discoverWithLastFm({ sp, market, excludedSet, recipe, meta }) {
   if (disc.include_seed_artists && seeds.length)
     artistPool = uniq([...seeds, ...artistPool]);
   artistPool = artistPool.slice(0, Math.max(5, disc.take_artists));
+  step(
+    meta,
+    `lastfm:discover artistPool=${artistPool.length} take_artists=${disc.take_artists}`,
+  );
 
   if (!artistPool.length) {
     meta?.notes?.push("no_artist_pool");
@@ -1636,18 +1796,58 @@ async function discoverWithLastFm({ sp, market, excludedSet, recipe, meta }) {
     }
   } else {
     const artistIds = [];
+    let i = 0;
+
     for (const name of artistPool) {
-      const aid = await spotifySearchArtistId(sp, name, market);
+      i += 1;
+      const aid = await spotifySearchArtistId(sp, name, market, meta);
       if (aid) artistIds.push({ name, id: aid });
+
+      if (i % 25 === 0 || i === artistPool.length) {
+        step(
+          meta,
+          `spotifySearchArtistId progress ${i}/${artistPool.length} hits=${artistIds.length}`,
+        );
+      }
     }
 
     if (!artistIds.length) {
       meta?.notes?.push("spotify_artist_search_no_hits");
       return [];
     }
+    step(
+      meta,
+      `spotifyGetArtistAlbumTrackIds start artists=${artistIds.length} strategy=${strategy}`,
+    );
 
+    let j = 0;
     for (const a of artistIds) {
-      const ids = await spotifyGetArtistAlbumTrackIds(sp, a.id, market, disc);
+      j += 1;
+      if (j % 10 === 0 || j === artistIds.length) {
+        step(
+          meta,
+          `spotifyGetArtistAlbumTrackIds progress ${j}/${artistIds.length}`,
+        );
+      }
+
+      let ids = [];
+      try {
+        ids = await spotifyGetArtistAlbumTrackIds(sp, a.id, market, disc, meta);
+      } catch (e) {
+        const status = e?.statusCode || e?.status;
+
+        if (status === 429) {
+          step(
+            meta,
+            `rate-limit on getArtistAlbums -> shrinking discovery for this run (stop after ${ids.length} ids so far)`,
+          );
+          meta?.notes?.push("spotify_rate_limited_artist_albums");
+          break; // zmenšíme discovery: přestaneme zpracovávat další artisty
+        }
+
+        throw e; // ostatní chyby chceme pořád vidět a řešit
+      }
+
       if (!ids.length) continue;
 
       const pickN = Math.max(1, disc.tracks_per_artist * 8);
@@ -1780,6 +1980,7 @@ async function generateTracksWithMeta({
   market,
   excludedSet,
   historyOnlySet,
+  debugSteps = false,
 }) {
   const need = Number(recipe.track_count ?? 50);
 
@@ -1787,18 +1988,20 @@ async function generateTracksWithMeta({
     need,
     provider: "sources",
     used_provider: "sources",
+    debugSteps: Boolean(debugSteps),
+    recipe_id: recipe?.id || recipe?.recipe_id || recipe?.name || "unknown",
     counts: {
       audiodb_selected: 0,
       lastfm_selected: 0,
       reco_selected: 0,
       sources_selected: 0,
+      observed_genres_updates: 0,
 
       // debug/telemetry for history auto-flush (computed in poolFromSources)
       sources_pool_total: 0,
       sources_pool_after_excluded: 0,
       sources_pool_history_hits: 0,
     },
-
     notes: [],
   };
 
@@ -1807,8 +2010,16 @@ async function generateTracksWithMeta({
   const disc = getDiscovery(recipe);
   const rcfg = getRecommendationsCfg(recipe);
 
+  // IMPORTANT: Strict separation — no genre calls during generation.
+  // If user has genre filters configured, we just note that they were deferred.
+  if (genresWanted(filters)) {
+    meta.notes.push("genres_filter_cache_only");
+  }
+
+  // Genre cache (persistent). During generation we ONLY use cache (no Spotify calls).
+  const genreCache = genresWanted(filters) ? loadArtistGenresMap() : new Map();
+
   const state = createDiversityState([]);
-  const genreCache = new Map();
 
   // 1) Discovery / external sources first
   if (disc.enabled) {
@@ -1818,13 +2029,15 @@ async function generateTracksWithMeta({
     if (disc.use_audiodb_trending) {
       let chartTracks = [];
       try {
-        chartTracks = await discoverWithAudioDbTrending({
-          sp,
-          market,
-          excludedSet,
-          recipe,
-          meta,
-        });
+        chartTracks = await timeStep(meta, "audiodb:discover", () =>
+          discoverWithAudioDbTrending({
+            sp,
+            market,
+            excludedSet,
+            recipe,
+            meta,
+          }),
+        );
       } catch (e) {
         meta.notes.push("audiodb_discovery_failed");
         console.warn("[audiodb] discovery wrapper failed:", e?.message || e);
@@ -1834,7 +2047,9 @@ async function generateTracksWithMeta({
 
       // tempo enrichment if needed
       try {
-        const enr = await enrichTempoIfNeeded(sp, chartTracks, filters);
+        const enr = await timeStep(meta, "audiodb:tempo_enrich", () =>
+          enrichTempoIfNeeded(sp, chartTracks, filters),
+        );
         chartTracks = enr.tracks || chartTracks;
       } catch {
         meta.notes.push("tempo_enrich_failed_audiodb");
@@ -1847,14 +2062,16 @@ async function generateTracksWithMeta({
         popularity: null,
       });
 
-      // optional genre filtering
-      chartTracks = await filterByGenresIfNeeded(
-        sp,
-        chartTracks,
-        filters,
-        genreCache,
-        meta,
-      );
+      if (genresWanted(filters)) {
+        chartTracks = await filterByGenresIfNeeded(
+          null,
+          chartTracks,
+          filters,
+          genreCache,
+          meta,
+          { cacheOnly: true },
+        );
+      }
 
       // keep chart ordering (do not shuffle)
       const desired =
@@ -1880,16 +2097,18 @@ async function generateTracksWithMeta({
     // 1b) Similar-artist discovery (Last.fm + optional TasteDive)
     let discovered = [];
     try {
-      discovered = await discoverWithLastFm({
-        sp,
-        market,
-        excludedSet: new Set([
-          ...(excludedSet || []),
-          ...state.chosen.map((t) => t.id),
-        ]),
-        recipe,
-        meta,
-      });
+      discovered = await timeStep(meta, "lastfm:discover", () =>
+        discoverWithLastFm({
+          sp,
+          market,
+          excludedSet: new Set([
+            ...(excludedSet || []),
+            ...state.chosen.map((t) => t.id),
+          ]),
+          recipe,
+          meta,
+        }),
+      );
     } catch (e) {
       meta.notes.push("discovery_failed");
       console.warn("[discovery] failed:", e?.message || e);
@@ -1899,7 +2118,9 @@ async function generateTracksWithMeta({
 
     // tempo enrichment if needed
     try {
-      const enr = await enrichTempoIfNeeded(sp, discovered, filters);
+      const enr = await timeStep(meta, "discovery:tempo_enrich", () =>
+        enrichTempoIfNeeded(sp, discovered, filters),
+      );
       discovered = enr.tracks || discovered;
     } catch {
       meta.notes.push("tempo_enrich_failed_discovery");
@@ -1918,14 +2139,16 @@ async function generateTracksWithMeta({
       },
     });
 
-    // optional genre filtering
-    discovered = await filterByGenresIfNeeded(
-      sp,
-      discovered,
-      filters,
-      genreCache,
-      meta,
-    );
+    if (genresWanted(filters)) {
+      discovered = await filterByGenresIfNeeded(
+        null,
+        discovered,
+        filters,
+        genreCache,
+        meta,
+        { cacheOnly: true },
+      );
+    }
 
     if (disc.strategy === "deep_cuts") shuffleInPlace(discovered);
 
@@ -1949,28 +2172,35 @@ async function generateTracksWithMeta({
 
     let recoPool = [];
     try {
-      recoPool = await poolFromRecommendations({
-        sp,
-        recipe,
-        market,
-        excludedSet: new Set([
-          ...(excludedSet || []),
-          ...state.chosen.map((t) => t.id),
-        ]),
-        meta,
-      });
-
-      recoPool = await filterByGenresIfNeeded(
-        sp,
-        recoPool,
-        filters,
-        genreCache,
-        meta,
+      recoPool = await timeStep(meta, "reco:pool", () =>
+        poolFromRecommendations({
+          sp,
+          recipe,
+          market,
+          excludedSet: new Set([
+            ...(excludedSet || []),
+            ...state.chosen.map((t) => t.id),
+          ]),
+          historyOnlySet,
+          meta,
+        }),
       );
+
       shuffleInPlace(recoPool);
     } catch {
       meta.notes.push("recommendations_failed");
       recoPool = [];
+    }
+
+    if (genresWanted(filters)) {
+      recoPool = await filterByGenresIfNeeded(
+        null,
+        recoPool,
+        filters,
+        genreCache,
+        meta,
+        { cacheOnly: true },
+      );
     }
 
     const before = state.chosen.length;
@@ -1990,29 +2220,35 @@ async function generateTracksWithMeta({
 
     let srcPool = [];
     try {
-      srcPool = await poolFromSources({
-        sp,
-        recipe,
-        market,
-        excludedSet: new Set([
-          ...(excludedSet || []),
-          ...state.chosen.map((t) => t.id),
-        ]),
-        historyOnlySet,
-        meta,
-      });
-
-      srcPool = await filterByGenresIfNeeded(
-        sp,
-        srcPool,
-        filters,
-        genreCache,
-        meta,
+      srcPool = await timeStep(meta, "sources:pool", () =>
+        poolFromSources({
+          sp,
+          recipe,
+          market,
+          excludedSet: new Set([
+            ...(excludedSet || []),
+            ...state.chosen.map((t) => t.id),
+          ]),
+          historyOnlySet,
+          meta,
+        }),
       );
+
       shuffleInPlace(srcPool);
     } catch {
       meta.notes.push("sources_failed");
       srcPool = [];
+    }
+
+    if (genresWanted(filters)) {
+      srcPool = await filterByGenresIfNeeded(
+        null,
+        srcPool,
+        filters,
+        genreCache,
+        meta,
+        { cacheOnly: true },
+      );
     }
 
     const before = state.chosen.length;
@@ -2030,6 +2266,54 @@ async function generateTracksWithMeta({
   else meta.used_provider = "sources";
 
   return { tracks: state.chosen.slice(0, need), meta };
+}
+
+async function updateGenresCatalogFromTracks({ sp, tracks, meta, label }) {
+  // Runs strictly AFTER playlist write (server.js schedules it async)
+  const m = meta || { notes: [], counts: {} };
+  const cache = new Map();
+
+  try {
+    loadCatalog();
+  } catch {
+    // ignore
+  }
+
+  let updates = 0;
+  try {
+    updates = await observeGenresFromCandidates(
+      sp,
+      Array.isArray(tracks) ? tracks : [],
+      cache,
+      m,
+      label || "post_write",
+    );
+  } catch {
+    m?.notes?.push("genres_observe_fetch_failed");
+    updates = 0;
+  }
+
+  if (updates > 0) {
+    m.counts = m.counts || {};
+    m.counts.observed_genres_updates =
+      Number(m.counts.observed_genres_updates || 0) + updates;
+  }
+
+  // Persist artist->genres cache for next runs (so include/exclude can work without Spotify calls)
+  try {
+    const merged = mergeFromGenresMap(cache);
+    if (merged > 0) saveArtistGenresStore();
+  } catch {
+    m?.notes?.push("artist_genres_cache_save_failed");
+  }
+
+  try {
+    await saveCatalog();
+  } catch {
+    m?.notes?.push("genres_catalog_save_failed");
+  }
+
+  return updates;
 }
 
 async function replacePlaylistItems({ sp, playlistId, trackUris }) {
@@ -2050,4 +2334,5 @@ async function replacePlaylistItems({ sp, playlistId, trackUris }) {
 module.exports = {
   generateTracksWithMeta,
   replacePlaylistItems,
+  updateGenresCatalogFromTracks,
 };

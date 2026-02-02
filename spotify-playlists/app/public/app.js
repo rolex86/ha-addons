@@ -2346,6 +2346,9 @@ function wireGenreListInputs() {
       if (modeEl) modeEl.value = deriveGenresMode(incEl.value, excEl.value);
 
       renderGenreLists(block);
+      // NOVĚ: přepočti observed panel (schování už vybraných žánrů)
+      const og = block.querySelector(".observedGenres");
+      if (og) updateObservedPillClasses(og, block);
     };
 
     incEl.addEventListener("input", sync);
@@ -2680,6 +2683,16 @@ function updateObservedPillClasses(panel, recipeBlock) {
     pill.classList.remove("ok", "err");
     if (st === 1) pill.classList.add("ok");
     if (st === -1) pill.classList.add("err");
+
+    // NOVĚ: schovej pillku, pokud už je v include/exclude
+    const shouldHide = st !== 0;
+    pill.style.display = shouldHide ? "none" : "";
+
+    // Když ji schováváme, zruš bulk výběr (aby nezůstával outline)
+    if (shouldHide) {
+      pill.dataset.selected = "0";
+      pill.style.outline = "";
+    }
   }
 }
 
@@ -2815,6 +2828,12 @@ function wireObservedGenrePanels() {
         ? `Added ${sel.length} genres to include.`
         : `Nothing changed.`;
 
+      // NOVĚ: refresh UI, aby vybrané žánry zmizely z observed listu
+      renderGenreLists(recipeBlock);
+      const gp = recipeBlock.querySelector(".genrePicker");
+      if (gp) populateGenrePicker(gp);
+      updateObservedPillClasses(panel, recipeBlock);
+
       clearSelectionObserved(panel);
     });
 
@@ -2832,6 +2851,12 @@ function wireObservedGenrePanels() {
       panel.querySelector(".ogStatus").textContent = changedAny
         ? `Added ${sel.length} genres to exclude.`
         : `Nothing changed.`;
+
+      // NOVĚ: refresh UI, aby vybrané žánry zmizely z observed listu
+      renderGenreLists(recipeBlock);
+      const gp = recipeBlock.querySelector(".genrePicker");
+      if (gp) populateGenrePicker(gp);
+      updateObservedPillClasses(panel, recipeBlock);
 
       clearSelectionObserved(panel);
     });

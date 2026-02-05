@@ -32,6 +32,7 @@ const {
 } = require("./lib/generator");
 
 const { queryCatalog, loadCatalog } = require("./lib/genre_catalog");
+const { getCooldownRemainingMs, setCooldownMs } = require("./lib/spotify_cooldown");
 
 const app = express();
 app.use(express.json({ limit: "1mb" }));
@@ -222,6 +223,8 @@ async function spRetry(fn, { maxRetries = 6, baseDelayMs = 400 } = {}) {
 
   while (true) {
     try {
+      const cd = getCooldownRemainingMs();
+      if (cd > 0) await sleep(cd);
       return await fn();
     } catch (e) {
       const status = e?.statusCode || e?.status;
@@ -232,10 +235,12 @@ async function spRetry(fn, { maxRetries = 6, baseDelayMs = 400 } = {}) {
       const isRetryable =
         status === 429 || status === 502 || status === 503 || status === 504;
 
-      if (!isRetryable || attempt >= maxRetries) throw e;
-
       const backoff = Math.round(baseDelayMs * Math.pow(2, attempt));
       const waitMs = retryAfterMs ?? backoff;
+
+      if (status === 429) setCooldownMs(waitMs);
+
+      if (!isRetryable || attempt >= maxRetries) throw e;
 
       await sleep(waitMs);
       attempt += 1;
@@ -786,6 +791,8 @@ app.post("/api/run", requireToken, async (req, res) => {
         historyOnlySet: historyExcluded,
         debugSteps,
         genres_fetch_limit: opts.genres_fetch_limit,
+        spotify_cache_ttl_minutes: opts.spotify_cache_ttl_minutes,
+        spotify_search_cache_ttl_days: opts.spotify_search_cache_ttl_days,
       });
 
       // Auto-flush history when it blocks too much of the sources pool (per-recipe only)
@@ -855,6 +862,8 @@ app.post("/api/run", requireToken, async (req, res) => {
             excludedSet,
             historyOnlySet: historyExcluded,
             genres_fetch_limit: opts.genres_fetch_limit,
+            spotify_cache_ttl_minutes: opts.spotify_cache_ttl_minutes,
+            spotify_search_cache_ttl_days: opts.spotify_search_cache_ttl_days,
           });
 
           tracks = retry.tracks;

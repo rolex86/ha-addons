@@ -705,6 +705,43 @@ function helpFor(k) {
         `,
       );
 
+    // Mix
+    case "mix.enabled":
+      return helpBlock(
+        "Poměr zdrojů",
+        `
+          <div>Zapne rozdělení výsledného playlistu mezi Discovery / Recommendations / Sources.</div>
+          <div>Hodnoty jsou váhy (nemusí sumovat 100). Pokud některý zdroj nestačí, zbytek se doplní z ostatních.</div>
+        `,
+      );
+
+    case "mix.discovery":
+      return helpBlock(
+        "Váha: Discovery",
+        `
+          <div>Kolik % (váhově) má jít z Discovery části.</div>
+          <div class="helpExample"><strong>Příklad:</strong> <code>50</code></div>
+        `,
+      );
+
+    case "mix.recommendations":
+      return helpBlock(
+        "Váha: Recommendations",
+        `
+          <div>Kolik % (váhově) má jít ze Spotify Recommendations.</div>
+          <div class="helpExample"><strong>Příklad:</strong> <code>30</code></div>
+        `,
+      );
+
+    case "mix.sources":
+      return helpBlock(
+        "Váha: Sources",
+        `
+          <div>Kolik % (váhově) má jít ze Sources (fallback pool).</div>
+          <div class="helpExample"><strong>Příklad:</strong> <code>20</code></div>
+        `,
+      );
+
     // Sources
     case "sources.search":
       return helpBlock(
@@ -1063,6 +1100,13 @@ function normalizeRecipe(r) {
   if (!Array.isArray(r.recommendations.seed_genres))
     r.recommendations.seed_genres = [];
 
+  // Mix defaults
+  if (!r.mix || typeof r.mix !== "object") r.mix = {};
+  if (r.mix.enabled == null) r.mix.enabled = false;
+  if (r.mix.discovery == null) r.mix.discovery = 50;
+  if (r.mix.recommendations == null) r.mix.recommendations = 30;
+  if (r.mix.sources == null) r.mix.sources = 20;
+
   // Filters defaults
   if (!r.filters.explicit) r.filters.explicit = "allow";
   if (r.filters.year_min === undefined) r.filters.year_min = null;
@@ -1169,6 +1213,13 @@ function recipeTemplate() {
     recommendations: {
       enabled: false,
       seed_genres: [],
+    },
+
+    mix: {
+      enabled: false,
+      discovery: 50,
+      recommendations: 30,
+      sources: 20,
     },
 
     sources: {
@@ -1395,6 +1446,7 @@ function renderRecipeEditor(r) {
   const diversity = r.diversity || {};
   const adv = r.advanced || {};
   const reco = r.recommendations || {};
+  const mix = r.mix || {};
 
   return `
     <div class="formgrid">
@@ -1767,6 +1819,42 @@ function renderRecipeEditor(r) {
       </label>
     </div>
 
+    <div class="section-title">Mix (allocation)</div>
+    <div class="formgrid">
+      <label class="field">
+        <div class="label">Mix enabled</div>
+        <select data-k="mix.enabled">
+          <option value="true" ${mix.enabled === true ? "selected" : ""}>true</option>
+          <option value="false" ${mix.enabled !== true ? "selected" : ""}>false</option>
+        </select>
+        ${helpFor("mix.enabled")}
+      </label>
+
+      <label class="field">
+        <div class="label">Discovery weight</div>
+        <input data-k="mix.discovery" type="number" min="0" max="100" value="${Number(
+          mix.discovery ?? 50,
+        )}">
+        ${helpFor("mix.discovery")}
+      </label>
+
+      <label class="field">
+        <div class="label">Recommendations weight</div>
+        <input data-k="mix.recommendations" type="number" min="0" max="100" value="${Number(
+          mix.recommendations ?? 30,
+        )}">
+        ${helpFor("mix.recommendations")}
+      </label>
+
+      <label class="field">
+        <div class="label">Sources weight</div>
+        <input data-k="mix.sources" type="number" min="0" max="100" value="${Number(
+          mix.sources ?? 20,
+        )}">
+        ${helpFor("mix.sources")}
+      </label>
+    </div>
+
     <div class="section-title">Sources (fallback / pool)</div>
     <div class="formgrid">
       <label class="field span2">
@@ -2089,7 +2177,8 @@ function saveRecipeFromBlock(recipeId) {
       k === "sources.liked" ||
       k === "sources.top_tracks.enabled" ||
       k === "diversity.avoid_same_artist_in_row" ||
-      k === "filters.allow_unknown_genres"
+      k === "filters.allow_unknown_genres" ||
+      k === "mix.enabled"
     ) {
       setValueByPath(r, k, asBool(v));
       return;
@@ -2127,6 +2216,9 @@ function saveRecipeFromBlock(recipeId) {
       k === "discovery.audiodb_limit" ||
       k === "sources.max_candidates" ||
       k === "sources.top_tracks.limit" ||
+      k === "mix.discovery" ||
+      k === "mix.recommendations" ||
+      k === "mix.sources" ||
       k === "diversity.max_per_artist" ||
       k === "diversity.max_per_album" ||
       k === "advanced.recommendation_attempts"

@@ -17,6 +17,15 @@ const {
   mergeFromGenresMap,
   saveArtistGenresStore,
 } = require("./artist_genres_cache");
+const {
+  getCooldownRemainingMs,
+  setCooldownMs,
+} = require("./spotify_cooldown");
+const {
+  getByKey: getSearchCacheByKey,
+  setByKey: setSearchCacheByKey,
+  saveSearchCache,
+} = require("./spotify_search_cache");
 
 const LOG_RANK = { trace: 10, debug: 20, info: 30, warn: 40, error: 50 };
 function normLevel(x) {
@@ -36,6 +45,56 @@ function genLog(level, meta, msg) {
   console.log(`[gen][${normLevel(level)}][${rid}] ${msg}`);
 }
 
+const DEFAULT_SPOTIFY_CACHE_TTL_MS = 15 * 60 * 1000;
+const DEFAULT_SPOTIFY_SEARCH_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+let SPOTIFY_CACHE_TTL_MS = DEFAULT_SPOTIFY_CACHE_TTL_MS;
+let SPOTIFY_SEARCH_CACHE_TTL_MS = DEFAULT_SPOTIFY_SEARCH_CACHE_TTL_MS;
+
+const PLAYLIST_ITEMS_CACHE = new Map(); // key: playlistId -> { ts, items }
+const LIKED_ITEMS_CACHE = { ts: 0, items: null };
+
+function setRuntimeCacheOptions({
+  cacheTtlMs = DEFAULT_SPOTIFY_CACHE_TTL_MS,
+  searchCacheTtlMs = DEFAULT_SPOTIFY_SEARCH_CACHE_TTL_MS,
+} = {}) {
+  if (Number.isFinite(cacheTtlMs)) SPOTIFY_CACHE_TTL_MS = cacheTtlMs;
+  if (Number.isFinite(searchCacheTtlMs))
+    SPOTIFY_SEARCH_CACHE_TTL_MS = searchCacheTtlMs;
+}
+
+function cacheGetMap(map, key, ttlMs, minItems) {
+  if (!ttlMs || ttlMs <= 0) return null;
+  const ent = map.get(key);
+  if (!ent) return null;
+  if (Date.now() - ent.ts > ttlMs) {
+    map.delete(key);
+    return null;
+  }
+  if (minItems && Array.isArray(ent.items) && ent.items.length < minItems) {
+    return null;
+  }
+  return ent.items;
+}
+
+function cacheSetMap(map, key, items) {
+  if (!key) return;
+  map.set(key, { ts: Date.now(), items: Array.isArray(items) ? items : [] });
+}
+
+function likedCacheGet(ttlMs, minItems) {
+  if (!ttlMs || ttlMs <= 0) return null;
+  const ent = LIKED_ITEMS_CACHE;
+  if (!ent.items || Date.now() - ent.ts > ttlMs) return null;
+  if (minItems && ent.items.length < minItems) return null;
+  return ent.items;
+}
+
+function likedCacheSet(items) {
+  LIKED_ITEMS_CACHE.ts = Date.now();
+  LIKED_ITEMS_CACHE.items = Array.isArray(items) ? items : [];
+}
+
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
@@ -48,6 +107,15 @@ async function spRetry(
 
   while (true) {
     try {
+      const cd = getCooldownRemainingMs();
+      if (cd > 0) {
+        genLog(
+          "debug",
+          meta,
+          `spotify cooldown ${Math.round(cd / 1000)}s before ${label || "call"}`,
+        );
+        await sleep(cd);
+      }
       return await fn();
     } catch (e) {
       const status = e?.statusCode || e?.status;
@@ -64,19 +132,11 @@ async function spRetry(
       const isRetryable =
         status === 429 || status === 502 || status === 503 || status === 504;
 
-      if (!isRetryable || attempt >= maxRetries) {
-        genLog(
-          "debug",
-          meta,
-          `spRetry FAIL ${label ? `[${label}] ` : ""}status=${status ?? "?"} attempt=${attempt}/${maxRetries} retryable=${isRetryable ? 1 : 0}`,
-        );
-        throw e;
-      }
-
       const backoff = Math.round(baseDelayMs * Math.pow(2, attempt));
       const waitMs = retryAfterMs ?? backoff;
 
       if (status === 429) {
+        setCooldownMs(waitMs);
         genLog(
           "trace",
           meta,
@@ -88,6 +148,15 @@ async function spRetry(
           meta,
           `spRetry HTTP ${status} ${label ? `[${label}] ` : ""}attempt=${attempt + 1}/${maxRetries} waitMs=${waitMs}`,
         );
+      }
+
+      if (!isRetryable || attempt >= maxRetries) {
+        genLog(
+          "debug",
+          meta,
+          `spRetry FAIL ${label ? `[${label}] ` : ""}status=${status ?? "?"} attempt=${attempt}/${maxRetries} retryable=${isRetryable ? 1 : 0}`,
+        );
+        throw e;
       }
 
       await sleep(waitMs);
@@ -336,6 +405,51 @@ function getRecommendationsCfg(recipe) {
       ? recipe.source.seed_genres
       : [],
   };
+}
+
+function getMixCfg(recipe) {
+  const m = recipe.mix || {};
+  return {
+    enabled: Boolean(m.enabled),
+    discovery:
+      m.discovery === null || m.discovery === undefined
+        ? 50
+        : Number(m.discovery),
+    recommendations:
+      m.recommendations === null || m.recommendations === undefined
+        ? 30
+        : Number(m.recommendations),
+    sources:
+      m.sources === null || m.sources === undefined ? 20 : Number(m.sources),
+  };
+}
+
+function normalizeMixWeights(mix, { discoveryEnabled, recoEnabled } = {}) {
+  if (!mix?.enabled) return null;
+
+  let wD = Number.isFinite(mix.discovery) ? mix.discovery : 0;
+  let wR = Number.isFinite(mix.recommendations) ? mix.recommendations : 0;
+  let wS = Number.isFinite(mix.sources) ? mix.sources : 0;
+
+  wD = Math.max(0, wD);
+  wR = Math.max(0, wR);
+  wS = Math.max(0, wS);
+
+  if (!discoveryEnabled) wD = 0;
+  if (!recoEnabled) wR = 0;
+
+  const total = wD + wR + wS;
+  if (total <= 0) return null;
+
+  return { wD, wR, wS, total };
+}
+
+function computeMixTargets(need, weights) {
+  const d = Math.round((need * weights.wD) / weights.total);
+  const r = Math.round((need * weights.wR) / weights.total);
+  let s = need - d - r;
+  if (s < 0) s = 0;
+  return { discovery: d, recommendations: r, sources: s };
 }
 
 function getDiscovery(recipe) {
@@ -614,12 +728,19 @@ async function enrichTempoIfNeeded(sp, tracks, filters) {
 
 async function fetchAllPlaylistTrackItems(sp, playlistId, maxCandidates) {
   const items = [];
+  const pid = String(playlistId || "").trim();
+  if (!pid) return items;
+
+  const ttlMs = SPOTIFY_CACHE_TTL_MS;
+  const cached = cacheGetMap(PLAYLIST_ITEMS_CACHE, pid, ttlMs, maxCandidates);
+  if (cached) return cached.slice(0, maxCandidates);
+
   let offset = 0;
   const limit = 100;
 
   while (items.length < maxCandidates) {
     const resp = await spRetry(() =>
-      sp.getPlaylistTracks(playlistId, {
+      sp.getPlaylistTracks(pid, {
         limit,
         offset,
         fields:
@@ -637,11 +758,17 @@ async function fetchAllPlaylistTrackItems(sp, playlistId, maxCandidates) {
     offset += limit;
   }
 
+  if (ttlMs && ttlMs > 0) cacheSetMap(PLAYLIST_ITEMS_CACHE, pid, items);
+
   return items;
 }
 
 async function fetchLikedTracks(sp, maxCandidates) {
   const items = [];
+  const ttlMs = SPOTIFY_CACHE_TTL_MS;
+  const cached = likedCacheGet(ttlMs, maxCandidates);
+  if (cached) return cached.slice(0, maxCandidates);
+
   let offset = 0;
   const limit = 50;
 
@@ -657,6 +784,8 @@ async function fetchLikedTracks(sp, maxCandidates) {
     if (!resp.body?.next) break;
     offset += limit;
   }
+
+  if (ttlMs && ttlMs > 0) likedCacheSet(items);
 
   return items;
 }
@@ -1507,6 +1636,17 @@ async function spotifySearchTrackId(
     .trim();
   if (!aRaw || !tRaw) return null;
 
+  const aKey = normalizeForMatch(aRaw);
+  const tKey = normalizeForMatch(tRaw);
+  const cacheKey = aKey && tKey ? `${aKey}||${tKey}` : "";
+  if (cacheKey && SPOTIFY_SEARCH_CACHE_TTL_MS > 0) {
+    const cached = getSearchCacheByKey(
+      cacheKey,
+      SPOTIFY_SEARCH_CACHE_TTL_MS,
+    );
+    if (cached) return cached;
+  }
+
   // očistit track (feat/remaster/brackets často rozbijí match)
   const a = aRaw.replace(/\s+/g, " ").trim();
   const t = tRaw
@@ -1540,7 +1680,13 @@ async function spotifySearchTrackId(
     }
 
     const threshold = q.startsWith('artist:"') ? 60 : 50;
-    if (bestScore >= threshold) return best?.id || null;
+    if (bestScore >= threshold) {
+      const id = best?.id || null;
+      if (id && cacheKey && SPOTIFY_SEARCH_CACHE_TTL_MS > 0) {
+        setSearchCacheByKey(cacheKey, id);
+      }
+      return id;
+    }
   }
 
   return null;
@@ -2071,11 +2217,30 @@ async function generateTracksWithMeta({
   historyOnlySet,
   debugSteps = false,
   genres_fetch_limit,
+  spotify_cache_ttl_minutes,
+  spotify_search_cache_ttl_days,
 }) {
   const need = Number(recipe.track_count ?? 50);
   const rawLimit = Number(genres_fetch_limit);
   const genresFetchLimit =
     Number.isFinite(rawLimit) && rawLimit > 0 ? Math.floor(rawLimit) : null;
+  const cacheMinRaw = Number(spotify_cache_ttl_minutes);
+  const cacheTtlMs = Number.isFinite(cacheMinRaw)
+    ? cacheMinRaw <= 0
+      ? 0
+      : Math.round(cacheMinRaw * 60 * 1000)
+    : DEFAULT_SPOTIFY_CACHE_TTL_MS;
+  const searchDaysRaw = Number(spotify_search_cache_ttl_days);
+  const searchTtlMs = Number.isFinite(searchDaysRaw)
+    ? searchDaysRaw <= 0
+      ? 0
+      : Math.round(searchDaysRaw * 24 * 60 * 60 * 1000)
+    : DEFAULT_SPOTIFY_SEARCH_CACHE_TTL_MS;
+
+  setRuntimeCacheOptions({
+    cacheTtlMs,
+    searchCacheTtlMs: searchTtlMs,
+  });
 
   const meta = {
     need,
@@ -2087,6 +2252,8 @@ async function generateTracksWithMeta({
       genres_cache_only: false,
       genres_fetch_limit: genresFetchLimit,
       genres_fetch_remaining: genresFetchLimit,
+      spotify_cache_ttl_ms: cacheTtlMs,
+      spotify_search_cache_ttl_ms: searchTtlMs,
     },
     counts: {
       audiodb_selected: 0,
@@ -2107,6 +2274,45 @@ async function generateTracksWithMeta({
   const limits = getRecipeLimits(recipe);
   const disc = getDiscovery(recipe);
   const rcfg = getRecommendationsCfg(recipe);
+  const mixCfg = getMixCfg(recipe);
+  const mixWeights = normalizeMixWeights(mixCfg, {
+    discoveryEnabled: disc.enabled,
+    recoEnabled: rcfg.enabled,
+  });
+  const mixTargets = mixWeights ? computeMixTargets(need, mixWeights) : null;
+  const pickedByProvider = {
+    discovery: 0,
+    recommendations: 0,
+    sources: 0,
+  };
+
+  function takeWithMix(providerKey, candidates, desired, opts = {}) {
+    if (!Array.isArray(candidates) || !candidates.length) return 0;
+    const remainingNeed = need - state.chosen.length;
+    if (remainingNeed <= 0) return 0;
+
+    const ignoreMix = opts.ignoreMix === true;
+    let add = Math.max(0, Number(desired || 0));
+
+    if (mixTargets && !ignoreMix) {
+      const quota = mixTargets[providerKey] || 0;
+      const remainingProvider = Math.max(
+        0,
+        quota - (pickedByProvider[providerKey] || 0),
+      );
+      add = Math.min(add, remainingProvider);
+    }
+
+    add = Math.min(add, remainingNeed);
+    if (add <= 0) return 0;
+
+    const before = state.chosen.length;
+    takeFromCandidates(state, candidates, Math.min(need, before + add), limits);
+    const added = state.chosen.length - before;
+    pickedByProvider[providerKey] =
+      (pickedByProvider[providerKey] || 0) + added;
+    return added;
+  }
 
   // Genre filtering: try live Spotify fetch for accuracy,
   // but auto-fallback to cache-only on 429 to avoid slow runs.
@@ -2129,9 +2335,18 @@ async function generateTracksWithMeta({
   }
 
   const state = createDiversityState([]);
+  let chartTracks = null;
+  let discovered = null;
+  let recoPool = null;
+  let srcPool = null;
 
   function finalizeResult() {
     flushGenreCache();
+    try {
+      saveSearchCache({ ttlMs: SPOTIFY_SEARCH_CACHE_TTL_MS });
+    } catch {
+      pushNoteOnce(meta, "search_cache_save_failed");
+    }
     return { tracks: state.chosen.slice(0, need), meta };
   }
 
@@ -2141,7 +2356,7 @@ async function generateTracksWithMeta({
 
     // 1a) Charts: TheAudioDB trending (optional)
     if (disc.use_audiodb_trending) {
-      let chartTracks = [];
+      chartTracks = [];
       try {
         chartTracks = await timeStep(meta, "audiodb:discover", () =>
           discoverWithAudioDbTrending({
@@ -2193,14 +2408,12 @@ async function generateTracksWithMeta({
           ? Math.max(0, Number(disc.audiodb_fill))
           : Math.max(0, Math.round(need * 0.3));
 
-      const before = state.chosen.length;
-      takeFromCandidates(
-        state,
+      const added = takeWithMix(
+        "discovery",
         chartTracks,
-        Math.min(need, Math.max(0, desired)),
-        limits,
+        Math.max(0, desired),
       );
-      meta.counts.audiodb_selected = state.chosen.length - before;
+      meta.counts.audiodb_selected = added;
 
       if (state.chosen.length >= need) {
         meta.used_provider = "audiodb";
@@ -2209,7 +2422,7 @@ async function generateTracksWithMeta({
     }
 
     // 1b) Similar-artist discovery (Last.fm + optional TasteDive)
-    let discovered = [];
+    discovered = [];
     try {
       discovered = await timeStep(meta, "lastfm:discover", () =>
         discoverWithLastFm({
@@ -2266,9 +2479,8 @@ async function generateTracksWithMeta({
 
     if (disc.strategy === "deep_cuts") shuffleInPlace(discovered);
 
-    const before = state.chosen.length;
-    takeFromCandidates(state, discovered, need, limits);
-    meta.counts.lastfm_selected = state.chosen.length - before;
+    const added = takeWithMix("discovery", discovered, need);
+    meta.counts.lastfm_selected = added;
 
     if (state.chosen.length >= need) {
       meta.used_provider =
@@ -2284,7 +2496,7 @@ async function generateTracksWithMeta({
   if (remainingAfterDiscovery > 0 && rcfg.enabled) {
     meta.notes.push("fill_from_recommendations");
 
-    let recoPool = [];
+    recoPool = [];
     try {
       recoPool = await timeStep(meta, "reco:pool", () =>
         poolFromRecommendations({
@@ -2317,9 +2529,8 @@ async function generateTracksWithMeta({
       );
     }
 
-    const before = state.chosen.length;
-    takeFromCandidates(state, recoPool, need, limits);
-    meta.counts.reco_selected = state.chosen.length - before;
+    const added = takeWithMix("recommendations", recoPool, need);
+    meta.counts.reco_selected = added;
 
     if (state.chosen.length >= need) {
       meta.used_provider = disc.enabled ? "mixed" : "recommendations";
@@ -2332,7 +2543,7 @@ async function generateTracksWithMeta({
   if (remaining > 0) {
     meta.notes.push("fill_from_sources");
 
-    let srcPool = [];
+    srcPool = [];
     try {
       srcPool = await timeStep(meta, "sources:pool", () =>
         poolFromSources({
@@ -2365,9 +2576,45 @@ async function generateTracksWithMeta({
       );
     }
 
-    const before = state.chosen.length;
-    takeFromCandidates(state, srcPool, need, limits);
-    meta.counts.sources_selected = state.chosen.length - before;
+    const added = takeWithMix("sources", srcPool, need);
+    meta.counts.sources_selected = added;
+  }
+
+  // If mix is enabled but we still didn't reach the target count,
+  // allow overflow from any available pools (soft mix).
+  if (mixTargets && state.chosen.length < need) {
+    let remaining = need - state.chosen.length;
+
+    if (remaining > 0 && Array.isArray(srcPool) && srcPool.length) {
+      const added = takeWithMix("sources", srcPool, remaining, {
+        ignoreMix: true,
+      });
+      meta.counts.sources_selected += added;
+      remaining = need - state.chosen.length;
+    }
+
+    if (remaining > 0 && Array.isArray(recoPool) && recoPool.length) {
+      const added = takeWithMix("recommendations", recoPool, remaining, {
+        ignoreMix: true,
+      });
+      meta.counts.reco_selected += added;
+      remaining = need - state.chosen.length;
+    }
+
+    if (remaining > 0 && Array.isArray(chartTracks) && chartTracks.length) {
+      const added = takeWithMix("discovery", chartTracks, remaining, {
+        ignoreMix: true,
+      });
+      meta.counts.audiodb_selected += added;
+      remaining = need - state.chosen.length;
+    }
+
+    if (remaining > 0 && Array.isArray(discovered) && discovered.length) {
+      const added = takeWithMix("discovery", discovered, remaining, {
+        ignoreMix: true,
+      });
+      meta.counts.lastfm_selected += added;
+    }
   }
 
   const hasDiscovery =

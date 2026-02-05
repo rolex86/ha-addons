@@ -38,6 +38,8 @@ options:
   songkick_api_key: ""
   log_level: "info"
   genres_fetch_limit: 300 # max artist IDs fetched for genre filters per run (0 = unlimited)
+  spotify_cache_ttl_minutes: 15 # cache playlist/liked fetches (0 = disable)
+  spotify_search_cache_ttl_days: 30 # cache spotifySearchTrackId hits (0 = disable)
   history:
     scope: "per_recipe" # per_recipe | global
     mode: "rolling_days" # rolling_days | lifetime_capped | lifetime_all
@@ -58,6 +60,8 @@ schema:
   songkick_api_key: password
   log_level: list(trace|debug|info|warn|error)
   genres_fetch_limit: int(0,10000)
+  spotify_cache_ttl_minutes: int(0,1440)
+  spotify_search_cache_ttl_days: int(0,3650)
   history:
     scope: list(per_recipe|global)
     mode: list(rolling_days|lifetime_capped|lifetime_all)

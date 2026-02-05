@@ -220,6 +220,14 @@ function normalizeRecipe(recipe) {
   rec.enabled = toBoolOr(rec.enabled, false);
   if (!Array.isArray(rec.seed_genres)) rec.seed_genres = [];
 
+  // ---- mix (allocation between discovery/reco/sources) ----
+  if (!r.mix || typeof r.mix !== "object") r.mix = {};
+  const mx = r.mix;
+  mx.enabled = toBoolOr(mx.enabled, false);
+  mx.discovery = Math.max(0, toNumOr(mx.discovery, 50));
+  mx.recommendations = Math.max(0, toNumOr(mx.recommendations, 30));
+  mx.sources = Math.max(0, toNumOr(mx.sources, 20));
+
   // ---- advanced ----
   if (!r.advanced || typeof r.advanced !== "object") r.advanced = {};
   const a = r.advanced;
@@ -285,6 +293,15 @@ function getOptions() {
     genres_fetch_limit: toNumOr(
       opts.genres_fetch_limit ?? process.env.GENRES_FETCH_LIMIT,
       300,
+    ),
+    spotify_cache_ttl_minutes: toNumOr(
+      opts.spotify_cache_ttl_minutes ?? process.env.SPOTIFY_CACHE_TTL_MINUTES,
+      15,
+    ),
+    spotify_search_cache_ttl_days: toNumOr(
+      opts.spotify_search_cache_ttl_days ??
+        process.env.SPOTIFY_SEARCH_CACHE_TTL_DAYS,
+      30,
     ),
 
     history: {

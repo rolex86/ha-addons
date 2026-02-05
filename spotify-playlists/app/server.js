@@ -785,6 +785,7 @@ app.post("/api/run", requireToken, async (req, res) => {
         excludedSet,
         historyOnlySet: historyExcluded,
         debugSteps,
+        genres_fetch_limit: opts.genres_fetch_limit,
       });
 
       // Auto-flush history when it blocks too much of the sources pool (per-recipe only)
@@ -853,6 +854,7 @@ app.post("/api/run", requireToken, async (req, res) => {
             market: opts.market,
             excludedSet,
             historyOnlySet: historyExcluded,
+            genres_fetch_limit: opts.genres_fetch_limit,
           });
 
           tracks = retry.tracks;

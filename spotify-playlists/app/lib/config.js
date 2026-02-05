@@ -282,6 +282,10 @@ function getOptions() {
     ),
 
     log_level: toStrOr(opts.log_level ?? process.env.LOG_LEVEL, "info"),
+    genres_fetch_limit: toNumOr(
+      opts.genres_fetch_limit ?? process.env.GENRES_FETCH_LIMIT,
+      300,
+    ),
 
     history: {
       scope: toStrOr(

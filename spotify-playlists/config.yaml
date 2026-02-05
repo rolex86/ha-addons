@@ -37,6 +37,7 @@ options:
   audiodb_api_key: "2"
   songkick_api_key: ""
   log_level: "info"
+  genres_fetch_limit: 300 # max artist IDs fetched for genre filters per run (0 = unlimited)
   history:
     scope: "per_recipe" # per_recipe | global
     mode: "rolling_days" # rolling_days | lifetime_capped | lifetime_all
@@ -56,6 +57,7 @@ schema:
   audiodb_api_key: password
   songkick_api_key: password
   log_level: list(trace|debug|info|warn|error)
+  genres_fetch_limit: int(0,10000)
   history:
     scope: list(per_recipe|global)
     mode: list(rolling_days|lifetime_capped|lifetime_all)

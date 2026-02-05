@@ -1200,14 +1200,29 @@ function anyGenreMatch(artistGenres, patterns) {
   return false;
 }
 
-async function spotifyGetArtistGenresCached(sp, artistIds, cache) {
+async function spotifyGetArtistGenresCached(sp, artistIds, cache, opts = {}) {
   const ids = uniqIds(artistIds || []).filter(Boolean);
   const missing = ids.filter((id) => !cache.has(id));
   if (!missing.length) return;
 
+  const missingSet = new Set(missing);
+  const newCache =
+    opts && typeof opts === "object" ? opts.newCache || null : null;
+  const maxRetries =
+    opts && typeof opts === "object" && Number.isFinite(opts.maxRetries)
+      ? Number(opts.maxRetries)
+      : 6;
+  const meta = opts && typeof opts === "object" ? opts.meta || null : null;
+  const label =
+    opts && typeof opts === "object" ? opts.label || "getArtists" : "getArtists";
+
   for (let i = 0; i < missing.length; i += 50) {
     const chunk = missing.slice(i, i + 50);
-    const resp = await spRetry(() => sp.getArtists(chunk));
+    const resp = await spRetry(() => sp.getArtists(chunk), {
+      maxRetries,
+      label,
+      meta,
+    });
     const items = resp.body?.artists || [];
 
     // Spotify keeps order, but be robust
@@ -1216,6 +1231,9 @@ async function spotifyGetArtistGenresCached(sp, artistIds, cache) {
       if (!a?.id) continue;
       const genres = Array.isArray(a.genres) ? a.genres : [];
       cache.set(a.id, genres);
+      if (newCache && missingSet.has(a.id)) {
+        newCache.set(a.id, genres);
+      }
     }
   }
 }
@@ -1271,6 +1289,18 @@ async function observeGenresFromCandidates(sp, tracks, cache, meta, label) {
   return updates;
 }
 
+function isRateLimitErr(e) {
+  const status =
+    e?.statusCode || e?.status || e?.body?.error?.status || e?.response?.status;
+  return Number(status) === 429;
+}
+
+function pushNoteOnce(meta, note) {
+  if (!meta || !Array.isArray(meta.notes)) return;
+  if (meta.notes.includes(note)) return;
+  meta.notes.push(note);
+}
+
 async function filterByGenresIfNeeded(
   sp,
   tracks,
@@ -1307,15 +1337,74 @@ async function filterByGenresIfNeeded(
     }
   }
 
-  try {
-    const uniqArtistIds = uniqIds(artistIds);
-    if (!opts.cacheOnly) {
-      await spotifyGetArtistGenresCached(sp, uniqArtistIds, cache);
+  const optsObj = opts && typeof opts === "object" ? opts : {};
+  const rt = meta?.runtime || null;
+  let remaining =
+    rt && Number.isFinite(rt.genres_fetch_remaining)
+      ? Number(rt.genres_fetch_remaining)
+      : null;
+  let cacheOnly = Boolean(optsObj.cacheOnly) || rt?.genres_cache_only === true;
+
+  if (!cacheOnly && remaining != null && remaining <= 0) {
+    if (meta) {
+      meta.runtime = meta.runtime || {};
+      meta.runtime.genres_cache_only = true;
+      meta.runtime.genres_fetch_remaining = 0;
     }
-  } catch {
-    meta?.notes?.push("genre_fetch_failed");
-    // Don't hard-fail generation – just skip genre filtering.
-    return tracks;
+    pushNoteOnce(meta, "genres_cache_only_limit");
+    cacheOnly = true;
+  }
+
+  if (!cacheOnly) {
+    if (!sp || typeof sp.getArtists !== "function") {
+      pushNoteOnce(meta, "genre_fetch_skipped_no_spotify");
+    } else {
+      try {
+        const uniqArtistIds = uniqIds(artistIds);
+        let fetchIds = uniqArtistIds;
+
+        if (remaining != null) {
+          fetchIds = uniqArtistIds.filter((id) => !cache.has(id));
+          if (fetchIds.length > remaining) {
+            fetchIds = fetchIds.slice(0, remaining);
+          }
+        }
+
+        if (fetchIds.length) {
+          if (remaining != null) {
+            const nextRemaining = Math.max(0, remaining - fetchIds.length);
+            if (meta) {
+              meta.runtime = meta.runtime || {};
+              meta.runtime.genres_fetch_remaining = nextRemaining;
+              if (nextRemaining <= 0) {
+                meta.runtime.genres_cache_only = true;
+                pushNoteOnce(meta, "genres_cache_only_limit");
+              }
+            }
+          }
+
+          await spotifyGetArtistGenresCached(sp, fetchIds, cache, {
+            maxRetries: 0, // fail fast; if 429, switch to cache-only
+            meta,
+            label: "getArtists",
+            newCache: optsObj.newCache || null,
+          });
+        }
+      } catch (e) {
+        if (isRateLimitErr(e)) {
+          if (meta) {
+            meta.runtime = meta.runtime || {};
+            meta.runtime.genres_cache_only = true;
+          }
+          pushNoteOnce(meta, "genres_cache_only_429");
+          // Continue with cache-only filtering using whatever we already have.
+        } else {
+          pushNoteOnce(meta, "genre_fetch_failed");
+          // Don't hard-fail generation – just skip genre filtering.
+          return tracks;
+        }
+      }
+    }
   }
 
   let unknownTotal = 0;
@@ -1981,8 +2070,12 @@ async function generateTracksWithMeta({
   excludedSet,
   historyOnlySet,
   debugSteps = false,
+  genres_fetch_limit,
 }) {
   const need = Number(recipe.track_count ?? 50);
+  const rawLimit = Number(genres_fetch_limit);
+  const genresFetchLimit =
+    Number.isFinite(rawLimit) && rawLimit > 0 ? Math.floor(rawLimit) : null;
 
   const meta = {
     need,
@@ -1990,6 +2083,11 @@ async function generateTracksWithMeta({
     used_provider: "sources",
     debugSteps: Boolean(debugSteps),
     recipe_id: recipe?.id || recipe?.recipe_id || recipe?.name || "unknown",
+    runtime: {
+      genres_cache_only: false,
+      genres_fetch_limit: genresFetchLimit,
+      genres_fetch_remaining: genresFetchLimit,
+    },
     counts: {
       audiodb_selected: 0,
       lastfm_selected: 0,
@@ -2010,16 +2108,32 @@ async function generateTracksWithMeta({
   const disc = getDiscovery(recipe);
   const rcfg = getRecommendationsCfg(recipe);
 
-  // IMPORTANT: Strict separation — no genre calls during generation.
-  // If user has genre filters configured, we just note that they were deferred.
+  // Genre filtering: try live Spotify fetch for accuracy,
+  // but auto-fallback to cache-only on 429 to avoid slow runs.
   if (genresWanted(filters)) {
-    meta.notes.push("genres_filter_cache_only");
+    meta.notes.push("genres_filter_auto");
   }
 
-  // Genre cache (persistent). During generation we ONLY use cache (no Spotify calls).
+  // Genre cache (persistent). We'll refresh it during this run if possible.
   const genreCache = genresWanted(filters) ? loadArtistGenresMap() : new Map();
+  const genreCacheNew = genresWanted(filters) ? new Map() : null;
+
+  function flushGenreCache() {
+    if (!genreCacheNew || genreCacheNew.size === 0) return;
+    try {
+      const merged = mergeFromGenresMap(genreCacheNew);
+      if (merged > 0) saveArtistGenresStore();
+    } catch {
+      pushNoteOnce(meta, "artist_genres_cache_save_failed");
+    }
+  }
 
   const state = createDiversityState([]);
+
+  function finalizeResult() {
+    flushGenreCache();
+    return { tracks: state.chosen.slice(0, need), meta };
+  }
 
   // 1) Discovery / external sources first
   if (disc.enabled) {
@@ -2064,12 +2178,12 @@ async function generateTracksWithMeta({
 
       if (genresWanted(filters)) {
         chartTracks = await filterByGenresIfNeeded(
-          null,
+          sp,
           chartTracks,
           filters,
           genreCache,
           meta,
-          { cacheOnly: true },
+          { newCache: genreCacheNew },
         );
       }
 
@@ -2090,7 +2204,7 @@ async function generateTracksWithMeta({
 
       if (state.chosen.length >= need) {
         meta.used_provider = "audiodb";
-        return { tracks: state.chosen.slice(0, need), meta };
+        return finalizeResult();
       }
     }
 
@@ -2141,12 +2255,12 @@ async function generateTracksWithMeta({
 
     if (genresWanted(filters)) {
       discovered = await filterByGenresIfNeeded(
-        null,
+        sp,
         discovered,
         filters,
         genreCache,
         meta,
-        { cacheOnly: true },
+        { newCache: genreCacheNew },
       );
     }
 
@@ -2159,7 +2273,7 @@ async function generateTracksWithMeta({
     if (state.chosen.length >= need) {
       meta.used_provider =
         meta.counts.audiodb_selected > 0 ? "mixed" : "discovery";
-      return { tracks: state.chosen.slice(0, need), meta };
+      return finalizeResult();
     }
   } else {
     meta.provider = "sources";
@@ -2194,12 +2308,12 @@ async function generateTracksWithMeta({
 
     if (genresWanted(filters)) {
       recoPool = await filterByGenresIfNeeded(
-        null,
+        sp,
         recoPool,
         filters,
         genreCache,
         meta,
-        { cacheOnly: true },
+        { newCache: genreCacheNew },
       );
     }
 
@@ -2209,7 +2323,7 @@ async function generateTracksWithMeta({
 
     if (state.chosen.length >= need) {
       meta.used_provider = disc.enabled ? "mixed" : "recommendations";
-      return { tracks: state.chosen.slice(0, need), meta };
+      return finalizeResult();
     }
   }
 
@@ -2242,12 +2356,12 @@ async function generateTracksWithMeta({
 
     if (genresWanted(filters)) {
       srcPool = await filterByGenresIfNeeded(
-        null,
+        sp,
         srcPool,
         filters,
         genreCache,
         meta,
-        { cacheOnly: true },
+        { newCache: genreCacheNew },
       );
     }
 
@@ -2265,7 +2379,7 @@ async function generateTracksWithMeta({
     meta.used_provider = "recommendations";
   else meta.used_provider = "sources";
 
-  return { tracks: state.chosen.slice(0, need), meta };
+  return finalizeResult();
 }
 
 async function updateGenresCatalogFromTracks({ sp, tracks, meta, label }) {

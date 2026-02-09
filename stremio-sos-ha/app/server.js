@@ -1,4 +1,5 @@
 import express from "express";
+import cors from "cors";
 import { Cache } from "./cache.js";
 import {
   sosacFindByImdb,
@@ -39,6 +40,15 @@ cache.load();
 
 const app = express();
 
+const corsOptions = {
+  origin: "*",
+  methods: ["GET", "POST", "OPTIONS", "HEAD"],
+  allowedHeaders: ["Content-Type"],
+};
+
+app.use(cors(corsOptions));
+app.options("*", cors(corsOptions));
+
 app.get("/", (_req, res) =>
   res.json({ ok: true, name: "sosac-stremio-addon", version: "0.1.0" }),
 );
@@ -50,7 +60,13 @@ app.get("/manifest.json", (_req, res) => {
     version: "0.1.0",
     name: "Sosac (local)",
     description: "Sosac -> StreamujTV (on-demand + cache)",
-    resources: ["stream"],
+    resources: [
+      {
+        name: "stream",
+        types: ["movie", "series"],
+        idPrefixes: ["tt"],
+      },
+    ],
     types: ["movie", "series"],
     idPrefixes: ["tt"],
     catalogs: [],

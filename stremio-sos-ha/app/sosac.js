@@ -41,6 +41,23 @@ function uaHeaders() {
   };
 }
 
+function streamujCookieHeader({ user, pass, uid, location }) {
+  if (!user || !pass || !uid) return "";
+  const hashed = md5hex(md5hex(pass));
+  const passCookie = `${user}:::${hashed}`;
+
+  const parts = [
+    `UID=${uid}`,
+    `username=${encodeURIComponent(user)}`,
+    `pass=${encodeURIComponent(passCookie)}`,
+    `has_login=true`,
+  ];
+
+  if (location) parts.push(`location=${location}`);
+
+  return parts.join("; ");
+}
+
 function pickAuthorizeToken(html) {
   // 1) most common: somewhere in HTML is "authorize=<hex>"
   let m = html.match(/authorize=([a-f0-9]{16,64})/i);
@@ -240,11 +257,15 @@ export async function streamujResolve({ streamujId, log, preferredQuality, fetch
       `&UID=${encodeURIComponent(String(uid))}`;
 
     console.log("[stream] step 2b fetch video-link api");
+    const cookie = streamujCookieHeader({ user, pass, uid, location });
+
     const apiRes = await doFetch(apiUrl, {
       headers: {
         ...uaHeaders(),
+        Accept: "*/*",
         "X-Requested-With": "XMLHttpRequest",
         Referer: pageUrl,
+        Cookie: cookie,
         "Accept-Encoding": "identity",
       },
       redirect: "follow",
@@ -252,6 +273,7 @@ export async function streamujResolve({ streamujId, log, preferredQuality, fetch
 
     const ab = await apiRes.arrayBuffer();
     const txt = Buffer.from(ab).toString("utf-8");
+    console.log(`[stream] video-link resp head: ${String(txt).slice(0, 120).replace(/\s+/g, " ")}`);
     let js;
     try {
       js = JSON.parse(txt);
@@ -267,8 +289,14 @@ export async function streamujResolve({ streamujId, log, preferredQuality, fetch
         ? (txt.match(/"authorize"\s*:\s*"([^"]+)"/)?.[1] ?? null)
         : null);
 
-    console.log(`[stream] parsed (api): authorize=${auth ? "yes" : "no"}`);
-    return auth;
+    const auth2 =
+      auth ||
+      (typeof txt === "string"
+        ? (txt.match(/authorize=([a-f0-9]{16,64})/i)?.[1] ?? null)
+        : null);
+
+    console.log(`[stream] parsed (api): authorize=${auth2 ? "yes" : "no"}`);
+    return auth2;
   }
 
   function snippetAround(s, needle, radius = 120) {

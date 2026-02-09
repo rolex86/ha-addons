@@ -54,25 +54,48 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.options("*", cors(corsOptions));
 
+function redactUrl(url) {
+  try {
+    const u = new URL(url);
+    if (u.searchParams.has("pass")) u.searchParams.set("pass", "<redacted>");
+    return u.toString();
+  } catch (_) {
+    return String(url);
+  }
+}
+
 async function fetchWithTimeout(url, options = {}, ms = 12000) {
+  const safeUrl = redactUrl(url);
+  console.log(`[stream] fetch: ${safeUrl}`);
+  const t0 = Date.now();
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), ms);
   try {
-    return await fetch(url, { ...options, signal: controller.signal });
+    const r = await fetch(url, { ...options, signal: controller.signal });
+    console.log(
+      `[stream] fetch done: ${safeUrl} status=${r.status} in ${Date.now() - t0}ms`,
+    );
+    return r;
+  } catch (e) {
+    console.warn(
+      `[stream] fetch error: ${safeUrl} after ${Date.now() - t0}ms`,
+    );
+    throw e;
   } finally {
     clearTimeout(t);
   }
 }
 
+
 app.get("/", (_req, res) =>
-  res.json({ ok: true, name: "sosac-stremio-addon", version: "0.1.2" }),
+  res.json({ ok: true, name: "sosac-stremio-addon", version: "0.1.3" }),
 );
 
 // --- Stremio manifest ---
 app.get("/manifest.json", (_req, res) => {
   res.json({
     id: "org.local.sosac",
-    version: "0.1.2",
+    version: "0.1.3",
     name: "Sosac (local)",
     description: "Sosac -> StreamujTV (on-demand + cache)",
     resources: [

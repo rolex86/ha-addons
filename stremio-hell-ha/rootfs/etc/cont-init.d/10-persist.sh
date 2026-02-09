@@ -7,6 +7,6 @@ mkdir -p "${DATA_BASE}/cache_hellspy_php"
 touch "${DATA_BASE}/addon.log"
 
 # Ensure permissions
-chown -R root:root "${DATA_BASE}" || true
+chown -R nginx:nginx "${DATA_BASE}" || true
 chmod -R 755 "${DATA_BASE}/cache_hellspy_php"
 chmod 644 "${DATA_BASE}/addon.log"

@@ -1,0 +1,4 @@
+#!/usr/bin/with-contenv bash
+set -euo pipefail
+
+exec php-fpm82 -F

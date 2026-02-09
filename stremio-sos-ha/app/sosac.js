@@ -100,7 +100,7 @@ function guessQualityFromUrl(u) {
   return "Auto";
 }
 
-function extractDirectMediaUrlFromAuthorizedHtml(html) {
+function extractAllDirectMediaUrlsFromAuthorizedHtml(html) {
   const candidates = [];
 
   for (const re of [
@@ -132,15 +132,18 @@ function extractDirectMediaUrlFromAuthorizedHtml(html) {
     }
   }
 
-  const m3u8 = uniq.find((u) => u.includes(".m3u8"));
-  if (m3u8) return m3u8;
-  const mpd = uniq.find((u) => u.includes(".mpd"));
-  if (mpd) return mpd;
-  const mp4 = uniq.find((u) => u.includes(".mp4"));
-  if (mp4) return mp4;
-
-  return null;
+  return uniq;
 }
+
+function pickByQuality(urls, q) {
+  if (!urls || !urls.length) return null;
+  const lq = String(q ?? "").toLowerCase();
+  if (lq == "hd") return urls.find((u) => /_hd\b/i.test(u)) || urls[0];
+  if (lq == "sd") return urls.find((u) => /_sd\b/i.test(u)) || urls[0];
+  if (lq == "original") return urls.find((u) => /_original\b/i.test(u)) || urls[0];
+  return urls[0];
+}
+
 
 
 /**
@@ -347,58 +350,41 @@ export async function streamujResolve({ streamujId, log, preferredQuality, fetch
   }
 
   const out = [];
+  const seen = new Set();
   for (const it of qualities) {
     const api = await fetchAuthorizeForQuality(it.q);
-    const authForQ = api?.auth || authorize;
     const authorizedUrl = api?.urlFromApi || null;
 
+    if (!authorizedUrl) {
+      console.log(`[stream] resolve skip quality=${it.q} (no authorized url)`);
+      continue;
+    }
+
     console.log(`[stream] resolve start quality=${it.q}`);
+    console.log(`[stream] authorized URL from api: ${authorizedUrl}`);
 
-    let direct = null;
+    const r = await doFetch(authorizedUrl, {
+      redirect: "follow",
+      headers: { ...uaHeaders(), Referer: pageUrl },
+    });
+    const ab2 = await r.arrayBuffer();
+    const html2 = Buffer.from(ab2).toString("utf-8");
+    console.log(
+      `[stream] authorized page fetched status=${r.status} len=${html2.length}`,
+    );
 
-    if (authorizedUrl) {
-      console.log(`[stream] authorized URL from api: ${authorizedUrl}`);
-      const r = await doFetch(authorizedUrl, {
-        redirect: "follow",
-        headers: { ...uaHeaders(), Referer: pageUrl },
-      });
-      const ab2 = await r.arrayBuffer();
-      const html2 = Buffer.from(ab2).toString("utf-8");
-      console.log(
-        `[stream] authorized page fetched status=${r.status} len=${html2.length}`,
-      );
-
-      direct = extractDirectMediaUrlFromAuthorizedHtml(html2);
-      console.log(`[stream] direct media extracted: ${direct ? "yes" : "no"}`);
-    }
-
-    if (!direct) {
-      if (!authForQ) {
-        log?.warn?.(
-          `Streamuj: authorize missing for quality=${it.q} id=${streamujId}`,
-        );
-        continue;
-      }
-
-      let url = `${pageUrl}?streamuj=${encodeURIComponent(
-        it.q,
-      )}&authorize=${encodeURIComponent(authForQ)}`;
-      if (uid) url += `&UID=${encodeURIComponent(String(uid))}`;
-      url = addStreamujPremiumParams(url, { user, pass, location });
-
-      const r = await doFetch(url, {
-        redirect: "follow",
-        headers: { ...uaHeaders(), Referer: pageUrl },
-      });
-      const ab2 = await r.arrayBuffer();
-      const html2 = Buffer.from(ab2).toString("utf-8");
-      direct = extractDirectMediaUrlFromAuthorizedHtml(html2);
-    }
+    const candidates = extractAllDirectMediaUrlsFromAuthorizedHtml(html2);
+    const direct = pickByQuality(candidates, it.q);
+    console.log(`[stream] direct media extracted: ${direct ? "yes" : "no"}`);
 
     if (!direct) {
       console.log(`[stream] resolve skip quality=${it.q} (no direct media)`);
       continue;
     }
+
+    const key = String(direct).replace(/(\?|#).*/, "");
+    if (seen.has(key)) continue;
+    seen.add(key);
 
     out.push({
       url: direct,
@@ -408,25 +394,22 @@ export async function streamujResolve({ streamujId, log, preferredQuality, fetch
         "User-Agent": uaHeaders()["User-Agent"],
       },
     });
-
-    // First successful quality wins; lower qualities are fallback only.
-    if (out.length) break;
-  }
-  // de-dupe
-  const uniq = [];
-  const seen = new Set();
-  for (const s of out) {
-    if (!seen.has(s.url)) {
-      seen.add(s.url);
-      uniq.push(s);
-    }
   }
 
-  if (!uniq.length) {
+  if (!out.length) {
     log?.warn?.(
       `Streamuj: resolved 0 streams for id=${streamujId} (authorize ok)`,
     );
   }
 
-  return uniq;
+  return out;
+}
+
+function pickByQuality(urls, q) {
+  if (!urls || !urls.length) return null;
+  const lq = String(q ?? "").toLowerCase();
+  if (lq == "hd") return urls.find((u) => /_hd\b/i.test(u)) || urls[0];
+  if (lq == "sd") return urls.find((u) => /_sd\b/i.test(u)) || urls[0];
+  if (lq == "original") return urls.find((u) => /_original\b/i.test(u)) || urls[0];
+  return urls[0];
 }

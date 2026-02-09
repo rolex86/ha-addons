@@ -5,8 +5,9 @@ const SOSAC_SEARCH = "http://tv.sosac.to/jsonsearchapi.php?q=";
 const STREAMUJ_PAGE = "https://www.streamuj.tv/video/";
 
 // simple helper
-async function getJson(url) {
-  const res = await fetch(url, { redirect: "follow" });
+async function getJson(url, fetchImpl) {
+  const doFetch = fetchImpl ?? fetch;
+  const res = await doFetch(url, { redirect: "follow" });
   if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
   return await res.json();
 }
@@ -73,20 +74,21 @@ function labelFromQuality(q) {
   return s ? s.toUpperCase() : "Auto";
 }
 
-async function resolveFinalUrlByRedirect(url, { referer }) {
+async function resolveFinalUrlByRedirect(url, { referer, fetch: fetchImpl }) {
   // Try HEAD first; if server rejects, fallback to GET with Range
   const headers = { ...uaHeaders(), ...(referer ? { Referer: referer } : {}) };
+  const doFetch = fetchImpl ?? fetch;
 
   // HEAD
   try {
-    const r = await fetch(url, { method: "HEAD", redirect: "follow", headers });
+    const r = await doFetch(url, { method: "HEAD", redirect: "follow", headers });
     if (r.ok && r.url && r.url !== url) return r.url;
     if (r.url) return r.url;
   } catch (_) {}
 
   // GET with small Range (avoid full download)
   const headers2 = { ...headers, Range: "bytes=0-0" };
-  const r2 = await fetch(url, {
+  const r2 = await doFetch(url, {
     method: "GET",
     redirect: "follow",
     headers: headers2,
@@ -106,12 +108,12 @@ function guessQualityFromUrl(u) {
  * On-demand: find Sosac item by text search and match it by imdbId.
  * Returns { imdbId, title, year, streamujId, raw } or null
  */
-export async function sosacFindByImdb({ imdbId, title, year, log }) {
+export async function sosacFindByImdb({ imdbId, title, year, log, fetch: fetchImpl }) {
   if (!title) throw new Error("Missing title for Sosac search");
 
   const q = encodeURIComponent(title);
   const url = `${SOSAC_SEARCH}${q}`;
-  const results = await getJson(url);
+  const results = await getJson(url, fetchImpl);
 
   // results can be various shapes; often array of items
   const items = Array.isArray(results) ? results : (results?.items ?? []);
@@ -166,11 +168,12 @@ export async function sosacFindByImdb({ imdbId, title, year, log }) {
  * Resolve Streamuj page -> final stream URL(s).
  * Returns [{ url, quality, headers? }]
  */
-export async function streamujResolve({ streamujId, log, preferredQuality }) {
+export async function streamujResolve({ streamujId, log, preferredQuality, fetch: fetchImpl }) {
   const pageUrl = `${STREAMUJ_PAGE}${encodeURIComponent(streamujId)}`;
+  const doFetch = fetchImpl ?? fetch;
 
   // 1) fetch HTML page
-  const pageRes = await fetch(pageUrl, {
+  const pageRes = await doFetch(pageUrl, {
     redirect: "follow",
     headers: uaHeaders(),
   });
@@ -222,6 +225,7 @@ export async function streamujResolve({ streamujId, log, preferredQuality }) {
     // get final CDN link via redirect
     const finalUrl = await resolveFinalUrlByRedirect(url, {
       referer: pageUrl,
+      fetch: fetchImpl,
     });
 
     // sanity: ignore if still on /video/...

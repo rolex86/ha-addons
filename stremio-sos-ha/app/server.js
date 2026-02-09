@@ -40,6 +40,11 @@ cache.load();
 
 const app = express();
 
+app.use((req, _res, next) => {
+  console.log(`[http] ${req.method} ${req.url}`);
+  next();
+});
+
 const corsOptions = {
   origin: "*",
   methods: ["GET", "POST", "OPTIONS", "HEAD"],
@@ -49,15 +54,25 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.options("*", cors(corsOptions));
 
+async function fetchWithTimeout(url, options = {}, ms = 12000) {
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), ms);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(t);
+  }
+}
+
 app.get("/", (_req, res) =>
-  res.json({ ok: true, name: "sosac-stremio-addon", version: "0.1.0" }),
+  res.json({ ok: true, name: "sosac-stremio-addon", version: "0.1.2" }),
 );
 
 // --- Stremio manifest ---
 app.get("/manifest.json", (_req, res) => {
   res.json({
     id: "org.local.sosac",
-    version: "0.1.0",
+    version: "0.1.2",
     name: "Sosac (local)",
     description: "Sosac -> StreamujTV (on-demand + cache)",
     resources: [
@@ -74,10 +89,11 @@ app.get("/manifest.json", (_req, res) => {
 });
 
 // --- Helpers ---
-async function fetchCinemetaMeta(type, imdbId) {
+async function fetchCinemetaMeta(type, imdbId, { fetch: fetchImpl } = {}) {
   // Stremio Cinemeta v3 endpoint
   const url = `https://v3-cinemeta.strem.io/meta/${type}/${imdbId}.json`;
-  const res = await fetch(url, {
+  const doFetch = fetchImpl ?? fetch;
+  const res = await doFetch(url, {
     headers: { "User-Agent": "StremioAddon/0.1" },
   });
   if (!res.ok) throw new Error(`Cinemeta meta HTTP ${res.status}`);
@@ -98,25 +114,47 @@ function parseStremioId(type, id) {
 // --- Stream endpoint ---
 app.get("/stream/:type/:id.json", async (req, res) => {
   const { type, id } = req.params;
-  const parsed = parseStremioId(type, id);
+  const t0 = Date.now();
 
-  // MVP: movies OK, series zatím vrátí prázdno (resolver epizod doplníme)
-  if (parsed.type === "series" && (parsed.season || parsed.episode)) {
-    return res.json({ streams: [] });
-  }
+  const HARD_TIMEOUT_MS = 18000;
+  const hard = setTimeout(() => {
+    if (!res.headersSent) {
+      console.warn(
+        `[stream] HARD TIMEOUT ${type}/${id} after ${Date.now() - t0}ms`,
+      );
+      res.status(200).json({ streams: [] });
+    }
+  }, HARD_TIMEOUT_MS);
 
-  const cacheKey = `imdb:${parsed.imdbId}`;
-  const cached = cache.get(cacheKey);
-
-  if (cached?.kind === "negative") {
-    return res.json({ streams: [] });
-  }
+  console.log(`[stream] start ${type}/${id}`);
 
   try {
+    const parsed = parseStremioId(type, id);
+
+    // MVP: movies OK, series zatim vrati prazdno (resolver epizod doplnime)
+    if (parsed.type === "series" && (parsed.season || parsed.episode)) {
+      console.log(
+        `[stream] done ${type}/${id} streams=0 in ${Date.now() - t0}ms`,
+      );
+      return res.json({ streams: [] });
+    }
+
+    const cacheKey = `imdb:${parsed.imdbId}`;
+    const cached = cache.get(cacheKey);
+
+    if (cached?.kind === "negative") {
+      console.log(
+        `[stream] done ${type}/${id} streams=0 in ${Date.now() - t0}ms`,
+      );
+      return res.json({ streams: [] });
+    }
+
     let mapping = cached?.kind === "positive" ? cached : null;
 
     if (!mapping) {
-      const meta = await fetchCinemetaMeta("movie", parsed.imdbId);
+      const meta = await fetchCinemetaMeta("movie", parsed.imdbId, {
+        fetch: fetchWithTimeout,
+      });
       if (!meta) throw new Error("Cinemeta meta not found");
 
       const title = meta.name;
@@ -127,10 +165,14 @@ app.get("/stream/:type/:id.json", async (req, res) => {
         title,
         year,
         log,
+        fetch: fetchWithTimeout,
       });
 
       if (!found) {
         cache.setNegative(cacheKey, "sosac_not_found");
+        console.log(
+          `[stream] done ${type}/${id} streams=0 in ${Date.now() - t0}ms`,
+        );
         return res.json({ streams: [] });
       }
 
@@ -148,6 +190,7 @@ app.get("/stream/:type/:id.json", async (req, res) => {
       streamujId: mapping.streamujId,
       log,
       preferredQuality: mapping.quality,
+      fetch: fetchWithTimeout,
     });
 
     // Apply premium params if configured
@@ -159,21 +202,29 @@ app.get("/stream/:type/:id.json", async (req, res) => {
     const streams = resolved.map((s) => {
       const finalUrl = addStreamujPremiumParams(s.url, premiumCfg);
       return {
-        name: `Sosac • ${s.quality ?? "Auto"}`,
+        name: `Sosac - ${s.quality ?? "Auto"}`,
         title: mapping.title ? `${mapping.title}` : "Sosac",
         url: finalUrl,
         behaviorHints: {
-          // často pomůže pro m3u8
+          // casto pomuze pro m3u8
           notWebReady: false,
         },
         ...(s.headers ? { headers: s.headers } : {}),
       };
     });
 
+    console.log(
+      `[stream] done ${type}/${id} streams=${streams?.length ?? 0} in ${Date.now() - t0}ms`,
+    );
     return res.json({ streams });
   } catch (e) {
-    log.error(`stream error: ${String(e)}`);
-    return res.json({ streams: [] });
+    console.error(
+      `[stream] error ${type}/${id} after ${Date.now() - t0}ms`,
+      e,
+    );
+    return res.status(200).json({ streams: [] });
+  } finally {
+    clearTimeout(hard);
   }
 });
 

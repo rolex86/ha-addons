@@ -1,0 +1,19 @@
+# Runtime data (HA /data volume)
+data/
+
+# Secrets / env
+app/.env
+app/.env.*
+app/secrets.json
+app/secrets.*.json
+app/*.secret.json
+
+# Node / tooling
+app/node_modules/
+app/.cache/
+app/npm-debug.log*
+app/yarn-error.log*
+app/pnpm-debug.log*
+
+# Logs
+app/*.log

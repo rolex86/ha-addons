@@ -1,0 +1,43 @@
+name: "Sosac Stremio Add-on"
+slug: "sosac_stremio"
+description: "Local Stremio add-on: Sosac -> StreamujTV resolver (on-demand + /data cache)"
+version: "0.1.0"
+url: "https://example.local/"
+arch:
+  - amd64
+  - aarch64
+  - armhf
+  - armv7
+  - i386
+
+startup: services
+init: false
+
+ports:
+  7123/tcp: 7123
+
+ports_description:
+  7123/tcp: "Stremio Add-on HTTP"
+
+map:
+  - data:rw
+
+options:
+  log_level: info
+  stream_port: 7123
+  cache_ttl_days: 14
+  negative_cache_ttl_hours: 12
+  streamuj:
+    user: ""
+    pass: ""
+    location: 1
+
+schema:
+  log_level: list(trace|debug|info|notice|warning|error|fatal)?
+  stream_port: int(1,65535)?
+  cache_ttl_days: int(1,365)?
+  negative_cache_ttl_hours: int(1,168)?
+  streamuj:
+    user: str?
+    pass: password?
+    location: list(1|2)?

@@ -1,0 +1,11 @@
+{
+  "name": "sosac-stremio-addon",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "main": "server.js",
+  "dependencies": {
+    "express": "^4.19.2",
+    "cheerio": "^1.0.0-rc.12"
+  }
+}

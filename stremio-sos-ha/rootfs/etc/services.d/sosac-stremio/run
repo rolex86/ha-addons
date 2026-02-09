@@ -1,0 +1,26 @@
+#!/usr/bin/with-contenv bashio
+
+LOG_LEVEL="$(bashio::config 'log_level')"
+PORT="$(bashio::config 'stream_port')"
+CACHE_TTL_DAYS="$(bashio::config 'cache_ttl_days')"
+NEG_CACHE_TTL_HOURS="$(bashio::config 'negative_cache_ttl_hours')"
+
+STREAMUJ_USER="$(bashio::config 'streamuj.user')"
+STREAMUJ_PASS="$(bashio::config 'streamuj.pass')"
+STREAMUJ_LOCATION="$(bashio::config 'streamuj.location')"
+
+export LOG_LEVEL
+export PORT
+export CACHE_TTL_DAYS
+export NEG_CACHE_TTL_HOURS
+export STREAMUJ_USER
+export STREAMUJ_PASS
+export STREAMUJ_LOCATION
+export DATA_DIR="/data"
+
+bashio::log.info "HTTP port: ${PORT}"
+bashio::log.info "Cache TTL days: ${CACHE_TTL_DAYS}, negative TTL hours: ${NEG_CACHE_TTL_HOURS}"
+bashio::log.info "Streamuj location: ${STREAMUJ_LOCATION} (user set: $([ -n "${STREAMUJ_USER}" ] && echo yes || echo no))"
+
+cd /opt/app
+exec node server.js

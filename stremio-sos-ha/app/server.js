@@ -15,6 +15,7 @@ const NEG_CACHE_TTL_HOURS = Number(process.env.NEG_CACHE_TTL_HOURS ?? 12);
 const STREAMUJ_USER = process.env.STREAMUJ_USER ?? "";
 const STREAMUJ_PASS = process.env.STREAMUJ_PASS ?? "";
 const STREAMUJ_LOCATION = Number(process.env.STREAMUJ_LOCATION ?? 1);
+const STREAMUJ_UID = Number(process.env.STREAMUJ_UID ?? 0) || undefined;
 
 const LOG_LEVEL = (process.env.LOG_LEVEL ?? "info").toLowerCase();
 const log = {
@@ -88,14 +89,14 @@ async function fetchWithTimeout(url, options = {}, ms = 12000) {
 
 
 app.get("/", (_req, res) =>
-  res.json({ ok: true, name: "sosac-stremio-addon", version: "0.1.7" }),
+  res.json({ ok: true, name: "sosac-stremio-addon", version: "0.1.8" }),
 );
 
 // --- Stremio manifest ---
 app.get("/manifest.json", (_req, res) => {
   res.json({
     id: "org.local.sosac",
-    version: "0.1.7",
+    version: "0.1.8",
     name: "Sosac (local)",
     description: "Sosac -> StreamujTV (on-demand + cache)",
     resources: [
@@ -214,6 +215,10 @@ app.get("/stream/:type/:id.json", async (req, res) => {
       log,
       preferredQuality: mapping.quality,
       fetch: fetchWithTimeout,
+      user: STREAMUJ_USER,
+      pass: STREAMUJ_PASS,
+      location: STREAMUJ_LOCATION,
+      uid: STREAMUJ_UID,
     });
 
     // Apply premium params if configured

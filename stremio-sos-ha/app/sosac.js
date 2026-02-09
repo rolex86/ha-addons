@@ -177,7 +177,7 @@ export async function sosacFindByImdb({ imdbId, title, year, log, fetch: fetchIm
  * Resolve Streamuj page -> final stream URL(s).
  * Returns [{ url, quality, headers? }]
  */
-export async function streamujResolve({ streamujId, log, preferredQuality, fetch: fetchImpl }) {
+export async function streamujResolve({ streamujId, log, preferredQuality, fetch: fetchImpl, user, pass, location, uid }) {
   const pageUrl = `${STREAMUJ_PAGE}${encodeURIComponent(streamujId)}`;
   const doFetch = fetchImpl ?? fetch;
 
@@ -231,6 +231,46 @@ export async function streamujResolve({ streamujId, log, preferredQuality, fetch
   console.log("[stream] step 2 parse done");
   console.log(`[stream] parsed: authorize=${authorize || "-"}`);
 
+  // Fallback: token via JSON API (video-link)
+  async function fetchAuthorizeForQuality(q) {
+    if (!user || !pass || !uid) return null;
+    const apiUrl =
+      `https://www.streamuj.tv/json_api.php?action=video-link` +
+      `&URL=${encodeURIComponent(pageUrl + "?streamuj=" + q)}` +
+      `&UID=${encodeURIComponent(String(uid))}`;
+
+    console.log("[stream] step 2b fetch video-link api");
+    const apiRes = await doFetch(apiUrl, {
+      headers: {
+        ...uaHeaders(),
+        "X-Requested-With": "XMLHttpRequest",
+        Referer: pageUrl,
+        "Accept-Encoding": "identity",
+      },
+      redirect: "follow",
+    });
+
+    const ab = await apiRes.arrayBuffer();
+    const txt = Buffer.from(ab).toString("utf-8");
+    let js;
+    try {
+      js = JSON.parse(txt);
+    } catch {
+      js = null;
+    }
+
+    const auth =
+      js?.authorize ||
+      js?.data?.authorize ||
+      js?.result?.authorize ||
+      (typeof txt === "string"
+        ? (txt.match(/"authorize"\s*:\s*"([^"]+)"/)?.[1] ?? null)
+        : null);
+
+    console.log(`[stream] parsed (api): authorize=${auth ? "yes" : "no"}`);
+    return auth;
+  }
+
   function snippetAround(s, needle, radius = 120) {
     const i = s.indexOf(needle);
     if (i == -1) return null;
@@ -245,7 +285,7 @@ export async function streamujResolve({ streamujId, log, preferredQuality, fetch
     if (sn) console.log(`[stream] html snippet (${n}): ${sn}`);
   }
 
-  if (!authorize) {
+  if (!authorize && (!user || !pass || !uid)) {
     log?.warn?.(`Streamuj: authorize token not found for id=${streamujId}`);
     return [];
   }
@@ -261,9 +301,21 @@ export async function streamujResolve({ streamujId, log, preferredQuality, fetch
 
   const out = [];
   for (const it of qualities) {
-    const url = `${pageUrl}?streamuj=${encodeURIComponent(
+    let authForQ = authorize;
+    if (user && pass && uid) {
+      authForQ = await fetchAuthorizeForQuality(it.q) || authorize;
+    }
+
+    if (!authForQ) {
+      log?.warn?.(`Streamuj: authorize missing for quality=${it.q} id=${streamujId}`);
+      continue;
+    }
+
+    let url = `${pageUrl}?streamuj=${encodeURIComponent(
       it.q,
-    )}&authorize=${encodeURIComponent(authorize)}`;
+    )}&authorize=${encodeURIComponent(authForQ)}`;
+    if (uid) url += `&UID=${encodeURIComponent(String(uid))}`;
+    url = addStreamujPremiumParams(url, { user, pass, location });
 
     // get final CDN link via redirect
     console.log(`[stream] resolve start quality=${it.q}`);

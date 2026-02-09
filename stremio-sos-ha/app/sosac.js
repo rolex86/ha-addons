@@ -79,20 +79,28 @@ async function resolveFinalUrlByRedirect(url, { referer, fetch: fetchImpl }) {
   const headers = { ...uaHeaders(), ...(referer ? { Referer: referer } : {}) };
   const doFetch = fetchImpl ?? fetch;
 
+  console.log(`[stream] redirect start ${url}`);
+
   // HEAD
   try {
+    console.log(`[stream] redirect HEAD ${url}`);
     const r = await doFetch(url, { method: "HEAD", redirect: "follow", headers });
+    console.log(`[stream] redirect HEAD done status=${r.status} url=${r.url}`);
     if (r.ok && r.url && r.url !== url) return r.url;
     if (r.url) return r.url;
-  } catch (_) {}
+  } catch (e) {
+    console.warn(`[stream] redirect HEAD error ${url}`);
+  }
 
   // GET with small Range (avoid full download)
   const headers2 = { ...headers, Range: "bytes=0-0" };
+  console.log(`[stream] redirect GET ${url}`);
   const r2 = await doFetch(url, {
     method: "GET",
     redirect: "follow",
     headers: headers2,
   });
+  console.log(`[stream] redirect GET done status=${r2.status} url=${r2.url}`);
   return r2.url ?? url;
 }
 
@@ -172,6 +180,8 @@ export async function streamujResolve({ streamujId, log, preferredQuality, fetch
   const pageUrl = `${STREAMUJ_PAGE}${encodeURIComponent(streamujId)}`;
   const doFetch = fetchImpl ?? fetch;
 
+  console.log(`[stream] step 1 fetch video page ${pageUrl}`);
+
   // 1) fetch HTML page
   const pageRes = await doFetch(pageUrl, {
     redirect: "follow",
@@ -179,6 +189,8 @@ export async function streamujResolve({ streamujId, log, preferredQuality, fetch
   });
   if (!pageRes.ok) throw new Error(`Streamuj page HTTP ${pageRes.status}`);
   const html = await pageRes.text();
+  console.log(`[stream] video html length=${html.length}`);
+  console.log(`[stream] parse start`);
 
   // 2) extract authorize token
   let authorize = pickAuthorizeToken(html);
@@ -202,6 +214,8 @@ export async function streamujResolve({ streamujId, log, preferredQuality, fetch
     }
   }
 
+  console.log(`[stream] parsed: authorize=${authorize || "-"}`);
+
   if (!authorize) {
     log?.warn?.(`Streamuj: authorize token not found for id=${streamujId}`);
     return [];
@@ -223,13 +237,18 @@ export async function streamujResolve({ streamujId, log, preferredQuality, fetch
     )}&authorize=${encodeURIComponent(authorize)}`;
 
     // get final CDN link via redirect
+    console.log(`[stream] resolve start quality=${it.q}`);
     const finalUrl = await resolveFinalUrlByRedirect(url, {
       referer: pageUrl,
       fetch: fetchImpl,
     });
+    console.log(`[stream] resolve done quality=${it.q} url=${finalUrl || "-"}`);
 
     // sanity: ignore if still on /video/...
-    if (!finalUrl || finalUrl.includes("/video/")) continue;
+    if (!finalUrl || finalUrl.includes("/video/")) {
+      console.log(`[stream] resolve skip quality=${it.q} url=${finalUrl || "-"}`);
+      continue;
+    }
 
     out.push({
       url: finalUrl,

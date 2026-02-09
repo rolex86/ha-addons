@@ -438,18 +438,12 @@ $method=$_SERVER['REQUEST_METHOD'];
 $uri=parse_url($_SERVER['REQUEST_URI'],PHP_URL_PATH);
 
 if ($method === 'OPTIONS') {
-    header('Access-Control-Allow-Origin: *');
-    header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
-    header('Access-Control-Allow-Headers: Content-Type');
     http_response_code(204);
     exit;
 }
 
 // HEAD support for manifest
 if ($method === 'HEAD' && $uri === '/manifest.json') {
-    header('Access-Control-Allow-Origin: *');
-    header('Access-Control-Allow-Methods: GET, POST, OPTIONS, HEAD');
-    header('Access-Control-Allow-Headers: Content-Type');
     header('Content-Type: application/json; charset=utf-8');
     http_response_code(200);
     exit;
@@ -457,9 +451,6 @@ if ($method === 'HEAD' && $uri === '/manifest.json') {
 
 // HEAD support for stream route
 if ($method === 'HEAD' && preg_match('~^/stream/(movie|series)/([^/]+)\.json$~',$uri)) {
-    header('Access-Control-Allow-Origin: *');
-    header('Access-Control-Allow-Methods: GET, POST, OPTIONS, HEAD');
-    header('Access-Control-Allow-Headers: Content-Type');
     header('Content-Type: application/json; charset=utf-8');
     http_response_code(200);
     exit;
@@ -470,9 +461,6 @@ if($method==='GET' && $uri==='/manifest.json'){
     $remote = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
     $ua = $_SERVER['HTTP_USER_AGENT'] ?? 'unknown';
     log_info("Manifest request from $remote UA=\"$ua\"");
-    header('Access-Control-Allow-Origin: *');
-    header('Access-Control-Allow-Methods: GET, POST, OPTIONS, HEAD');
-    header('Access-Control-Allow-Headers: Content-Type');
     header('Content-Type: application/json; charset=utf-8');
     echo json_encode([
         'id'=>ADDON_ID,'version'=>ADDON_VERSION,'name'=>ADDON_NAME,'description'=>ADDON_DESCRIPTION,
@@ -496,9 +484,6 @@ if($method==='GET' && preg_match('~^/stream/(movie|series)/([^/]+)\.json$~',$uri
     log_info("Stremio GET stream: type=$type id=$id");
     $body=['type'=>$type,'id'=>$id,'name'=>$id];
     $result=handle_stream_request($body);
-    header('Access-Control-Allow-Origin: *');
-    header('Access-Control-Allow-Methods: GET, POST, OPTIONS, HEAD');
-    header('Access-Control-Allow-Headers: Content-Type');
     header('Content-Type: application/json; charset=utf-8');
     echo json_encode($result,JSON_PRETTY_PRINT|JSON_UNESCAPED_SLASHES);
     exit;
@@ -513,17 +498,11 @@ if($method==='POST' && $uri==='/stream'){
     try {
         $result=handle_stream_request($body);
         log_info("Stream result count: " . count($result['streams'] ?? []));
-        header('Access-Control-Allow-Origin: *');
-        header('Access-Control-Allow-Methods: GET, POST, OPTIONS, HEAD');
-        header('Access-Control-Allow-Headers: Content-Type');
         header('Content-Type: application/json; charset=utf-8');
         echo json_encode($result,JSON_PRETTY_PRINT|JSON_UNESCAPED_SLASHES);
     } catch(Throwable $e) {
         log_err("Stream handler error: " . $e->getMessage());
         http_response_code(500);
-        header('Access-Control-Allow-Origin: *');
-        header('Access-Control-Allow-Methods: GET, POST, OPTIONS, HEAD');
-        header('Access-Control-Allow-Headers: Content-Type');
         header('Content-Type: application/json; charset=utf-8');
         echo json_encode(['error'=>$e->getMessage()]);
     }
@@ -532,9 +511,6 @@ if($method==='POST' && $uri==='/stream'){
 
 // default 404
 http_response_code(404);
-header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: GET, POST, OPTIONS, HEAD');
-header('Access-Control-Allow-Headers: Content-Type');
 header('Content-Type: application/json; charset=utf-8');
 echo json_encode(['error'=>'Not found']);
 exit;

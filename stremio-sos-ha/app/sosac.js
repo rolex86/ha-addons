@@ -404,12 +404,3 @@ export async function streamujResolve({ streamujId, log, preferredQuality, fetch
 
   return out;
 }
-
-function pickByQuality(urls, q) {
-  if (!urls || !urls.length) return null;
-  const lq = String(q ?? "").toLowerCase();
-  if (lq == "hd") return urls.find((u) => /_hd\b/i.test(u)) || urls[0];
-  if (lq == "sd") return urls.find((u) => /_sd\b/i.test(u)) || urls[0];
-  if (lq == "original") return urls.find((u) => /_original\b/i.test(u)) || urls[0];
-  return urls[0];
-}

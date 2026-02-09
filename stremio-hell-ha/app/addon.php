@@ -447,12 +447,14 @@ if ($method === 'OPTIONS') {
 
 // manifest
 if($method==='GET' && $uri==='/manifest.json'){
+    $remote = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+    $ua = $_SERVER['HTTP_USER_AGENT'] ?? 'unknown';
+    log_info("Manifest request from $remote UA=\"$ua\"");
     header('Access-Control-Allow-Origin: *');
     header('Content-Type: application/json; charset=utf-8');
     echo json_encode([
         'id'=>ADDON_ID,'version'=>ADDON_VERSION,'name'=>ADDON_NAME,'description'=>ADDON_DESCRIPTION,
-        'resources'=>['stream'],'types'=>['movie','series'],'idPrefixes'=>['tt'],'catalogs'=>[],
-        'stremioAddonsConfig'=>['issuer'=>'https://stremio-addons.net','signature'=>'']
+        'resources'=>['stream'],'types'=>['movie','series'],'idPrefixes'=>['tt'],'catalogs'=>[]
     ],JSON_PRETTY_PRINT|JSON_UNESCAPED_SLASHES);
     exit;
 }

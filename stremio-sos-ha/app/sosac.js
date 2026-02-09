@@ -37,6 +37,7 @@ function uaHeaders() {
     Accept:
       "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "cs-CZ,cs;q=0.9,en;q=0.7",
+    "Accept-Encoding": "identity",
   };
 }
 
@@ -194,7 +195,8 @@ export async function streamujResolve({ streamujId, log, preferredQuality, fetch
 
   console.log("[stream] step 1b read body start");
   const tBody = Date.now();
-  const html = await pageRes.text();
+  const ab = await pageRes.arrayBuffer();
+  const html = Buffer.from(ab).toString("utf-8");
   console.log(
     `[stream] step 1c read body done len=${html.length} in ${Date.now() - tBody}ms`,
   );

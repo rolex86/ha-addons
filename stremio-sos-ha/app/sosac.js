@@ -188,9 +188,21 @@ export async function streamujResolve({ streamujId, log, preferredQuality, fetch
     headers: uaHeaders(),
   });
   if (!pageRes.ok) throw new Error(`Streamuj page HTTP ${pageRes.status}`);
+  const enc = pageRes.headers.get("content-encoding");
+  const len = pageRes.headers.get("content-length");
+  console.log(`[stream] headers: enc=${enc || "-"} len=${len || "-"}`);
+
+  console.log("[stream] step 1b read body start");
+  const tBody = Date.now();
   const html = await pageRes.text();
-  console.log(`[stream] video html length=${html.length}`);
-  console.log(`[stream] parse start`);
+  console.log(
+    `[stream] step 1c read body done len=${html.length} in ${Date.now() - tBody}ms`,
+  );
+  console.log(
+    `[stream] html head: ${html.slice(0, 200).replace(/\s+/g, " ")}`,
+  );
+
+  console.log("[stream] step 2 parse start");
 
   // 2) extract authorize token
   let authorize = pickAuthorizeToken(html);
@@ -214,6 +226,7 @@ export async function streamujResolve({ streamujId, log, preferredQuality, fetch
     }
   }
 
+  console.log("[stream] step 2 parse done");
   console.log(`[stream] parsed: authorize=${authorize || "-"}`);
 
   if (!authorize) {

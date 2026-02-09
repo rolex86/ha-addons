@@ -476,7 +476,16 @@ if($method==='GET' && $uri==='/manifest.json'){
     header('Content-Type: application/json; charset=utf-8');
     echo json_encode([
         'id'=>ADDON_ID,'version'=>ADDON_VERSION,'name'=>ADDON_NAME,'description'=>ADDON_DESCRIPTION,
-        'resources'=>['stream'],'types'=>['movie','series'],'idPrefixes'=>['tt'],'catalogs'=>[]
+        'resources'=>[
+            [
+                'name'=>'stream',
+                'types'=>['movie','series'],
+                'idPrefixes'=>['tt']
+            ]
+        ],
+        'types'=>['movie','series'],
+        'idPrefixes'=>['tt'],
+        'catalogs'=>[]
     ],JSON_PRETTY_PRINT|JSON_UNESCAPED_SLASHES);
     exit;
 }

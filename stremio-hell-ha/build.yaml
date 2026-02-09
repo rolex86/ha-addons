@@ -1,2 +1,2 @@
 build_from:
-  amd64: "php:8.2-apache"
+  amd64: ghcr.io/home-assistant/amd64-base:3.20

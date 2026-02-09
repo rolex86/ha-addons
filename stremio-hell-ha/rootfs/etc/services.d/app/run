@@ -1,0 +1,7 @@
+#!/usr/bin/with-contenv bash
+set -euo pipefail
+
+PORT="${PORT:-80}"
+
+cd /var/www/html
+exec php -S 0.0.0.0:${PORT} index.php

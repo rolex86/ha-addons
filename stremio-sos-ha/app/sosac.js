@@ -231,6 +231,20 @@ export async function streamujResolve({ streamujId, log, preferredQuality, fetch
   console.log("[stream] step 2 parse done");
   console.log(`[stream] parsed: authorize=${authorize || "-"}`);
 
+  function snippetAround(s, needle, radius = 120) {
+    const i = s.indexOf(needle);
+    if (i == -1) return null;
+    const start = Math.max(0, i - radius);
+    const end = Math.min(s.length, i + needle.length + radius);
+    return s.slice(start, end).replace(/\s+/g, " ");
+  }
+
+  const needles = ["authorize", "token", "auth", "sources", "playlist", "file", "m3u8", "mp4"];
+  for (const n of needles) {
+    const sn = snippetAround(html, n);
+    if (sn) console.log(`[stream] html snippet (${n}): ${sn}`);
+  }
+
   if (!authorize) {
     log?.warn?.(`Streamuj: authorize token not found for id=${streamujId}`);
     return [];

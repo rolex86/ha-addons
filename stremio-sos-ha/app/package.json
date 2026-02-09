@@ -1,6 +1,6 @@
 {
   "name": "sosac-stremio-addon",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "type": "module",
   "private": true,
   "main": "server.js",

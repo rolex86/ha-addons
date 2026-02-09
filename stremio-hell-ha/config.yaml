@@ -14,8 +14,8 @@ map:
   - data:rw
 
 ports:
-  18099/tcp: 80
+  80/tcp: 18099
 ports_description:
-  18099/tcp: "HTTP (manifest.json)"
+  80/tcp: "HTTP (manifest.json)"
 
 webui: "http://[HOST]:[PORT:18099]/manifest.json"

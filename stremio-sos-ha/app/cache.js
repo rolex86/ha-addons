@@ -6,10 +6,11 @@ function nowMs() {
 }
 
 export class Cache {
-  constructor({ dataDir, ttlDays, negativeTtlHours, log }) {
+  constructor({ dataDir, ttlDays, negativeTtlHours, streamTtlMinutes, log }) {
     this.dataDir = dataDir;
     this.ttlMs = (ttlDays ?? 14) * 24 * 60 * 60 * 1000;
     this.negativeTtlMs = (negativeTtlHours ?? 12) * 60 * 60 * 1000;
+    this.streamTtlMs = (streamTtlMinutes ?? 20) * 60 * 1000;
     this.log = log;
     this.filePath = path.join(this.dataDir, "cache.json");
     this.db = { version: 1, items: {} };
@@ -49,7 +50,12 @@ export class Cache {
     if (!entry) return null;
 
     const age = nowMs() - (entry.updatedAt ?? 0);
-    const ttl = entry.kind === "negative" ? this.negativeTtlMs : this.ttlMs;
+    const ttl =
+      entry.kind === "negative"
+        ? this.negativeTtlMs
+        : entry.kind === "streams"
+          ? this.streamTtlMs
+          : this.ttlMs;
 
     if (age > ttl) {
       delete this.db.items[key];
@@ -66,5 +72,23 @@ export class Cache {
   setNegative(key, reason = "not_found") {
     this.db.items[key] = { kind: "negative", updatedAt: nowMs(), reason };
     this.save();
+  }
+
+  setStreams(key, streams) {
+    this.db.items[key] = { kind: "streams", updatedAt: nowMs(), streams };
+    this.save();
+  }
+
+  stats() {
+    const items = this.db?.items ?? {};
+    const keys = Object.keys(items);
+    const counts = { total: keys.length, positive: 0, negative: 0, streams: 0 };
+    for (const k of keys) {
+      const kind = items[k]?.kind;
+      if (kind === "positive") counts.positive += 1;
+      else if (kind === "negative") counts.negative += 1;
+      else if (kind === "streams") counts.streams += 1;
+    }
+    return counts;
   }
 }

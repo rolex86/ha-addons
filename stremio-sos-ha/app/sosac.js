@@ -2,7 +2,9 @@ import crypto from "crypto";
 import * as cheerio from "cheerio";
 import { CookieJar } from "tough-cookie";
 
-const SOSAC_BASE = "http://tv.sosac.to";
+const SOSAC_BASE_HTTP = "http://tv.sosac.to";
+const SOSAC_BASE_HTTPS = "https://tv.sosac.to";
+const SOSAC_BASE = SOSAC_BASE_HTTP;
 const SOSAC_SERIES = "/vystupy5981/serialy/";
 const SOSAC_SEARCH = "/jsonsearchapi.php?q=";
 const STREAMUJ_PAGE = "https://www.streamuj.tv/video/";
@@ -32,16 +34,49 @@ async function sosacFetchJson(url, { fetch: fetchImpl, log } = {}) {
 }
 
 async function tryLoadEpisodesByShowId(showId, { fetch: fetchImpl, log } = {}) {
-  const url = showId.startsWith("http")
-    ? showId
-    : `${SOSAC_BASE}${SOSAC_SERIES}${showId}`;
+  const doFetch = fetchImpl ?? fetch;
+  const id = String(showId ?? "");
+  const candidates = [];
+  const seen = new Set();
 
-  try {
-    const j = await sosacFetchJson(url, { fetch: fetchImpl, log });
-    return isEpisodesJson(j) ? j : null;
-  } catch (_) {
-    return null;
+  const push = (u) => {
+    if (u && !seen.has(u)) {
+      seen.add(u);
+      candidates.push(u);
+    }
+  };
+
+  if (id.startsWith("http")) {
+    push(id);
+    if (!id.endsWith(".json")) push(`${id}.json`);
+    push(`${id}/`);
+    push(`${id}/index.json`);
+  } else {
+    for (const base of [SOSAC_BASE_HTTPS, SOSAC_BASE_HTTP]) {
+      push(`${base}${SOSAC_SERIES}${id}`);
+      push(`${base}${SOSAC_SERIES}${id}.json`);
+      push(`${base}${SOSAC_SERIES}${id}/`);
+      push(`${base}${SOSAC_SERIES}${id}/index.json`);
+    }
   }
+
+  for (const url of candidates) {
+    try {
+      const r = await doFetch(url);
+      if (!r.ok) continue;
+      let j = null;
+      try {
+        j = await r.json();
+      } catch (_) {
+        j = null;
+      }
+      if (isEpisodesJson(j)) return j;
+    } catch (_) {
+      // ignore and try next candidate
+    }
+  }
+
+  return null;
 }
 
 export async function sosacFindShowIdByImdbOrTitle({

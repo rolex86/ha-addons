@@ -4,11 +4,19 @@ import { CookieJar } from "tough-cookie";
 
 const SOSAC_BASE_HTTP = "http://tv.sosac.to";
 const SOSAC_BASE_HTTPS = "https://tv.sosac.to";
+const SOSAC_BASE_ALT_HTTP = "http://sosac.to";
+const SOSAC_BASE_ALT_HTTPS = "https://sosac.to";
 const SOSAC_BASE = SOSAC_BASE_HTTP;
 const SOSAC_SERIES = "/vystupy5981/serialy/";
+const SOSAC_SERIES_INDEX_PATHS = [
+  "/vystupy5981/serialy.json",
+  "/vystupy5981/serialy/serialy.json",
+];
 const SOSAC_SEARCH = "/jsonsearchapi.php?q=";
 const STREAMUJ_PAGE = "https://www.streamuj.tv/video/";
 const streamujJar = new CookieJar();
+const seriesIndexCache = { ts: 0, data: null };
+const SERIES_INDEX_TTL_MS = 6 * 60 * 60 * 1000;
 
 // simple helper
 async function getJson(url, fetchImpl) {
@@ -52,7 +60,12 @@ async function tryLoadEpisodesByShowId(showId, { fetch: fetchImpl, log } = {}) {
     push(`${id}/`);
     push(`${id}/index.json`);
   } else {
-    for (const base of [SOSAC_BASE_HTTPS, SOSAC_BASE_HTTP]) {
+    for (const base of [
+      SOSAC_BASE_HTTPS,
+      SOSAC_BASE_HTTP,
+      SOSAC_BASE_ALT_HTTPS,
+      SOSAC_BASE_ALT_HTTP,
+    ]) {
       push(`${base}${SOSAC_SERIES}${id}`);
       push(`${base}${SOSAC_SERIES}${id}.json`);
       push(`${base}${SOSAC_SERIES}${id}/`);
@@ -73,6 +86,112 @@ async function tryLoadEpisodesByShowId(showId, { fetch: fetchImpl, log } = {}) {
       if (isEpisodesJson(j)) return j;
     } catch (_) {
       // ignore and try next candidate
+    }
+  }
+
+  return null;
+}
+
+function candidateShowIds(it) {
+  const out = [];
+  const push = (v) => {
+    const s = String(v ?? "").trim();
+    if (s && !out.includes(s)) out.push(s);
+  };
+  push(it?.l);
+  push(it?.c);
+  push(it?.id);
+  push(it?.sid);
+  return out;
+}
+
+function normalizeTitle(s) {
+  return String(s ?? "")
+    .trim()
+    .toLowerCase();
+}
+
+function extractImdbFromItem(it) {
+  return (
+    it?.m ||
+    it?.imdb ||
+    it?.imdb_id ||
+    it?.imdbId ||
+    it?.ids?.imdb ||
+    null
+  );
+}
+
+function extractTitleFromItem(it) {
+  return (
+    (typeof it?.n === "string" ? it.n : (it?.n?.cs ?? it?.n?.en ?? null)) ||
+    it?.name ||
+    it?.title ||
+    null
+  );
+}
+
+async function loadSeriesIndex({ fetch: fetchImpl, log } = {}) {
+  const now = Date.now();
+  if (seriesIndexCache.data && now - seriesIndexCache.ts < SERIES_INDEX_TTL_MS) {
+    return seriesIndexCache.data;
+  }
+
+  const doFetch = fetchImpl ?? fetch;
+  const bases = [
+    SOSAC_BASE_HTTPS,
+    SOSAC_BASE_HTTP,
+    SOSAC_BASE_ALT_HTTPS,
+    SOSAC_BASE_ALT_HTTP,
+  ];
+
+  for (const base of bases) {
+    for (const path of SOSAC_SERIES_INDEX_PATHS) {
+      const url = `${base}${path}`;
+      try {
+        const r = await doFetch(url);
+        if (!r.ok) continue;
+        const j = await r.json();
+        if (Array.isArray(j)) {
+          seriesIndexCache.ts = now;
+          seriesIndexCache.data = j;
+          return j;
+        }
+      } catch (_) {
+        // ignore and continue
+      }
+    }
+  }
+
+  return null;
+}
+
+async function tryFindShowIdFromSeriesIndex({
+  seriesImdbTt,
+  title,
+  fetch: fetchImpl,
+  log,
+}) {
+  const q1 = imdbDigits(seriesImdbTt);
+  const index = await loadSeriesIndex({ fetch: fetchImpl, log });
+  if (!index) return null;
+
+  const wantTitle = normalizeTitle(title);
+
+  for (const it of index) {
+    const imdb = imdbDigits(extractImdbFromItem(it));
+    const t = normalizeTitle(extractTitleFromItem(it));
+    const imdbMatch = imdb && q1 && imdb === q1;
+    const titleMatch = wantTitle && t && t === wantTitle;
+    if (!imdbMatch && !titleMatch) continue;
+
+    const ids = candidateShowIds(it);
+    for (const showId of ids) {
+      const eps = await tryLoadEpisodesByShowId(showId, {
+        fetch: fetchImpl,
+        log,
+      });
+      if (eps) return { showId, episodesJson: eps };
     }
   }
 
@@ -104,15 +223,24 @@ export async function sosacFindShowIdByImdbOrTitle({
     const pool = candidates.length ? candidates : (results || []).slice(0, 10);
 
     for (const it of pool) {
-      const showId = it?.l;
-      if (!showId) continue;
-
-      const eps = await tryLoadEpisodesByShowId(showId, { fetch: fetchImpl, log });
-      if (eps) return { showId, episodesJson: eps };
+      const ids = candidateShowIds(it);
+      for (const showId of ids) {
+        const eps = await tryLoadEpisodesByShowId(showId, {
+          fetch: fetchImpl,
+          log,
+        });
+        if (eps) return { showId, episodesJson: eps };
+      }
     }
   }
 
-  return null;
+  // Fallback: try series index if search didn't resolve
+  return await tryFindShowIdFromSeriesIndex({
+    seriesImdbTt,
+    title,
+    fetch: fetchImpl,
+    log,
+  });
 }
 
 export function sosacExtractEpisodeStreamujId(episodesJson, season, episode) {

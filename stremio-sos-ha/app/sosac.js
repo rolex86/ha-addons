@@ -63,22 +63,14 @@ function md5hex(s) {
  * pass = user + ":::" + md5(md5(pass))
  * + location (1/2)
  */
-export function addStreamujPremiumParams(url, { user, pass, location }) {
+export function addStreamujPremiumParams(url, { user, pass, location, uid }) {
   if (!user || !pass) return url;
   const hashed = md5hex(md5hex(pass));
   const u = new URL(url);
   u.searchParams.set("pass", `${user}:::${hashed}`);
   if (location) u.searchParams.set("location", String(location));
+  if (uid) u.searchParams.set("UID", String(uid));
   return u.toString();
-}
-
-export async function getStreamujCookieNames() {
-  try {
-    const cookies = await streamujJar.getCookies("https://www.streamuj.tv/");
-    return cookies.map((c) => c.key);
-  } catch (_) {
-    return [];
-  }
 }
 
 function uaHeaders() {
@@ -338,6 +330,7 @@ export async function streamujResolve({ streamujId, log, preferredQuality, fetch
       user,
       pass,
       location,
+      uid,
     });
     const apiUrl =
       `https://www.streamuj.tv/json_api.php?action=video-link` +

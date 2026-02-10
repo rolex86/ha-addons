@@ -5,16 +5,12 @@ import {
   sosacFindByImdb,
   streamujResolve,
   addStreamujPremiumParams,
-  getStreamujCookieNames,
 } from "./sosac.js";
 
 const PORT = Number(process.env.PORT ?? 7123);
 const DATA_DIR = process.env.DATA_DIR ?? "/data";
 const CACHE_TTL_DAYS = Number(process.env.CACHE_TTL_DAYS ?? 14);
 const NEG_CACHE_TTL_HOURS = Number(process.env.NEG_CACHE_TTL_HOURS ?? 12);
-const STREAM_CACHE_TTL_MINUTES = Number(
-  process.env.STREAM_CACHE_TTL_MINUTES ?? 20,
-);
 
 const STREAMUJ_USER = process.env.STREAMUJ_USER ?? "";
 const STREAMUJ_PASS = process.env.STREAMUJ_PASS ?? "";
@@ -39,7 +35,6 @@ const cache = new Cache({
   dataDir: DATA_DIR,
   ttlDays: CACHE_TTL_DAYS,
   negativeTtlHours: NEG_CACHE_TTL_HOURS,
-  streamTtlMinutes: STREAM_CACHE_TTL_MINUTES,
   log,
 });
 cache.load();
@@ -105,26 +100,14 @@ async function fetchWithTimeout(url, options = {}, ms = 12000) {
 
 
 app.get("/", (_req, res) =>
-  res.json({ ok: true, name: "sosac-stremio-addon", version: "0.2.6" }),
+  res.json({ ok: true, name: "sosac-stremio-addon", version: "0.2.5" }),
 );
-
-app.get("/health", async (_req, res) => {
-  const stats = cache.stats();
-  const cookies = await getStreamujCookieNames();
-  res.json({
-    ok: true,
-    cacheItems: stats.total,
-    cache: stats,
-    cookies,
-    streamCacheTtlMinutes: STREAM_CACHE_TTL_MINUTES,
-  });
-});
 
 // --- Stremio manifest ---
 app.get("/manifest.json", (_req, res) => {
   res.json({
     id: "org.local.sosac",
-    version: "0.2.6",
+    version: "0.2.5",
     name: "Sosac (local)",
     description: "Sosac -> StreamujTV (on-demand + cache)",
     resources: [
@@ -155,49 +138,12 @@ async function fetchCinemetaMeta(type, imdbId, { fetch: fetchImpl } = {}) {
 
 function parseStremioId(type, id) {
   // movie: tt123
-  // series episode casto: tt123:1:3
+  // series episode často: tt123:1:3
   const parts = String(id).split(":");
   const imdbId = parts[0];
   const season = parts.length >= 2 ? Number(parts[1]) : null;
   const episode = parts.length >= 3 ? Number(parts[2]) : null;
   return { imdbId, season, episode, type };
-}
-
-function qualityRank(label) {
-  const q = String(label ?? "").trim().toLowerCase();
-  if (q === "original") return 0;
-  if (q === "hd") return 1;
-  if (q === "sd") return 2;
-  return 10;
-}
-
-function stripUrlNoise(url) {
-  return String(url ?? "").replace(/(\?|#).*/, "");
-}
-
-function orderAndDedupResolved(resolved) {
-  const sorted = [...(Array.isArray(resolved) ? resolved : [])].sort(
-    (a, b) => qualityRank(a?.quality) - qualityRank(b?.quality),
-  );
-  const out = [];
-  const seen = new Set();
-  for (const s of sorted) {
-    const key = stripUrlNoise(s?.url);
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
-    out.push(s);
-  }
-  return out;
-}
-
-function pickFilenameFromUrl(url) {
-  try {
-    const p = new URL(url).pathname;
-    const name = p.split("/").pop();
-    return name || undefined;
-  } catch (_) {
-    return undefined;
-  }
 }
 
 // --- Stream endpoint ---
@@ -274,44 +220,27 @@ app.get("/stream/:type/:id.json", async (req, res) => {
       cache.setPositive(cacheKey, mapping);
     }
 
-    const streamCacheKey = `streams:${parsed.imdbId}:${mapping.quality ?? "auto"}`;
-    const streamCached = cache.get(streamCacheKey);
-    let resolved = null;
-
-    if (streamCached?.kind === "streams" && Array.isArray(streamCached.streams)) {
-      resolved = streamCached.streams;
-      log.debug?.(`Stream cache hit: ${streamCacheKey}`);
-    } else {
-      // Resolve streamuj -> final stream(s)
-      resolved = await streamujResolve({
-        streamujId: mapping.streamujId,
-        log,
-        preferredQuality: mapping.quality,
-        fetch: fetchWithTimeout,
-        user: STREAMUJ_USER,
-        pass: STREAMUJ_PASS,
-        location: STREAMUJ_LOCATION,
-        uid: STREAMUJ_UID,
-      });
-      cache.setStreams(streamCacheKey, resolved);
-      log.debug?.(
-        `Stream cache set: ${streamCacheKey} (${resolved?.length ?? 0} items)`,
-      );
-    }
-
-    const normalizedResolved = orderAndDedupResolved(resolved);
+    // Resolve streamuj -> final stream(s)
+    const resolved = await streamujResolve({
+      streamujId: mapping.streamujId,
+      log,
+      preferredQuality: mapping.quality,
+      fetch: fetchWithTimeout,
+      user: STREAMUJ_USER,
+      pass: STREAMUJ_PASS,
+      location: STREAMUJ_LOCATION,
+      uid: STREAMUJ_UID,
+    });
 
     // Apply premium params if configured
     const premiumCfg = {
       user: STREAMUJ_USER,
       pass: STREAMUJ_PASS,
       location: STREAMUJ_LOCATION,
+      uid: STREAMUJ_UID,
     };
-    const streams = normalizedResolved.map((s) => {
+    const streams = resolved.map((s) => {
       const finalUrl = addStreamujPremiumParams(s.url, premiumCfg);
-      const lowerUrl = finalUrl.toLowerCase();
-      const isDirectFile = /\.(mp4|flv)(?:$|[?#])/.test(lowerUrl);
-      const filename = pickFilenameFromUrl(finalUrl);
       const proxyRequestHeaders = s.headers
         ? Object.fromEntries(
             Object.entries({
@@ -327,11 +256,8 @@ app.get("/stream/:type/:id.json", async (req, res) => {
         title: mapping.title ? `${mapping.title}` : "Sosac",
         url: finalUrl,
         behaviorHints: {
-          notWebReady: isDirectFile,
-          ...(filename ? { filename } : {}),
-          ...(parsed.type === "series"
-            ? { bingeGroup: `sosac:${parsed.imdbId}` }
-            : {}),
+          // casto pomuze pro m3u8
+          notWebReady: false,
           ...(Object.keys(proxyRequestHeaders).length
             ? { proxyHeaders: { request: proxyRequestHeaders } }
             : {}),

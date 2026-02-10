@@ -269,9 +269,16 @@ export async function streamujResolve({ streamujId, log, preferredQuality, fetch
   // Fallback: token via JSON API (video-link)
   async function fetchAuthorizeForQuality(q) {
     if (!user || !pass || !uid) return null;
+    const baseUrl = `${pageUrl}?streamuj=${encodeURIComponent(q)}`;
+    const baseWithPremium = addStreamujPremiumParams(baseUrl, {
+      user,
+      pass,
+      location,
+      uid,
+    });
     const apiUrl =
       `https://www.streamuj.tv/json_api.php?action=video-link` +
-      `&URL=${encodeURIComponent(pageUrl + "?streamuj=" + q)}` +
+      `&URL=${encodeURIComponent(baseWithPremium)}` +
       `&UID=${encodeURIComponent(String(uid))}`;
 
     console.log("[stream] step 2b fetch video-link api");

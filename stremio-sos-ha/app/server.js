@@ -59,6 +59,17 @@ function redactUrl(url) {
   try {
     const u = new URL(url);
     if (u.searchParams.has("pass")) u.searchParams.set("pass", "<redacted>");
+    if (u.searchParams.has("URL")) {
+      try {
+        const nested = new URL(u.searchParams.get("URL"));
+        if (nested.searchParams.has("pass")) {
+          nested.searchParams.set("pass", "<redacted>");
+        }
+        u.searchParams.set("URL", nested.toString());
+      } catch (_) {
+        // ignore nested URL parse errors
+      }
+    }
     return u.toString();
   } catch (_) {
     return String(url);
@@ -89,14 +100,14 @@ async function fetchWithTimeout(url, options = {}, ms = 12000) {
 
 
 app.get("/", (_req, res) =>
-  res.json({ ok: true, name: "sosac-stremio-addon", version: "0.2.3" }),
+  res.json({ ok: true, name: "sosac-stremio-addon", version: "0.2.4" }),
 );
 
 // --- Stremio manifest ---
 app.get("/manifest.json", (_req, res) => {
   res.json({
     id: "org.local.sosac",
-    version: "0.2.3",
+    version: "0.2.4",
     name: "Sosac (local)",
     description: "Sosac -> StreamujTV (on-demand + cache)",
     resources: [

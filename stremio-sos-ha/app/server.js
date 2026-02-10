@@ -4,7 +4,6 @@ import { Cache } from "./cache.js";
 import {
   sosacFindByImdb,
   streamujResolve,
-  addStreamujPremiumParams,
 } from "./sosac.js";
 
 const PORT = Number(process.env.PORT ?? 7123);
@@ -100,14 +99,14 @@ async function fetchWithTimeout(url, options = {}, ms = 12000) {
 
 
 app.get("/", (_req, res) =>
-  res.json({ ok: true, name: "sosac-stremio-addon", version: "0.2.5" }),
+  res.json({ ok: true, name: "sosac-stremio-addon", version: "0.2.6" }),
 );
 
 // --- Stremio manifest ---
 app.get("/manifest.json", (_req, res) => {
   res.json({
     id: "org.local.sosac",
-    version: "0.2.5",
+    version: "0.2.6",
     name: "Sosac (local)",
     description: "Sosac -> StreamujTV (on-demand + cache)",
     resources: [
@@ -232,15 +231,8 @@ app.get("/stream/:type/:id.json", async (req, res) => {
       uid: STREAMUJ_UID,
     });
 
-    // Apply premium params if configured
-    const premiumCfg = {
-      user: STREAMUJ_USER,
-      pass: STREAMUJ_PASS,
-      location: STREAMUJ_LOCATION,
-      uid: STREAMUJ_UID,
-    };
     const streams = resolved.map((s) => {
-      const finalUrl = addStreamujPremiumParams(s.url, premiumCfg);
+      const finalUrl = s.url;
       const proxyRequestHeaders = s.headers
         ? Object.fromEntries(
             Object.entries({

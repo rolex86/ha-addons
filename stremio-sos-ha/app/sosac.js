@@ -63,13 +63,12 @@ function md5hex(s) {
  * pass = user + ":::" + md5(md5(pass))
  * + location (1/2)
  */
-export function addStreamujPremiumParams(url, { user, pass, location, uid }) {
+export function addStreamujPremiumParams(url, { user, pass, location }) {
   if (!user || !pass) return url;
   const hashed = md5hex(md5hex(pass));
   const u = new URL(url);
   u.searchParams.set("pass", `${user}:::${hashed}`);
   if (location) u.searchParams.set("location", String(location));
-  if (uid) u.searchParams.set("UID", String(uid));
   return u.toString();
 }
 
@@ -330,7 +329,6 @@ export async function streamujResolve({ streamujId, log, preferredQuality, fetch
       user,
       pass,
       location,
-      uid,
     });
     const apiUrl =
       `https://www.streamuj.tv/json_api.php?action=video-link` +
@@ -451,7 +449,7 @@ export async function streamujResolve({ streamujId, log, preferredQuality, fetch
       continue;
     }
 
-    const key = String(direct).replace(/(\?|#).*/, "");
+    const key = String(direct);
     if (seen.has(key)) continue;
     seen.add(key);
 

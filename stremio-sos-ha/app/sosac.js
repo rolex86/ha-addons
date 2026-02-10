@@ -15,6 +15,8 @@ const SOSAC_SERIES_INDEX_PATHS = [
 const SOSAC_SEARCH = "/jsonsearchapi.php?q=";
 const STREAMUJ_PAGE = "https://www.streamuj.tv/video/";
 const SOSAC_TVPH = "https://tv.sosac.ph";
+const SOSAC_TV = "https://tv.sosac.tv";
+const SOSAC_LANG = "cs";
 const streamujJar = new CookieJar();
 const seriesIndexCache = { ts: 0, data: null };
 const SERIES_INDEX_TTL_MS = 6 * 60 * 60 * 1000;
@@ -270,6 +272,80 @@ function sxe(season, episode) {
   const s = String(season).padStart(2, "0");
   const e = String(episode).padStart(2, "0");
   return `s${s}e${e}`;
+}
+
+async function tvFetchHtml(url, { fetch: fetchImpl, log } = {}) {
+  const doFetch = fetchImpl ?? fetch;
+  log?.debug?.(`[tv] fetch: ${url}`);
+  const r = await doFetch(url, {
+    redirect: "follow",
+    headers: {
+      "User-Agent":
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/121.0 Safari/537.36",
+      Accept:
+        "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "Accept-Language": "cs-CZ,cs;q=0.9,en;q=0.8",
+    },
+  });
+  log?.debug?.(`[tv] fetch done: ${url} status=${r.status}`);
+  if (!r.ok) return null;
+  return await r.text();
+}
+
+async function tvFindDetailSlugByTitle(title, { fetch: fetchImpl, log } = {}) {
+  const q = encodeURIComponent(title);
+  const url = `${SOSAC_TV}/${SOSAC_LANG}/search?q=${q}`;
+  const html = await tvFetchHtml(url, { fetch: fetchImpl, log });
+  if (!html) return null;
+
+  const m = html.match(new RegExp(`/${SOSAC_LANG}/detail/([a-z0-9-]+)`, "i"));
+  if (m) return m[1];
+
+  return null;
+}
+
+function pad2(n) {
+  return String(Number(n)).padStart(2, "0");
+}
+
+function tvEpisodePlayerUrl(slug, season, episode) {
+  return `${SOSAC_TV}/${SOSAC_LANG}/player/${slug}-s${Number(season)}-e${pad2(
+    episode,
+  )}`;
+}
+
+function extractStreamujCdnMp4s(html) {
+  const re =
+    /https?:\/\/[a-z0-9.-]*streamuj\.tv\/[^\s"'<>]+\.mp4\?[^\s"'<>]+/gi;
+  const out = [];
+  let m;
+  while ((m = re.exec(html)) !== null) out.push(m[0]);
+  return Array.from(new Set(out));
+}
+
+export async function sosacTvResolveEpisodeDirect({
+  seriesTitle,
+  season,
+  episode,
+  fetch: fetchImpl,
+  log,
+} = {}) {
+  if (!seriesTitle || !season || !episode) return null;
+
+  const slug = await tvFindDetailSlugByTitle(seriesTitle, {
+    fetch: fetchImpl,
+    log,
+  });
+  if (!slug) return null;
+
+  const playerUrl = tvEpisodePlayerUrl(slug, season, episode);
+  const html = await tvFetchHtml(playerUrl, { fetch: fetchImpl, log });
+  if (!html) return null;
+
+  const mp4s = extractStreamujCdnMp4s(html);
+  if (!mp4s.length) return null;
+
+  return { slug, playerUrl, mp4s };
 }
 
 async function tvphFindSeriesUrlByTitle(title, { fetch: fetchImpl } = {}) {

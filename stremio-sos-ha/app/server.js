@@ -3,7 +3,7 @@ import cors from "cors";
 import { Cache } from "./cache.js";
 import {
   sosacFindByImdb,
-  sosacFindEpisodeStreamujIdViaTvPh,
+  sosacTvResolveEpisodeDirect,
   streamujResolve,
 } from "./sosac.js";
 
@@ -100,14 +100,14 @@ async function fetchWithTimeout(url, options = {}, ms = 12000) {
 
 
 app.get("/", (_req, res) =>
-  res.json({ ok: true, name: "sosac-stremio-addon", version: "0.2.12" }),
+  res.json({ ok: true, name: "sosac-stremio-addon", version: "0.2.13" }),
 );
 
 // --- Stremio manifest ---
 app.get("/manifest.json", (_req, res) => {
   res.json({
     id: "org.local.sosac",
-    version: "0.2.12",
+    version: "0.2.13",
     name: "Sosac (local)",
     description: "Sosac -> StreamujTV (on-demand + cache)",
     resources: [
@@ -189,52 +189,46 @@ app.get("/stream/:type/:id.json", async (req, res) => {
       });
       const seriesTitle = seriesMeta?.name ?? null;
 
-      const epStreamujId = await sosacFindEpisodeStreamujIdViaTvPh({
-        title: seriesTitle,
+      const resolved = await sosacTvResolveEpisodeDirect({
+        seriesTitle,
         season: parsed.season,
         episode: parsed.episode,
         fetch: fetchWithTimeout,
         log,
       });
-      if (!epStreamujId) {
+
+      if (!resolved || !resolved.mp4s?.length) {
         console.log(
           `[stream] done ${type}/${id} streams=0 in ${Date.now() - t0}ms`,
         );
         return res.json({ streams: [] });
       }
 
-      const resolved = await streamujResolve({
-        streamujId: epStreamujId,
-        log,
-        fetch: fetchWithTimeout,
-        user: STREAMUJ_USER,
-        pass: STREAMUJ_PASS,
-        location: STREAMUJ_LOCATION,
-        uid: STREAMUJ_UID,
-      });
+      const streams = resolved.mp4s.map((u) => {
+        const lower = String(u).toLowerCase();
+        const quality = lower.includes("_hd.mp4")
+          ? "HD"
+          : lower.includes("_sd.mp4")
+            ? "SD"
+            : lower.includes("_original.mp4")
+              ? "Original"
+              : "Stream";
 
-      const streams = resolved.map((s) => {
-        const finalUrl = s.url;
-        const proxyRequestHeaders = s.headers
-          ? Object.fromEntries(
-              Object.entries({
-                Referer: s.headers.Referer,
-                "User-Agent": s.headers["User-Agent"],
-                Cookie: s.headers.Cookie,
-              }).filter(([, v]) => Boolean(v)),
-            )
-          : {};
+        const headers = {
+          Referer: resolved.playerUrl,
+          "User-Agent": "Mozilla/5.0",
+        };
 
         return {
-          name: `Sosac - ${s.quality ?? "Auto"}`,
-          title: seriesTitle ?? "Sosac",
-          url: finalUrl,
+          name: `Sosac TV - ${quality}`,
+          title: seriesTitle
+            ? `${seriesTitle} • ${quality}`
+            : `Sosac TV • ${quality}`,
+          url: u,
+          headers,
           behaviorHints: {
-            ...(Object.keys(proxyRequestHeaders).length
-              ? { proxyHeaders: { request: proxyRequestHeaders } }
-              : {}),
+            proxyHeaders: { request: headers },
           },
-          ...(s.headers ? { headers: s.headers } : {}),
         };
       });
 

@@ -3,7 +3,8 @@ import cors from "cors";
 import { Cache } from "./cache.js";
 import {
   sosacFindByImdb,
-  sosacFindByTitle,
+  sosacFindShowIdByImdbOrTitle,
+  sosacExtractEpisodeStreamujId,
   streamujResolve,
 } from "./sosac.js";
 
@@ -100,14 +101,14 @@ async function fetchWithTimeout(url, options = {}, ms = 12000) {
 
 
 app.get("/", (_req, res) =>
-  res.json({ ok: true, name: "sosac-stremio-addon", version: "0.2.8" }),
+  res.json({ ok: true, name: "sosac-stremio-addon", version: "0.2.9" }),
 );
 
 // --- Stremio manifest ---
 app.get("/manifest.json", (_req, res) => {
   res.json({
     id: "org.local.sosac",
-    version: "0.2.8",
+    version: "0.2.9",
     name: "Sosac (local)",
     description: "Sosac -> StreamujTV (on-demand + cache)",
     resources: [

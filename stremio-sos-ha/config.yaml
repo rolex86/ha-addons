@@ -1,7 +1,7 @@
 name: "Sosac Stremio Add-on"
 slug: "sosac_stremio"
 description: "Local Stremio add-on: Sosac -> StreamujTV resolver (on-demand + /data cache)"
-version: "0.2.8"
+version: "0.2.9"
 url: "https://example.local/"
 arch:
   - amd64

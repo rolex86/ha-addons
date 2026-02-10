@@ -14,6 +14,7 @@ const SOSAC_SERIES_INDEX_PATHS = [
 ];
 const SOSAC_SEARCH = "/jsonsearchapi.php?q=";
 const STREAMUJ_PAGE = "https://www.streamuj.tv/video/";
+const SOSAC_TVPH = "https://tv.sosac.ph";
 const streamujJar = new CookieJar();
 const seriesIndexCache = { ts: 0, data: null };
 const SERIES_INDEX_TTL_MS = 6 * 60 * 60 * 1000;
@@ -254,6 +255,128 @@ export function sosacExtractEpisodeStreamujId(episodesJson, season, episode) {
     }
   }
   return null;
+}
+
+function normTitle(s) {
+  return String(s ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function sxe(season, episode) {
+  const s = String(season).padStart(2, "0");
+  const e = String(episode).padStart(2, "0");
+  return `s${s}e${e}`;
+}
+
+async function tvphFindSeriesUrlByTitle(title, { fetch: fetchImpl } = {}) {
+  const doFetch = fetchImpl ?? fetch;
+  const q = encodeURIComponent(title);
+  const url = `${SOSAC_TVPH}/?s=${q}`;
+
+  const r = await doFetch(url, { redirect: "follow" });
+  if (!r.ok) return null;
+  const html = await r.text();
+  const $ = cheerio.load(html);
+
+  const want = normTitle(title);
+  const links = [];
+  $("a").each((_, a) => {
+    const href = $(a).attr("href");
+    const text = $(a).text();
+    if (!href || !text) return;
+    const nt = normTitle(text);
+    if (nt && (nt === want || nt.includes(want) || want.includes(nt))) {
+      links.push(href);
+    }
+  });
+
+  const pick =
+    links.find((h) => /serial|serie|show|tv/i.test(h)) ?? links[0] ?? null;
+
+  return pick;
+}
+
+async function tvphFindEpisodeUrl(
+  seriesUrl,
+  season,
+  episode,
+  { fetch: fetchImpl } = {},
+) {
+  const doFetch = fetchImpl ?? fetch;
+  const r = await doFetch(seriesUrl, { redirect: "follow" });
+  if (!r.ok) return null;
+  const html = await r.text();
+  const $ = cheerio.load(html);
+
+  const needle1 = sxe(season, episode);
+  const needle2 = `${season}x${String(episode).padStart(2, "0")}`;
+
+  let best = null;
+  $("a").each((_, a) => {
+    const href = $(a).attr("href");
+    const text = ($(a).text() || "").toLowerCase();
+    const h = (href || "").toLowerCase();
+    if (!href) return;
+
+    if (
+      text.includes(needle1) ||
+      h.includes(needle1) ||
+      text.includes(needle2) ||
+      h.includes(needle2)
+    ) {
+      best = href;
+      return false;
+    }
+  });
+
+  return best;
+}
+
+async function tvphExtractStreamujId(episodeUrl, { fetch: fetchImpl } = {}) {
+  const doFetch = fetchImpl ?? fetch;
+  const r = await doFetch(episodeUrl, { redirect: "follow" });
+  if (!r.ok) return null;
+  const html = await r.text();
+  const $ = cheerio.load(html);
+
+  const ifr = $("iframe").first().attr("src") || "";
+  const m1 = String(ifr).match(/streamuj\.tv\/video\/([a-z0-9]+)/i);
+  if (m1) return m1[1];
+
+  const m2 = html.match(
+    /https?:\/\/(?:www\.)?streamuj\.tv\/video\/([a-z0-9]+)/i,
+  );
+  if (m2) return m2[1];
+
+  return null;
+}
+
+export async function sosacFindEpisodeStreamujIdViaTvPh({
+  title,
+  season,
+  episode,
+  fetch: fetchImpl,
+  log,
+} = {}) {
+  if (!title || !season || !episode) return null;
+
+  const seriesUrl = await tvphFindSeriesUrlByTitle(title, { fetch: fetchImpl });
+  log?.debug?.(`[series] tvph seriesUrl=${seriesUrl || "-"}`);
+  if (!seriesUrl) return null;
+
+  const epUrl = await tvphFindEpisodeUrl(seriesUrl, season, episode, {
+    fetch: fetchImpl,
+  });
+  log?.debug?.(`[series] tvph episodeUrl=${epUrl || "-"}`);
+  if (!epUrl) return null;
+
+  const streamujId = await tvphExtractStreamujId(epUrl, { fetch: fetchImpl });
+  log?.debug?.(`[series] tvph streamujId=${streamujId || "-"}`);
+  return streamujId;
 }
 
 function getSetCookies(res) {

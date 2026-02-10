@@ -3,8 +3,7 @@ import cors from "cors";
 import { Cache } from "./cache.js";
 import {
   sosacFindByImdb,
-  sosacFindShowIdByImdbOrTitle,
-  sosacExtractEpisodeStreamujId,
+  sosacFindEpisodeStreamujIdViaTvPh,
   streamujResolve,
 } from "./sosac.js";
 
@@ -101,14 +100,14 @@ async function fetchWithTimeout(url, options = {}, ms = 12000) {
 
 
 app.get("/", (_req, res) =>
-  res.json({ ok: true, name: "sosac-stremio-addon", version: "0.2.11" }),
+  res.json({ ok: true, name: "sosac-stremio-addon", version: "0.2.12" }),
 );
 
 // --- Stremio manifest ---
 app.get("/manifest.json", (_req, res) => {
   res.json({
     id: "org.local.sosac",
-    version: "0.2.11",
+    version: "0.2.12",
     name: "Sosac (local)",
     description: "Sosac -> StreamujTV (on-demand + cache)",
     resources: [
@@ -190,24 +189,13 @@ app.get("/stream/:type/:id.json", async (req, res) => {
       });
       const seriesTitle = seriesMeta?.name ?? null;
 
-      const foundShow = await sosacFindShowIdByImdbOrTitle({
-        seriesImdbTt: parsed.imdbId,
+      const epStreamujId = await sosacFindEpisodeStreamujIdViaTvPh({
         title: seriesTitle,
+        season: parsed.season,
+        episode: parsed.episode,
         fetch: fetchWithTimeout,
         log,
       });
-      if (!foundShow) {
-        console.log(
-          `[stream] done ${type}/${id} streams=0 in ${Date.now() - t0}ms`,
-        );
-        return res.json({ streams: [] });
-      }
-
-      const epStreamujId = sosacExtractEpisodeStreamujId(
-        foundShow.episodesJson,
-        parsed.season,
-        parsed.episode,
-      );
       if (!epStreamujId) {
         console.log(
           `[stream] done ${type}/${id} streams=0 in ${Date.now() - t0}ms`,

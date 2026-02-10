@@ -1,8 +1,10 @@
 import crypto from "crypto";
 import * as cheerio from "cheerio";
+import { CookieJar } from "tough-cookie";
 
 const SOSAC_SEARCH = "http://tv.sosac.to/jsonsearchapi.php?q=";
 const STREAMUJ_PAGE = "https://www.streamuj.tv/video/";
+const streamujJar = new CookieJar();
 
 // simple helper
 async function getJson(url, fetchImpl) {
@@ -10,6 +12,46 @@ async function getJson(url, fetchImpl) {
   const res = await doFetch(url, { redirect: "follow" });
   if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
   return await res.json();
+}
+
+function getSetCookies(res) {
+  if (typeof res?.headers?.getSetCookie === "function") {
+    return res.headers.getSetCookie();
+  }
+  const one = res?.headers?.get("set-cookie");
+  return one ? [one] : [];
+}
+
+async function fetchWithJar(
+  url,
+  { fetchImpl, jar = streamujJar, ...options } = {},
+) {
+  const doFetch = fetchImpl ?? fetch;
+  const headers = { ...(options.headers ?? {}) };
+
+  if (jar) {
+    const jarCookie = await jar.getCookieString(url);
+    if (jarCookie) {
+      headers.Cookie = headers.Cookie
+        ? `${headers.Cookie}; ${jarCookie}`
+        : jarCookie;
+    }
+  }
+
+  const res = await doFetch(url, { ...options, headers });
+
+  if (jar) {
+    const responseUrl = res.url || url;
+    for (const sc of getSetCookies(res)) {
+      try {
+        await jar.setCookie(sc, responseUrl);
+      } catch (_) {
+        // ignore invalid cookie lines from upstream
+      }
+    }
+  }
+
+  return res;
 }
 
 function md5hex(s) {
@@ -215,18 +257,32 @@ export async function streamujResolve({ streamujId, log, preferredQuality, fetch
   const pageUrl = `${STREAMUJ_PAGE}${encodeURIComponent(streamujId)}`;
   const doFetch = fetchImpl ?? fetch;
   const streamCookie = streamujCookieHeader({ user, pass, uid, location });
+  const doStreamujFetch = (url, options = {}) =>
+    fetchWithJar(url, {
+      fetchImpl: doFetch,
+      jar: streamujJar,
+      ...options,
+    });
 
   console.log(`[stream] step 1 fetch video page ${pageUrl}`);
 
   // 1) fetch HTML page
-  const pageRes = await doFetch(pageUrl, {
+  const pageRes = await doStreamujFetch(pageUrl, {
     redirect: "follow",
-    headers: uaHeaders(),
+    headers: {
+      ...uaHeaders(),
+      ...(streamCookie ? { Cookie: streamCookie } : {}),
+    },
   });
   if (!pageRes.ok) throw new Error(`Streamuj page HTTP ${pageRes.status}`);
   const enc = pageRes.headers.get("content-encoding");
   const len = pageRes.headers.get("content-length");
   console.log(`[stream] headers: enc=${enc || "-"} len=${len || "-"}`);
+  try {
+    const jarCookies = await streamujJar.getCookies("https://www.streamuj.tv/");
+    const names = jarCookies.map((c) => c.key).join(",");
+    console.log(`[stream] jar cookies: ${names || "-"}`);
+  } catch (_) {}
 
   console.log("[stream] step 1b read body start");
   const tBody = Date.now();
@@ -284,13 +340,13 @@ export async function streamujResolve({ streamujId, log, preferredQuality, fetch
     console.log("[stream] step 2b fetch video-link api");
     const cookie = streamujCookieHeader({ user, pass, uid, location });
 
-    const apiRes = await doFetch(apiUrl, {
+    const apiRes = await doStreamujFetch(apiUrl, {
       headers: {
         ...uaHeaders(),
         Accept: "*/*",
         "X-Requested-With": "XMLHttpRequest",
         Referer: pageUrl,
-        Cookie: cookie,
+        ...(cookie ? { Cookie: cookie } : {}),
         "Accept-Encoding": "identity",
       },
       redirect: "follow",
@@ -372,7 +428,7 @@ export async function streamujResolve({ streamujId, log, preferredQuality, fetch
     console.log(`[stream] resolve start quality=${it.q}`);
     console.log(`[stream] authorized URL from api: ${authorizedUrl}`);
 
-    const r = await doFetch(authorizedUrl, {
+    const r = await doStreamujFetch(authorizedUrl, {
       redirect: "follow",
       headers: {
         ...uaHeaders(),

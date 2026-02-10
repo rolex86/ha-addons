@@ -249,6 +249,63 @@ export async function sosacFindByImdb({ imdbId, title, year, log, fetch: fetchIm
 }
 
 /**
+ * Fallback: find Sosac item by title (and optionally year).
+ * Returns { imdbId, title, year, streamujId, raw } or null
+ */
+export async function sosacFindByTitle({ title, year, log, fetch: fetchImpl }) {
+  if (!title) throw new Error("Missing title for Sosac search");
+
+  const q = encodeURIComponent(title);
+  const url = `${SOSAC_SEARCH}${q}`;
+  const results = await getJson(url, fetchImpl);
+  const items = Array.isArray(results) ? results : (results?.items ?? []);
+
+  const norm = (s) =>
+    String(s ?? "")
+      .trim()
+      .toLowerCase();
+  const pickTitle = (it) =>
+    typeof it?.n === "string" ? it.n : (it?.n?.cs ?? it?.n?.en ?? "");
+
+  let hit =
+    items.find(
+      (it) => norm(pickTitle(it)) === norm(title) && it?.l,
+    ) ?? null;
+
+  if (!hit && year) {
+    hit =
+      items.find(
+        (it) =>
+          String(it?.y ?? "") === String(year) && it?.l,
+      ) ?? null;
+  }
+
+  if (!hit) {
+    hit = items.find((it) => it?.l) ?? null;
+  }
+
+  if (!hit) {
+    log?.debug?.(`Sosac: no match for title="${title}"`);
+    return null;
+  }
+
+  const streamujId = hit?.l ? String(hit.l) : null;
+  if (!streamujId) return null;
+
+  const displayTitle =
+    typeof hit?.n === "string" ? hit.n : (hit?.n?.cs ?? hit?.n?.en ?? title);
+
+  return {
+    imdbId: null,
+    title: displayTitle,
+    year: hit?.y ?? year,
+    streamujId,
+    quality: normalizeQuality(hit?.q),
+    raw: hit,
+  };
+}
+
+/**
  * Resolve Streamuj page -> final stream URL(s).
  * Returns [{ url, quality, headers? }]
  */

@@ -3,6 +3,7 @@ import cors from "cors";
 import { Cache } from "./cache.js";
 import {
   sosacFindByImdb,
+  sosacFindByTitle,
   streamujResolve,
 } from "./sosac.js";
 
@@ -99,14 +100,14 @@ async function fetchWithTimeout(url, options = {}, ms = 12000) {
 
 
 app.get("/", (_req, res) =>
-  res.json({ ok: true, name: "sosac-stremio-addon", version: "0.2.6" }),
+  res.json({ ok: true, name: "sosac-stremio-addon", version: "0.2.7" }),
 );
 
 // --- Stremio manifest ---
 app.get("/manifest.json", (_req, res) => {
   res.json({
     id: "org.local.sosac",
-    version: "0.2.6",
+    version: "0.2.7",
     name: "Sosac (local)",
     description: "Sosac -> StreamujTV (on-demand + cache)",
     resources: [
@@ -134,6 +135,23 @@ async function fetchCinemetaMeta(type, imdbId, { fetch: fetchImpl } = {}) {
   const j = await res.json();
   return j?.meta ?? null;
 }
+
+function toTt(id) {
+  if (!id) return null;
+  const s = String(id).trim();
+  return s.startsWith("tt") ? s : `tt${s}`;
+}
+
+function extractEpisodeImdb(meta) {
+  return (
+    meta?.imdb_id ||
+    meta?.imdbId ||
+    meta?.imdb ||
+    meta?.ids?.imdb ||
+    null
+  );
+}
+
 
 function parseStremioId(type, id) {
   // movie: tt123
@@ -165,15 +183,57 @@ app.get("/stream/:type/:id.json", async (req, res) => {
   try {
     const parsed = parseStremioId(type, id);
 
-    // MVP: movies OK, series zatim vrati prazdno (resolver epizod doplnime)
-    if (parsed.type === "series" && (parsed.season || parsed.episode)) {
+    let lookupType = "movie";
+    let lookupImdb = parsed.imdbId;
+    let titleForSearch = null;
+    let yearForSearch = null;
+
+    // Episode: ttSERIES:S:E
+    if (parsed.type === "series" && parsed.season && parsed.episode) {
+      lookupType = "series";
+      const epId = `${parsed.imdbId}:${parsed.season}:${parsed.episode}`;
+
+      const epMeta = await fetchCinemetaMeta("series", epId, {
+        fetch: fetchWithTimeout,
+      });
+      if (!epMeta) {
+        cache.setNegative(`imdb:${epId}`, "cinemeta_episode_not_found");
+        console.log(
+          `[stream] done ${type}/${id} streams=0 in ${Date.now() - t0}ms`,
+        );
+        return res.json({ streams: [] });
+      }
+
+      const epImdbRaw = extractEpisodeImdb(epMeta);
+      const epImdb = toTt(epImdbRaw);
+
+      if (epImdb) {
+        lookupImdb = epImdb;
+        titleForSearch = epMeta.name ?? epMeta.title ?? null;
+        yearForSearch = epMeta.year ?? null;
+      } else {
+        lookupImdb = null;
+        titleForSearch = epMeta.name ?? epMeta.title ?? null;
+        yearForSearch = epMeta.year ?? null;
+      }
+    } else if (parsed.type === "series") {
+      // whole series without S/E
       console.log(
         `[stream] done ${type}/${id} streams=0 in ${Date.now() - t0}ms`,
       );
       return res.json({ streams: [] });
+    } else {
+      const meta = await fetchCinemetaMeta("movie", parsed.imdbId, {
+        fetch: fetchWithTimeout,
+      });
+      if (!meta) throw new Error("Cinemeta meta not found");
+      titleForSearch = meta.name;
+      yearForSearch = meta.year;
     }
 
-    const cacheKey = `imdb:${parsed.imdbId}`;
+    const cacheKey = lookupImdb
+      ? `imdb:${lookupImdb}`
+      : `episode:${parsed.imdbId}:${parsed.season}:${parsed.episode}`;
     const cached = cache.get(cacheKey);
 
     if (cached?.kind === "negative") {
@@ -186,21 +246,24 @@ app.get("/stream/:type/:id.json", async (req, res) => {
     let mapping = cached?.kind === "positive" ? cached : null;
 
     if (!mapping) {
-      const meta = await fetchCinemetaMeta("movie", parsed.imdbId, {
-        fetch: fetchWithTimeout,
-      });
-      if (!meta) throw new Error("Cinemeta meta not found");
+      let found = null;
 
-      const title = meta.name;
-      const year = meta.year;
-
-      const found = await sosacFindByImdb({
-        imdbId: parsed.imdbId,
-        title,
-        year,
-        log,
-        fetch: fetchWithTimeout,
-      });
+      if (lookupImdb) {
+        found = await sosacFindByImdb({
+          imdbId: lookupImdb,
+          title: titleForSearch,
+          year: yearForSearch,
+          log,
+          fetch: fetchWithTimeout,
+        });
+      } else if (titleForSearch) {
+        found = await sosacFindByTitle({
+          title: titleForSearch,
+          year: yearForSearch,
+          log,
+          fetch: fetchWithTimeout,
+        });
+      }
 
       if (!found) {
         cache.setNegative(cacheKey, "sosac_not_found");

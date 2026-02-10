@@ -2,7 +2,9 @@ import crypto from "crypto";
 import * as cheerio from "cheerio";
 import { CookieJar } from "tough-cookie";
 
-const SOSAC_SEARCH = "http://tv.sosac.to/jsonsearchapi.php?q=";
+const SOSAC_BASE = "http://tv.sosac.to";
+const SOSAC_SERIES = "/vystupy5981/serialy/";
+const SOSAC_SEARCH = "/jsonsearchapi.php?q=";
 const STREAMUJ_PAGE = "https://www.streamuj.tv/video/";
 const streamujJar = new CookieJar();
 
@@ -12,6 +14,83 @@ async function getJson(url, fetchImpl) {
   const res = await doFetch(url, { redirect: "follow" });
   if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
   return await res.json();
+}
+
+function imdbDigits(tt) {
+  return String(tt || "").replace(/^tt/, "");
+}
+
+function isEpisodesJson(x) {
+  return Array.isArray(x) && x.length > 0 && typeof x[0] === "object";
+}
+
+async function sosacFetchJson(url, { fetch: fetchImpl, log } = {}) {
+  const doFetch = fetchImpl ?? fetch;
+  const r = await doFetch(url);
+  if (!r.ok) throw new Error(`Sosac HTTP ${r.status}`);
+  return await r.json();
+}
+
+async function tryLoadEpisodesByShowId(showId, { fetch: fetchImpl, log } = {}) {
+  const url = showId.startsWith("http")
+    ? showId
+    : `${SOSAC_BASE}${SOSAC_SERIES}${showId}`;
+
+  try {
+    const j = await sosacFetchJson(url, { fetch: fetchImpl, log });
+    return isEpisodesJson(j) ? j : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+export async function sosacFindShowIdByImdbOrTitle({
+  seriesImdbTt,
+  title,
+  fetch: fetchImpl,
+  log,
+}) {
+  const q1 = imdbDigits(seriesImdbTt);
+  const queries = [q1, title].filter(Boolean);
+
+  for (const q of queries) {
+    const url = `${SOSAC_BASE}${SOSAC_SEARCH}${encodeURIComponent(q)}`;
+    let results = [];
+    try {
+      results = await sosacFetchJson(url, { fetch: fetchImpl, log });
+    } catch (_) {
+      results = [];
+    }
+
+    const candidates = (results || []).filter(
+      (it) => String(it?.m || "") === q1,
+    );
+
+    const pool = candidates.length ? candidates : (results || []).slice(0, 10);
+
+    for (const it of pool) {
+      const showId = it?.l;
+      if (!showId) continue;
+
+      const eps = await tryLoadEpisodesByShowId(showId, { fetch: fetchImpl, log });
+      if (eps) return { showId, episodesJson: eps };
+    }
+  }
+
+  return null;
+}
+
+export function sosacExtractEpisodeStreamujId(episodesJson, season, episode) {
+  for (const seriesObj of episodesJson || []) {
+    for (const [seasonKey, epMap] of Object.entries(seriesObj || {})) {
+      if (Number(seasonKey) !== Number(season)) continue;
+      for (const [epKey, video] of Object.entries(epMap || {})) {
+        if (Number(epKey) !== Number(episode)) continue;
+        return video?.l || null;
+      }
+    }
+  }
+  return null;
 }
 
 function getSetCookies(res) {
@@ -196,7 +275,7 @@ export async function sosacFindByImdb({ imdbId, title, year, log, fetch: fetchIm
   if (!title) throw new Error("Missing title for Sosac search");
 
   const q = encodeURIComponent(title);
-  const url = `${SOSAC_SEARCH}${q}`;
+  const url = `${SOSAC_BASE}${SOSAC_SEARCH}${q}`;
   const results = await getJson(url, fetchImpl);
 
   // results can be various shapes; often array of items
@@ -256,7 +335,7 @@ export async function sosacFindByTitle({ title, year, log, fetch: fetchImpl }) {
   if (!title) throw new Error("Missing title for Sosac search");
 
   const q = encodeURIComponent(title);
-  const url = `${SOSAC_SEARCH}${q}`;
+  const url = `${SOSAC_BASE}${SOSAC_SEARCH}${q}`;
   const results = await getJson(url, fetchImpl);
   const items = Array.isArray(results) ? results : (results?.items ?? []);
 

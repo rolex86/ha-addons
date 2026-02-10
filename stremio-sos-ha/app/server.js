@@ -89,14 +89,14 @@ async function fetchWithTimeout(url, options = {}, ms = 12000) {
 
 
 app.get("/", (_req, res) =>
-  res.json({ ok: true, name: "sosac-stremio-addon", version: "0.2.2" }),
+  res.json({ ok: true, name: "sosac-stremio-addon", version: "0.2.3" }),
 );
 
 // --- Stremio manifest ---
 app.get("/manifest.json", (_req, res) => {
   res.json({
     id: "org.local.sosac",
-    version: "0.2.2",
+    version: "0.2.3",
     name: "Sosac (local)",
     description: "Sosac -> StreamujTV (on-demand + cache)",
     resources: [
@@ -226,9 +226,20 @@ app.get("/stream/:type/:id.json", async (req, res) => {
       user: STREAMUJ_USER,
       pass: STREAMUJ_PASS,
       location: STREAMUJ_LOCATION,
+      uid: STREAMUJ_UID,
     };
     const streams = resolved.map((s) => {
       const finalUrl = addStreamujPremiumParams(s.url, premiumCfg);
+      const proxyRequestHeaders = s.headers
+        ? Object.fromEntries(
+            Object.entries({
+              Referer: s.headers.Referer,
+              "User-Agent": s.headers["User-Agent"],
+              Cookie: s.headers.Cookie,
+            }).filter(([, v]) => Boolean(v)),
+          )
+        : {};
+
       return {
         name: `Sosac - ${s.quality ?? "Auto"}`,
         title: mapping.title ? `${mapping.title}` : "Sosac",
@@ -236,6 +247,9 @@ app.get("/stream/:type/:id.json", async (req, res) => {
         behaviorHints: {
           // casto pomuze pro m3u8
           notWebReady: false,
+          ...(Object.keys(proxyRequestHeaders).length
+            ? { proxyHeaders: { request: proxyRequestHeaders } }
+            : {}),
         },
         ...(s.headers ? { headers: s.headers } : {}),
       };

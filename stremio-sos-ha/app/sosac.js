@@ -21,12 +21,13 @@ function md5hex(s) {
  * pass = user + ":::" + md5(md5(pass))
  * + location (1/2)
  */
-export function addStreamujPremiumParams(url, { user, pass, location }) {
+export function addStreamujPremiumParams(url, { user, pass, location, uid }) {
   if (!user || !pass) return url;
   const hashed = md5hex(md5hex(pass));
   const u = new URL(url);
   u.searchParams.set("pass", `${user}:::${hashed}`);
   if (location) u.searchParams.set("location", String(location));
+  if (uid) u.searchParams.set("UID", String(uid));
   return u.toString();
 }
 
@@ -213,6 +214,7 @@ export async function sosacFindByImdb({ imdbId, title, year, log, fetch: fetchIm
 export async function streamujResolve({ streamujId, log, preferredQuality, fetch: fetchImpl, user, pass, location, uid }) {
   const pageUrl = `${STREAMUJ_PAGE}${encodeURIComponent(streamujId)}`;
   const doFetch = fetchImpl ?? fetch;
+  const streamCookie = streamujCookieHeader({ user, pass, uid, location });
 
   console.log(`[stream] step 1 fetch video page ${pageUrl}`);
 
@@ -365,7 +367,11 @@ export async function streamujResolve({ streamujId, log, preferredQuality, fetch
 
     const r = await doFetch(authorizedUrl, {
       redirect: "follow",
-      headers: { ...uaHeaders(), Referer: pageUrl },
+      headers: {
+        ...uaHeaders(),
+        Referer: pageUrl,
+        ...(streamCookie ? { Cookie: streamCookie } : {}),
+      },
     });
     const ab2 = await r.arrayBuffer();
     const html2 = Buffer.from(ab2).toString("utf-8");
@@ -392,6 +398,7 @@ export async function streamujResolve({ streamujId, log, preferredQuality, fetch
       headers: {
         Referer: pageUrl,
         "User-Agent": uaHeaders()["User-Agent"],
+        ...(streamCookie ? { Cookie: streamCookie } : {}),
       },
     });
   }

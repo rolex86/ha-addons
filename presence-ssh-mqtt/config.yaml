@@ -1,7 +1,7 @@
 name: "UniFi SSH Presence (MQTT)"
 slug: "unifi_ssh_presence"
 description: "Presence bez UniFi Controlleru: SSH polling UniFi AP a MQTT autodiscovery device_tracker"
-version: "0.3.2"
+version: "0.4.0"
 url: "https://github.com/rolex86/ha-addons/tree/master/presence-ssh-mqtt"
 arch:
   - aarch64
@@ -19,44 +19,84 @@ host_network: false
 ingress: false
 
 options:
+  # MQTT output for discovery/state/attributes.
   mqtt:
+    # MQTT broker host/IP reachable from this add-on.
     host: "core-mosquitto"
+    # MQTT broker TCP port.
     port: 1883
+    # Optional username; keep empty when broker allows anonymous access.
     username: ""
+    # Optional password for username above.
     password: ""
+    # Home Assistant MQTT discovery prefix.
     discovery_prefix: "homeassistant"
+    # Base topic for presence payloads:
+    # <base_topic>/<mac>/state and <base_topic>/<mac>/attributes
     base_topic: "unifi_presence"
+    # MQTT client ID used by this add-on.
     client_id: "unifi_ssh_presence"
 
+  # Poll interval in seconds.
   poll_interval_sec: 90
+  # Number of consecutive missed cycles before publishing not_home.
   away_after_misses: 3
+  # false = basic mode (legacy behavior)
+  # true = extended attributes + presence_confidence
+  # NOTE: extended_mode does NOT change home/not_home decision logic.
+  extended_mode: false
 
   ssh:
+    # SSH username on UniFi AP.
     username: "unifiap"
+    # SSH password on UniFi AP (required).
     password: ""
+    # SSH port on UniFi AP.
     port: 22
+    # Timeout for establishing SSH connection.
     connect_timeout_sec: 8
+    # Timeout for a single remote command execution.
     cmd_timeout_sec: 12
+    # true = strict host key checking, false = skip known_hosts validation.
     known_hosts_strict: false
 
-  # Seznam UniFi AP (SSH). Nech schválně prázdné – vyplníš v konfiguraci add-onu v HA.
+  # UniFi AP list (SSH targets).
+  # - name: logical AP name used in attributes as ap_name
+  # - host: AP IP or hostname
+  # - floor: optional explicit floor/zone label
+  #   If floor is missing, fallback is derived from name:
+  #   ap_1_patro -> 1_patro
+  #
+  # Example:
   # aps:
-  #   - name: "ap_1"
-  #     host: "192.168.1.10"
+  #   - name: "ap_1_patro"
+  #     host: "192.168.0.103"
+  #     floor: "1np"
+  #   - name: "ap_2_patro"
+  #     host: "192.168.0.106"
+  #     floor: "2np"
   aps: []
 
-  # Learn mode: sbírá "neznámé" (ne-whitelist) klienty do /data/seen_devices.json
-  # a do logu zapisuje jen při změně (nový MAC / poprvé IPv4).
+  # Learn mode:
+  # - true: collect unknown (non-whitelist) devices into /data/seen_devices.json
+  # - logs only when a new MAC appears or IPv4 becomes known
   learn_mode: true
+  # Max number of unknown devices kept in /data/seen_devices.json.
   learn_max_entries: 50
 
-  # Whitelist zařízení, která se budou publikovat jako device_tracker
+  # Whitelist of tracked devices published as device_tracker.
+  # - mac: device MAC address (aa:bb:cc:dd:ee:ff)
+  # - name: friendly name in Home Assistant
+  # - allow_randomized: allow locally-administered/randomized MAC for this device
+  #
+  # Example:
   # devices:
   #   - mac: "aa:bb:cc:dd:ee:ff"
   #     name: "Phone"
   #     allow_randomized: false
   devices: []
 
+# Schema validates types for all fields in options above.
 schema:
   mqtt:
     host: str
@@ -69,6 +109,7 @@ schema:
 
   poll_interval_sec: int
   away_after_misses: int
+  extended_mode: bool
 
   ssh:
     username: str
@@ -81,6 +122,7 @@ schema:
   aps:
     - name: str
       host: str
+      floor: str?
 
   learn_mode: bool
   learn_max_entries: int

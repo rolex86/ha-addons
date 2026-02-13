@@ -1,0 +1,97 @@
+configuration:
+  mqtt:
+    name: MQTT
+    description: MQTT broker and topic settings for discovery and state publishing.
+    fields:
+      host:
+        name: MQTT host
+        description: Hostname or IP address of the MQTT broker.
+      port:
+        name: MQTT port
+        description: TCP port of the MQTT broker.
+      username:
+        name: MQTT username
+        description: Optional username for MQTT authentication.
+      password:
+        name: MQTT password
+        description: Optional password for MQTT authentication.
+      discovery_prefix:
+        name: Discovery prefix
+        description: Home Assistant MQTT discovery prefix (typically homeassistant).
+      base_topic:
+        name: Base topic
+        description: Base topic used for device state/attributes publishing.
+      client_id:
+        name: Client ID
+        description: MQTT client ID used by this add-on.
+
+  poll_interval_sec:
+    name: Poll interval (s)
+    description: How often (in seconds) APs are queried.
+
+  away_after_misses:
+    name: Not home after misses
+    description: Number of consecutive missed cycles before publishing not_home.
+
+  extended_mode:
+    name: Extended mode
+    description: Adds extended attributes (SSID/VAP/rates/idle/mode/confidence). Does not change home/not_home logic.
+
+  ssh:
+    name: SSH
+    description: Credentials and timeouts for SSH access to UniFi APs.
+    fields:
+      username:
+        name: SSH username
+        description: SSH username for AP access.
+      password:
+        name: SSH password
+        description: SSH password for AP access.
+      port:
+        name: SSH port
+        description: SSH TCP port on the AP.
+      connect_timeout_sec:
+        name: Connect timeout (s)
+        description: Maximum time to establish SSH connection.
+      cmd_timeout_sec:
+        name: Command timeout (s)
+        description: Maximum runtime for a single remote command.
+      known_hosts_strict:
+        name: Strict host keys
+        description: Enable strict host key validation (known_hosts).
+
+  aps:
+    name: Access points
+    description: List of UniFi AP devices to poll over SSH.
+    fields:
+      name:
+        name: AP name
+        description: Logical AP name, published as ap_name attribute.
+      host:
+        name: AP host
+        description: IP address or hostname of the AP.
+      floor:
+        name: Floor/Zone
+        description: Optional explicit floor label. If missing, it is derived from AP name.
+
+  learn_mode:
+    name: Learn mode
+    description: Collect unknown (non-whitelist) devices into /data/seen_devices.json.
+
+  learn_max_entries:
+    name: Max learned entries
+    description: Maximum number of unknown devices kept in learn file.
+
+  devices:
+    name: Tracked devices
+    description: Device whitelist published as device_tracker entities.
+    fields:
+      mac:
+        name: MAC address
+        description: Device MAC address in aa:bb:cc:dd:ee:ff format.
+      name:
+        name: Device name
+        description: Friendly device name used in Home Assistant.
+      allow_randomized:
+        name: Allow randomized MAC
+        description: Allow locally-administered/randomized MAC for this tracked device.

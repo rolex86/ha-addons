@@ -14,6 +14,7 @@ import paho.mqtt.client as mqtt
 class AP:
     name: str
     host: str
+    floor: str
 
 
 @dataclass
@@ -96,7 +97,55 @@ def get_wifi_ifaces(host: str, sshc: SSHConfig) -> List[str]:
     return [line.strip() for line in out.splitlines() if line.strip()]
 
 
-def parse_wlanconfig_list(output: str) -> Dict[str, Dict]:
+def get_col(parts: List[str], col_index: Dict[str, int], names: List[str]) -> Optional[str]:
+    for name in names:
+        idx = col_index.get(name)
+        if idx is not None and idx < len(parts):
+            return parts[idx]
+    return None
+
+
+def parse_int_field(raw: Optional[str]) -> Optional[int]:
+    if raw is None:
+        return None
+    m = re.search(r"-?\d+", raw)
+    if not m:
+        return None
+    try:
+        return int(m.group(0))
+    except Exception:
+        return None
+
+
+def parse_rate_mbps(raw: Optional[str]) -> Optional[float]:
+    if not raw:
+        return None
+    m = re.match(r"^\s*(-?\d+(?:\.\d+)?)\s*([kKmMgG]?)\s*$", raw)
+    if not m:
+        m_num = re.search(r"-?\d+(?:\.\d+)?", raw)
+        if not m_num:
+            return None
+        try:
+            val = float(m_num.group(0))
+        except Exception:
+            return None
+        return int(val) if val.is_integer() else round(val, 2)
+
+    try:
+        val = float(m.group(1))
+    except Exception:
+        return None
+
+    suffix = (m.group(2) or "").upper()
+    if suffix == "K":
+        val = val / 1000.0
+    elif suffix == "G":
+        val = val * 1000.0
+
+    return int(val) if val.is_integer() else round(val, 2)
+
+
+def parse_wlanconfig_list(output: str, extended: bool = False) -> Dict[str, Dict]:
     lines = [ln.strip() for ln in output.splitlines() if ln.strip()]
     if not lines:
         return {}
@@ -123,11 +172,52 @@ def parse_wlanconfig_list(output: str) -> Dict[str, Dict]:
 
         rec: Dict = {"mac": mac}
 
-        if "RSSI" in col_index and col_index["RSSI"] < len(parts):
-            try:
-                rec["rssi"] = int(parts[col_index["RSSI"]])
-            except ValueError:
-                pass
+        rssi = parse_int_field(get_col(parts, col_index, ["RSSI"]))
+        if rssi is not None:
+            rec["rssi"] = rssi
+
+        if extended:
+            min_rssi = parse_int_field(get_col(parts, col_index, ["MINRSSI", "MIN_RSSI"]))
+            if min_rssi is not None:
+                rec["min_rssi"] = min_rssi
+
+            max_rssi = parse_int_field(get_col(parts, col_index, ["MAXRSSI", "MAX_RSSI"]))
+            if max_rssi is not None:
+                rec["max_rssi"] = max_rssi
+
+            idle_s = parse_int_field(get_col(parts, col_index, ["IDLE", "IDLE_S"]))
+            if idle_s is not None:
+                rec["idle_s"] = idle_s
+
+            chan = parse_int_field(get_col(parts, col_index, ["CHAN", "CHANNEL"]))
+            if chan is not None:
+                rec["chan"] = chan
+
+            tx_rate_raw = get_col(parts, col_index, ["TXRATE", "TX_RATE", "TX"])
+            if tx_rate_raw:
+                rec["tx_rate_raw"] = tx_rate_raw
+                tx_mbps = parse_rate_mbps(tx_rate_raw)
+                if tx_mbps is not None:
+                    rec["tx_mbps"] = tx_mbps
+
+            rx_rate_raw = get_col(parts, col_index, ["RXRATE", "RX_RATE", "RX"])
+            if rx_rate_raw:
+                rec["rx_rate_raw"] = rx_rate_raw
+                rx_mbps = parse_rate_mbps(rx_rate_raw)
+                if rx_mbps is not None:
+                    rec["rx_mbps"] = rx_mbps
+
+            mode = get_col(parts, col_index, ["MODE"])
+            if mode:
+                rec["mode"] = mode
+
+            psmode = get_col(parts, col_index, ["PSMODE"])
+            if psmode:
+                rec["psmode"] = psmode
+
+            assoctime = get_col(parts, col_index, ["ASSOCTIME"])
+            if assoctime:
+                rec["assoctime"] = assoctime
 
         results[mac] = rec
 
@@ -161,7 +251,88 @@ def band_from_iface(iface: str) -> str:
         return "2.4"
     if iface.startswith("wifi1"):
         return "5"
+    if iface.startswith("vwire"):
+        return "vwire"
     return "?"
+
+
+def parse_hostapd_ssid_map(output: str) -> Dict[str, str]:
+    out: Dict[str, str] = {}
+    for ln in output.splitlines():
+        ln = ln.strip()
+        if not ln:
+            continue
+        m = re.match(r"^/etc/hostapd/([^:/]+)\.cfg:ssid=(.*)$", ln)
+        if not m:
+            continue
+        iface = m.group(1).strip()
+        ssid = m.group(2).strip()
+        if iface:
+            out[iface] = ssid
+    return out
+
+
+def get_hostapd_ssid_map(host: str, sshc: SSHConfig) -> Dict[str, str]:
+    remote = r"grep -H '^ssid=' /etc/hostapd/*.cfg 2>/dev/null || true"
+    rc, out, _ = ssh_run(host, sshc, remote)
+    if rc != 0:
+        return {}
+    return parse_hostapd_ssid_map(out)
+
+
+def floor_from_ap_name(name: str) -> str:
+    n = (name or "").strip()
+    if not n:
+        return "unknown"
+    m = re.match(r"(?i)^ap_(.+)$", n)
+    if m and m.group(1).strip():
+        return m.group(1).strip()
+    return n
+
+
+def presence_confidence_for_record(rec: dict) -> int:
+    score = 0
+
+    rssi = rec.get("rssi")
+    if isinstance(rssi, (int, float)):
+        if rssi >= 45:
+            score += 45
+        elif rssi >= 35:
+            score += 30
+        elif rssi >= 25:
+            score += 15
+        else:
+            score += 5
+
+    idle_s = rec.get("idle_s")
+    if isinstance(idle_s, (int, float)):
+        if idle_s <= 60:
+            score += 30
+        elif idle_s <= 300:
+            score += 15
+
+    rates: List[float] = []
+    for key in ("tx_mbps", "rx_mbps"):
+        v = rec.get(key)
+        if isinstance(v, (int, float)):
+            rates.append(float(v))
+    if rates:
+        if max(rates) >= 50:
+            score += 20
+        else:
+            score += 10
+
+    ssid = rec.get("ssid")
+    if isinstance(ssid, str) and ssid:
+        low = ssid.lower()
+        if any(x in low for x in ("cam", "iot", "guest")):
+            score -= 5
+
+    if score < 0:
+        return 0
+    if score > 100:
+        return 100
+    return int(score)
 
 
 def is_randomized_mac(mac: str) -> bool:
@@ -249,13 +420,23 @@ def publish_attrs(client: mqtt.Client, cfg: MQTTConfig, mac: str, attrs: dict) -
 def best_record(a: dict, b: dict) -> dict:
     ar = a.get("rssi")
     br = b.get("rssi")
-    if ar is None and br is None:
-        return a
-    if ar is None:
+    if ar is None and br is not None:
         return b
-    if br is None:
+    if br is None and ar is not None:
         return a
-    return a if ar >= br else b
+    if ar is not None and br is not None and ar != br:
+        return a if ar >= br else b
+
+    ai = a.get("idle_s")
+    bi = b.get("idle_s")
+    if ai is None and bi is not None:
+        return b
+    if bi is None and ai is not None:
+        return a
+    if ai is not None and bi is not None and ai != bi:
+        return a if ai <= bi else b
+
+    return a
 
 
 def now_ts_iso() -> Tuple[int, str]:
@@ -365,10 +546,12 @@ def main() -> None:
         host = (a.get("host") or "").strip()
         if not (name and host):
             continue
-        aps.append(AP(name=name, host=host))
+        floor = (a.get("floor") or "").strip() or floor_from_ap_name(name)
+        aps.append(AP(name=name, host=host, floor=floor))
 
     learn_mode = bool(opts.get("learn_mode", False))
     learn_max_entries = int(opts.get("learn_max_entries", 50))
+    extended_mode = bool(opts.get("extended_mode", False))
 
     devices_raw = opts.get("devices", [])
     devices: List[Device] = []
@@ -406,12 +589,22 @@ def main() -> None:
 
     iface_cache: Dict[str, List[str]] = {}
     iface_refresh_every_cycles = 40  # ~1 hour if poll is 90s
+
+    ssid_cache: Dict[str, Dict[str, str]] = {}
+    ssid_cache_cycle: Dict[str, int] = {}
+    ssid_refresh_every_cycles = 20  # ~30 minutes if poll is 90s
+
     cycle = 0
 
     # tracked state caches (for change-only log)
     prev_home: Dict[str, Optional[bool]] = {d.mac: None for d in devices}
     prev_ap: Dict[str, Optional[str]] = {d.mac: None for d in devices}
+    prev_ap_host: Dict[str, Optional[str]] = {d.mac: None for d in devices}
+    prev_floor: Dict[str, Optional[str]] = {d.mac: None for d in devices}
+    prev_floor_attr: Dict[str, Optional[str]] = {d.mac: None for d in devices}
     prev_ip: Dict[str, Optional[str]] = {d.mac: None for d in devices}
+    last_floor_change: Dict[str, Optional[str]] = {d.mac: None for d in devices}
+    roam_count: Dict[str, int] = {d.mac: 0 for d in devices}
 
     misses: Dict[str, int] = {d.mac: 0 for d in devices}
     last_seen: Dict[str, int] = {d.mac: 0 for d in devices}
@@ -432,6 +625,17 @@ def main() -> None:
                 if ap.host not in iface_cache or (cycle % iface_refresh_every_cycles == 1):
                     iface_cache[ap.host] = get_wifi_ifaces(ap.host, ssh_cfg)
                 ifaces = iface_cache[ap.host]
+
+                ssid_by_iface: Dict[str, str] = {}
+                if extended_mode:
+                    ssid_refresh = (
+                        ap.host not in ssid_cache
+                        or (cycle - ssid_cache_cycle.get(ap.host, 0) >= ssid_refresh_every_cycles)
+                    )
+                    if ssid_refresh:
+                        ssid_cache[ap.host] = get_hostapd_ssid_map(ap.host, ssh_cfg)
+                        ssid_cache_cycle[ap.host] = cycle
+                    ssid_by_iface = ssid_cache.get(ap.host, {})
 
                 # Single SSH per AP per cycle; mark sections for parsing
                 parts: List[str] = []
@@ -488,7 +692,7 @@ def main() -> None:
                 seen_ap_unknown: Dict[str, dict] = {}
 
                 for iface, txt in iface_txt.items():
-                    macs = parse_wlanconfig_list(txt)
+                    macs = parse_wlanconfig_list(txt, extended=extended_mode)
                     for mac, rec in macs.items():
                         mac = mac.lower()
 
@@ -497,13 +701,39 @@ def main() -> None:
 
                         is_randomized = is_randomized_mac(mac)
 
-                        rec2 = dict(rec)
+                        rec2: Dict[str, object] = {}
+                        rec2["mac"] = mac
                         rec2["ap_name"] = ap.name
                         rec2["ap_host"] = ap.host
+                        rec2["floor"] = ap.floor
                         rec2["iface"] = iface
                         rec2["band"] = band_from_iface(iface)
+                        if "rssi" in rec:
+                            rec2["rssi"] = rec["rssi"]
                         if mac in mac_to_ip:
                             rec2["ip"] = mac_to_ip[mac]
+
+                        if extended_mode:
+                            rec2["vap_if"] = iface
+                            ssid = ssid_by_iface.get(iface)
+                            if ssid:
+                                rec2["ssid"] = ssid
+                            for key in (
+                                "chan",
+                                "tx_rate_raw",
+                                "rx_rate_raw",
+                                "tx_mbps",
+                                "rx_mbps",
+                                "min_rssi",
+                                "max_rssi",
+                                "idle_s",
+                                "mode",
+                                "psmode",
+                                "assoctime",
+                            ):
+                                if key in rec:
+                                    rec2[key] = rec[key]
+                            rec2["presence_confidence"] = presence_confidence_for_record(rec2)
 
                         if mac in device_by_mac:
                             dev = device_by_mac[mac]
@@ -553,31 +783,52 @@ def main() -> None:
                 rec["last_seen_ts"] = last_seen.get(mac, 0)
                 rec["last_seen_iso"] = last_seen_iso.get(mac, "")
                 rec["misses"] = misses.get(mac, 0)
+                rec["prev_floor"] = prev_floor_attr.get(mac)
+                rec["last_floor_change"] = last_floor_change.get(mac)
+                rec["roam_count"] = roam_count.get(mac, 0)
 
                 publish_state(mqc, mqtt_cfg, mac, True)
-                publish_attrs(mqc, mqtt_cfg, mac, rec)
 
                 ap_now = rec.get("ap_name")
+                ap_host_now = rec.get("ap_host")
+                floor_now = rec.get("floor")
                 ip_now = rec.get("ip")
                 rssi_now = rec.get("rssi")
 
+                if prev_ap.get(mac) and ap_now and ap_now != prev_ap[mac]:
+                    roam_count[mac] = roam_count.get(mac, 0) + 1
+                    rec["roam_count"] = roam_count[mac]
+
+                if prev_floor.get(mac) and floor_now and floor_now != prev_floor[mac]:
+                    prev_floor_attr[mac] = prev_floor[mac]
+                    last_floor_change[mac] = rec.get("last_seen_iso")
+                    rec["prev_floor"] = prev_floor_attr[mac]
+                    rec["last_floor_change"] = last_floor_change[mac]
+
+                # republish attrs if roam/floor metadata changed in this cycle
+                publish_attrs(mqc, mqtt_cfg, mac, rec)
+
                 if prev_home[mac] is not True:
-                    print(f"[state] {dev.name}: home (ap={ap_now} rssi={rssi_now} ip={ip_now})")
+                    print(f"[state] {dev.name}: home (ap={ap_now} floor={floor_now} rssi={rssi_now} ip={ip_now})")
                 elif ap_now != prev_ap[mac]:
-                    print(f"[state] {dev.name}: moved ap={ap_now} (was {prev_ap[mac]}) rssi={rssi_now}")
+                    print(f"[state] {dev.name}: moved ap={ap_now} (was {prev_ap[mac]}) floor={floor_now} rssi={rssi_now}")
+                elif floor_now and floor_now != prev_floor[mac]:
+                    print(f"[state] {dev.name}: floor={floor_now} (was {prev_floor[mac]})")
                 elif ip_now and ip_now != prev_ip[mac]:
                     print(f"[state] {dev.name}: ip={ip_now} (was {prev_ip[mac]})")
 
                 prev_home[mac] = True
                 prev_ap[mac] = ap_now
+                prev_ap_host[mac] = ap_host_now
+                prev_floor[mac] = floor_now
                 prev_ip[mac] = ip_now
 
             elif became_away_now:
-                publish_state(mqc, mqtt_cfg, mac, False)
-                publish_attrs(mqc, mqtt_cfg, mac, {
+                away_attrs = {
                     "friendly_name": dev.name,
-                    "ap_name": None,
-                    "ap_host": None,
+                    "ap_name": prev_ap.get(mac),
+                    "ap_host": prev_ap_host.get(mac),
+                    "floor": prev_floor.get(mac),
                     "iface": None,
                     "band": None,
                     "rssi": None,
@@ -585,13 +836,35 @@ def main() -> None:
                     "misses": misses.get(mac, 0),
                     "last_seen_ts": last_seen.get(mac, 0),
                     "last_seen_iso": last_seen_iso.get(mac, ""),
-                })
+                    "prev_floor": prev_floor_attr.get(mac),
+                    "last_floor_change": last_floor_change.get(mac),
+                    "roam_count": roam_count.get(mac, 0),
+                }
+                if extended_mode:
+                    away_attrs.update({
+                        "vap_if": None,
+                        "ssid": None,
+                        "chan": None,
+                        "tx_rate_raw": None,
+                        "rx_rate_raw": None,
+                        "tx_mbps": None,
+                        "rx_mbps": None,
+                        "min_rssi": None,
+                        "max_rssi": None,
+                        "idle_s": None,
+                        "mode": None,
+                        "psmode": None,
+                        "assoctime": None,
+                        "presence_confidence": None,
+                    })
+
+                publish_state(mqc, mqtt_cfg, mac, False)
+                publish_attrs(mqc, mqtt_cfg, mac, away_attrs)
 
                 if prev_home[mac] is not False:
-                    print(f"[state] {dev.name}: not_home (misses={misses.get(mac, 0)})")
+                    print(f"[state] {dev.name}: not_home (misses={misses.get(mac, 0)} last_ap={prev_ap.get(mac)} floor={prev_floor.get(mac)})")
 
                 prev_home[mac] = False
-                prev_ap[mac] = None
                 prev_ip[mac] = None
 
         # learn mode: persist unknown list, log only on change
@@ -611,6 +884,7 @@ def main() -> None:
                     "ip": new_ip or (prev_ip_val if prev else None),
                     "ap_name": rec.get("ap_name"),
                     "ap_host": rec.get("ap_host"),
+                    "floor": rec.get("floor"),
                     "iface": rec.get("iface"),
                     "band": rec.get("band"),
                     "rssi": rec.get("rssi"),

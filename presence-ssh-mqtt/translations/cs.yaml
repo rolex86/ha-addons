@@ -1,0 +1,97 @@
+configuration:
+  mqtt:
+    name: MQTT
+    description: Nastavení MQTT brokeru a topiců pro autodiscovery a publikaci stavů.
+    fields:
+      host:
+        name: MQTT host
+        description: Hostname nebo IP adresa MQTT brokeru.
+      port:
+        name: MQTT port
+        description: TCP port MQTT brokeru.
+      username:
+        name: MQTT uživatel
+        description: Volitelný uživatel pro přihlášení k MQTT.
+      password:
+        name: MQTT heslo
+        description: Volitelné heslo pro MQTT uživatele.
+      discovery_prefix:
+        name: Discovery prefix
+        description: Prefix pro Home Assistant MQTT autodiscovery (typicky homeassistant).
+      base_topic:
+        name: Base topic
+        description: Základní topic, pod kterým se publikuje state/attributes pro zařízení.
+      client_id:
+        name: Client ID
+        description: MQTT Client ID, pod kterým se add-on připojuje.
+
+  poll_interval_sec:
+    name: Interval pollingu (s)
+    description: Jak často (v sekundách) se provádí dotaz na AP.
+
+  away_after_misses:
+    name: Not home po X miss
+    description: Počet po sobě jdoucích cyklů bez nálezu, po kterých se publikuje not_home.
+
+  extended_mode:
+    name: Extended mode
+    description: Přidá rozšířené atributy (SSID/VAP/rates/idle/mode/confidence). Nemění logiku home/not_home.
+
+  ssh:
+    name: SSH
+    description: Přihlašovací údaje a timeouty pro SSH přístup na UniFi AP.
+    fields:
+      username:
+        name: SSH uživatel
+        description: Uživatelské jméno pro SSH na AP.
+      password:
+        name: SSH heslo
+        description: Heslo pro SSH na AP.
+      port:
+        name: SSH port
+        description: TCP port SSH služby na AP.
+      connect_timeout_sec:
+        name: Connect timeout (s)
+        description: Maximální čas pro navázání SSH spojení.
+      cmd_timeout_sec:
+        name: Command timeout (s)
+        description: Maximální čas běhu jednoho vzdáleného příkazu.
+      known_hosts_strict:
+        name: Strict host keys
+        description: Pokud je zapnuto, vyžaduje validaci host key (known_hosts).
+
+  aps:
+    name: Access pointy
+    description: Seznam UniFi AP, která se mají přes SSH pollovat.
+    fields:
+      name:
+        name: Název AP
+        description: Logický název AP, publikuje se jako ap_name.
+      host:
+        name: Host AP
+        description: IP adresa nebo hostname AP.
+      floor:
+        name: Patro/Zóna
+        description: Volitelné explicitní patro. Když není uvedeno, odvodí se z názvu AP.
+
+  learn_mode:
+    name: Learn mode
+    description: Sběr neznámých (ne-whitelist) zařízení do /data/seen_devices.json.
+
+  learn_max_entries:
+    name: Max learned entries
+    description: Maximální počet neznámých zařízení uložených v learn souboru.
+
+  devices:
+    name: Sledovaná zařízení
+    description: Whitelist zařízení, která se publikují jako device_tracker.
+    fields:
+      mac:
+        name: MAC adresa
+        description: MAC adresa zařízení ve formátu aa:bb:cc:dd:ee:ff.
+      name:
+        name: Název zařízení
+        description: Friendly název zařízení v Home Assistant.
+      allow_randomized:
+        name: Povolit randomized MAC
+        description: Povolit locally-administered/randomized MAC pro toto zařízení.

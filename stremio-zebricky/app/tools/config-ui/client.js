@@ -411,6 +411,146 @@
     return sel;
   }
 
+  function inferSourceProviderFromPath(sourcePath) {
+    const p = String(sourcePath || "")
+      .trim()
+      .toLowerCase();
+    if (
+      p.startsWith("/movie/") ||
+      p.startsWith("/tv/") ||
+      p.startsWith("/trending/movie/") ||
+      p.startsWith("/trending/tv/") ||
+      p.startsWith("/discover/movie") ||
+      p.startsWith("/discover/tv")
+    ) {
+      return "tmdb";
+    }
+    return "trakt";
+  }
+
+  function normalizeListSourceEntry(entry, idx = 0) {
+    const src =
+      typeof entry === "string"
+        ? { path: entry }
+        : entry && typeof entry === "object"
+          ? entry
+          : null;
+    if (!src) return null;
+
+    let sourcePath = String(src.path || "").trim();
+    if (!sourcePath) return null;
+    if (!sourcePath.startsWith("/")) sourcePath = "/" + sourcePath;
+
+    const providerRaw = String(src.provider || "")
+      .trim()
+      .toLowerCase();
+    const provider = providerRaw || inferSourceProviderFromPath(sourcePath);
+    if (provider !== "trakt" && provider !== "tmdb") {
+      throw new Error(
+        `sources[${idx}].provider musí být 'trakt' nebo 'tmdb'.`,
+      );
+    }
+
+    const out = { path: sourcePath };
+    if (provider === "tmdb") out.provider = "tmdb";
+
+    const id = String(src.id || "").trim();
+    if (id) out.id = id;
+
+    if (src.weight !== undefined) {
+      const weight = Number(src.weight);
+      if (!Number.isFinite(weight) || weight <= 0) {
+        throw new Error(`sources[${idx}].weight musí být kladné číslo.`);
+      }
+      out.weight = weight;
+    }
+
+    if (src.candidatePages !== undefined) {
+      const pages = Number(src.candidatePages);
+      if (!Number.isFinite(pages) || pages <= 0) {
+        throw new Error(`sources[${idx}].candidatePages musí být kladné číslo.`);
+      }
+      out.candidatePages = Math.floor(pages);
+    }
+
+    return out;
+  }
+
+  function normalizeListSourcesArray(arr) {
+    const out = [];
+    const seen = new Set();
+    for (let i = 0; i < (arr || []).length; i++) {
+      const normalized = normalizeListSourceEntry(arr[i], i);
+      if (!normalized) continue;
+      const provider = normalized.provider || "trakt";
+      const key = `${provider}|${normalized.path}|${normalized.id || ""}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(normalized);
+    }
+    return out;
+  }
+
+  function ensureListSourcesJsonField() {
+    let ta = $("f_sourcesJson");
+    if (ta) return ta;
+
+    const sourceEl = $("f_source");
+    if (!sourceEl) return null;
+    const row = sourceEl.closest(".row2");
+    if (!row || !row.parentElement) return null;
+
+    const wrap = document.createElement("div");
+    wrap.id = "f_sourcesJson_wrap";
+    wrap.style.marginTop = "12px";
+    wrap.innerHTML = `
+      <label class="small">sources[] (multi-source, per-list, volitelné)</label>
+      <textarea
+        id="f_sourcesJson"
+        style="min-height:120px"
+        placeholder='[
+  {"id":"trakt_trending","path":"/movies/trending","weight":1.4,"candidatePages":5},
+  {"id":"tmdb_trending_day","provider":"tmdb","path":"/trending/movie/day","weight":0.55,"candidatePages":2}
+]'
+      ></textarea>
+      <details class="help">
+        <summary>
+          <span>Jak to funguje</span><span class="k">lists[].sources[]</span>
+        </summary>
+        <div class="helpBody">
+          Zdroje se nastavují <strong>pro konkrétní list</strong>. Když necháš prázdné,
+          použije se single <code>source.path</code> výše.
+        </div>
+      </details>
+    `;
+
+    row.insertAdjacentElement("afterend", wrap);
+    ta = $("f_sourcesJson");
+    return ta;
+  }
+
+  function readListSourcesFromUi() {
+    const ta = ensureListSourcesJsonField();
+    const raw = String(ta?.value || "").trim();
+    if (!raw) return { custom: false, sources: [] };
+
+    let parsed = null;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      throw new Error("sources[] musí být validní JSON pole.");
+    }
+    if (!Array.isArray(parsed)) {
+      throw new Error("sources[] musí být JSON pole.");
+    }
+
+    const sources = normalizeListSourcesArray(parsed);
+    if (!sources.length) {
+      throw new Error("sources[] je prázdné nebo neplatné.");
+    }
+    return { custom: true, sources };
+  }
+
   function fillSources() {
     const type = $("f_type")?.value || "movie";
     const sel = $("f_source");
@@ -428,6 +568,20 @@
 
     const csfdRow = $("csfdRow");
     if (csfdRow) csfdRow.style.display = type === "movie" ? "" : "none";
+  }
+
+  function setSelectValueEnsured(selectEl, value) {
+    if (!selectEl) return;
+    const v = String(value || "").trim();
+    if (!v) return;
+    const has = Array.from(selectEl.options || []).some((o) => o.value === v);
+    if (!has) {
+      const opt = document.createElement("option");
+      opt.value = v;
+      opt.textContent = v;
+      selectEl.appendChild(opt);
+    }
+    selectEl.value = v;
   }
 
   // =========================
@@ -769,7 +923,15 @@
       tr.appendChild(td(x.id, "mono"));
       tr.appendChild(td(x.name));
       tr.appendChild(td(x.type));
-      tr.appendChild(td(x.source?.path || "", "mono"));
+      tr.appendChild(
+        td(
+          x.source?.path ||
+            (Array.isArray(x.sources) && x.sources[0]?.path
+              ? x.sources[0].path
+              : ""),
+          "mono",
+        ),
+      );
       tr.appendChild(td(x.filters?.years || ""));
       tr.appendChild(td(formatListGenresCell(x.filters || {}), "mono"));
 
@@ -809,13 +971,26 @@
       return;
     }
 
+    const sourcePathUi = String($("f_source")?.value || "").trim();
     const obj = {
       id,
       name,
       type,
-      source: { path: $("f_source")?.value || "" },
+      source: { path: sourcePathUi },
       filters: {},
     };
+
+    let listSources = { custom: false, sources: [] };
+    try {
+      listSources = readListSourcesFromUi();
+    } catch (e) {
+      alert(String(e?.message || e));
+      return;
+    }
+    if (listSources.custom && listSources.sources.length) {
+      obj.sources = listSources.sources;
+      obj.source = { path: listSources.sources[0].path };
+    }
 
     if (mode === "stable" || mode === "balanced" || mode === "fresh") {
       obj.mode = mode;
@@ -906,6 +1081,7 @@
 
     fillSources();
     if ($("f_source")) $("f_source").value = SOURCES_MOVIE[0].value;
+    if (ensureListSourcesJsonField()) ensureListSourcesJsonField().value = "";
 
     if ($("f_years")) $("f_years").value = "";
 
@@ -952,10 +1128,22 @@
     }
 
     fillSources();
+    const normalizedSources = normalizeListSourcesArray(
+      Array.isArray(x.sources) ? x.sources : [],
+    );
+    if (ensureListSourcesJsonField()) {
+      ensureListSourcesJsonField().value = normalizedSources.length
+        ? JSON.stringify(normalizedSources, null, 2)
+        : "";
+    }
     if ($("f_source")) {
       const fallback =
         x.type === "series" ? SOURCES_SERIES[0].value : SOURCES_MOVIE[0].value;
-      $("f_source").value = x.source?.path || fallback;
+      const selectedPath =
+        x.source?.path ||
+        (normalizedSources.length ? normalizedSources[0].path : "") ||
+        fallback;
+      setSelectValueEnsured($("f_source"), selectedPath);
     }
 
     if ($("f_years")) $("f_years").value = x.filters?.years || "";
@@ -2110,6 +2298,7 @@
   // =========================
   (async () => {
     ensureListModeField();
+    ensureListSourcesJsonField();
     fillSources();
     initYearsUI();
     initSpYearsUI();

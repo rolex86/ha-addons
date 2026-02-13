@@ -72,7 +72,18 @@ configuration:
         description: IP address or hostname of the AP.
       floor:
         name: Floor/Zone
-        description: Optional explicit floor label. If missing, it is derived from AP name.
+        description: Optional explicit floor label. If UI does not persist it, use Floor overrides.
+
+  floor_overrides:
+    name: Floor overrides
+    description: Reliable floor mapping by AP name (recommended when aps[].floor is not persisted by UI).
+    fields:
+      ap_name:
+        name: AP name
+        description: Must exactly match aps[].name.
+      floor:
+        name: Floor/Zone
+        description: Value published as floor attribute for device_tracker.
 
   learn_mode:
     name: Learn mode

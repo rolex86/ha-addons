@@ -1,7 +1,7 @@
 name: "UniFi SSH Presence (MQTT)"
 slug: "unifi_ssh_presence"
 description: "Presence bez UniFi Controlleru: SSH polling UniFi AP a MQTT autodiscovery device_tracker"
-version: "0.4.0"
+version: "0.4.1"
 url: "https://github.com/rolex86/ha-addons/tree/master/presence-ssh-mqtt"
 arch:
   - aarch64
@@ -63,7 +63,7 @@ options:
   # UniFi AP list (SSH targets).
   # - name: logical AP name used in attributes as ap_name
   # - host: AP IP or hostname
-  # - floor: optional explicit floor/zone label
+  # - floor: optional explicit floor/zone label (may be ignored by some HA UI versions)
   #   If floor is missing, fallback is derived from name:
   #   ap_1_patro -> 1_patro
   #
@@ -76,6 +76,16 @@ options:
   #     host: "192.168.0.106"
   #     floor: "2np"
   aps: []
+
+  # Reliable floor override mapping by AP name (recommended).
+  # Use this when aps[].floor is not persisted by HA UI.
+  # Example:
+  # floor_overrides:
+  #   - ap_name: "ap_1_patro"
+  #     floor: "přízemí"
+  #   - ap_name: "ap_2_patro"
+  #     floor: "patro"
+  floor_overrides: []
 
   # Learn mode:
   # - true: collect unknown (non-whitelist) devices into /data/seen_devices.json
@@ -123,6 +133,10 @@ schema:
     - name: str
       host: str
       floor: str?
+
+  floor_overrides:
+    - ap_name: str
+      floor: str
 
   learn_mode: bool
   learn_max_entries: int

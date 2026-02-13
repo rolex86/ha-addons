@@ -72,7 +72,18 @@ configuration:
         description: IP adresa nebo hostname AP.
       floor:
         name: Patro/Zóna
-        description: Volitelné explicitní patro. Když není uvedeno, odvodí se z názvu AP.
+        description: Volitelné explicitní patro. Pokud se v UI neukládá, použijte pole Přepisy pater.
+
+  floor_overrides:
+    name: Přepisy pater
+    description: Spolehlivé mapování patra podle názvu AP (doporučeno při problémech s ukládáním aps[].floor).
+    fields:
+      ap_name:
+        name: Název AP
+        description: Musí přesně odpovídat aps[].name.
+      floor:
+        name: Patro/Zóna
+        description: Hodnota publikovaná jako atribut floor u device_tracker.
 
   learn_mode:
     name: Learn mode

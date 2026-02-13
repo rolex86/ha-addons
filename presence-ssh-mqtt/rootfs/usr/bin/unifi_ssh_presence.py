@@ -382,7 +382,8 @@ def publish_discovery(client: mqtt.Client, cfg: MQTTConfig, dev: Device) -> None
     obj_id = object_id_for_device(dev)
     topic = discovery_topic(cfg.discovery_prefix, "unifi_ssh_presence", obj_id)
     payload = {
-        "name": dev.name,
+        "name": "Presence",
+        "has_entity_name": True,
         "unique_id": obj_id,
         "source_type": "router",
         "state_topic": state_topic(cfg.base_topic, dev.mac),
@@ -540,13 +541,22 @@ def main() -> None:
     )
 
     aps_raw = opts.get("aps", [])
+    floor_overrides_raw = opts.get("floor_overrides", [])
+    floor_override_by_ap: Dict[str, str] = {}
+    for item in floor_overrides_raw:
+        if not isinstance(item, dict):
+            continue
+        ap_name = (item.get("ap_name") or "").strip()
+        floor_val = (item.get("floor") or "").strip()
+        if ap_name and floor_val:
+            floor_override_by_ap[ap_name] = floor_val
     aps: List[AP] = []
     for a in aps_raw:
         name = (a.get("name") or "").strip()
         host = (a.get("host") or "").strip()
         if not (name and host):
             continue
-        floor = (a.get("floor") or "").strip() or floor_from_ap_name(name)
+        floor = floor_override_by_ap.get(name) or (a.get("floor") or "").strip() or floor_from_ap_name(name)
         aps.append(AP(name=name, host=host, floor=floor))
 
     learn_mode = bool(opts.get("learn_mode", False))
@@ -739,7 +749,6 @@ def main() -> None:
                             dev = device_by_mac[mac]
                             if is_randomized and not dev.allow_randomized:
                                 continue
-                            rec2["friendly_name"] = dev.name
                             seen_ap_tracked[mac] = best_record(seen_ap_tracked.get(mac, rec2), rec2)
                         else:
                             if learn_mode:
@@ -825,7 +834,6 @@ def main() -> None:
 
             elif became_away_now:
                 away_attrs = {
-                    "friendly_name": dev.name,
                     "ap_name": prev_ap.get(mac),
                     "ap_host": prev_ap_host.get(mac),
                     "floor": prev_floor.get(mac),

@@ -6,6 +6,32 @@
     "sleepMs": 120,
     "timeoutMs": 15000,
     "csfdCacheTtlDays": 30,
+    "listMode": "balanced",
+    "stability": {
+      "stableCoreRatio": 0.3,
+      "maxOverlapRatio": 0.78,
+      "newEntrantMinRatio": 0.12,
+      "rotationPeriod": "day"
+    },
+    "diversity": {
+      "topWindow": 40,
+      "maxPrimaryGenreTop": 6,
+      "maxPerDecadeTop": 9,
+      "maxPerFranchiseTop": 2
+    },
+    "novelty": {
+      "newBoost": 20,
+      "agingPerDay": 0.5,
+      "agingMax": 12,
+      "seenPenalty": 0.45,
+      "exposurePenaltyPerShow": 2,
+      "exposurePenaltyCap": 30
+    },
+    "sources": {
+      "snapshotTtlDays": 14,
+      "snapshotWeight": 0.75,
+      "scoreWeight": 1.1
+    },
     "dupRules": {
       "hardBlockTop": 45,
       "penaltyPerHit": 80
@@ -152,6 +178,27 @@
       "source": {
         "path": "/movies/trending"
       },
+      "sources": [
+        {
+          "id": "trakt_trending",
+          "path": "/movies/trending",
+          "weight": 1.4,
+          "candidatePages": 5
+        },
+        {
+          "id": "trakt_popular",
+          "path": "/movies/popular",
+          "weight": 1,
+          "candidatePages": 4
+        },
+        {
+          "id": "trakt_recommended",
+          "path": "/movies/recommended",
+          "weight": 1.1,
+          "candidatePages": 3
+        }
+      ],
+      "mode": "fresh",
       "filters": {},
       "csfdRules": {
         "minCount": 800

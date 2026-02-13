@@ -452,7 +452,7 @@ async function detectScripts() {
   } else if (!scripts.enrichBest) {
     log("--- STEP 3: (skip) no enrich script found ---");
   } else if (!baseChanged.length && !smartChanged.length) {
-    log("--- STEP 3: SKIP enrich (base listy se nezměnily) ---");
+    log("--- STEP 3: SKIP enrich (base ani smartpicks listy se nezmenily) ---");
   } else {
     const lightMode = !baseChanged.length && smartChanged.length;
     log(

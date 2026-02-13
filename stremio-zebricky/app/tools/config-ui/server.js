@@ -288,6 +288,32 @@ function normalizeListsConfig(lists) {
     if (l.source.path && !l.source.path.startsWith("/"))
       l.source.path = "/" + l.source.path;
 
+    // normalize optional sources[]
+    if (Array.isArray(l.sources)) {
+      l.sources = l.sources
+        .map((s) => {
+          if (typeof s === "string") {
+            let p = String(s || "").trim();
+            if (!p) return null;
+            if (!p.startsWith("/")) p = "/" + p;
+            return { path: p };
+          }
+          if (!s || typeof s !== "object") return null;
+
+          let p = String(s.path || "").trim();
+          if (!p) return null;
+          if (!p.startsWith("/")) p = "/" + p;
+
+          const out = { ...s, path: p };
+          if (out.id !== undefined) out.id = String(out.id || "").trim();
+          if (out.weight !== undefined) out.weight = Number(out.weight);
+          if (out.candidatePages !== undefined)
+            out.candidatePages = Number(out.candidatePages);
+          return out;
+        })
+        .filter(Boolean);
+    }
+
     // normalize type
     const rawType = (l.type ?? "").toString().trim().toLowerCase();
     const rawPath = (l.source.path ?? "").toString().trim().toLowerCase();
@@ -347,8 +373,24 @@ function isValidListsConfig(obj) {
       return `List ${l.id || "(unknown)"}: chybí name.`;
     if (!l.type || !["movie", "series"].includes(l.type))
       return `List ${l.id}: type musí být movie/series.`;
-    if (!l.source || typeof l.source !== "object" || !l.source.path)
-      return `List ${l.id}: chybí source.path.`;
+    const hasSourcePath =
+      !!String(l?.source?.path || "")
+        .trim()
+        .length;
+    const hasSourcesArray =
+      Array.isArray(l?.sources) &&
+      l.sources.some((s) => {
+        if (typeof s === "string")
+          return !!String(s || "")
+            .trim()
+            .length;
+        if (!s || typeof s !== "object") return false;
+        return !!String(s.path || "")
+          .trim()
+          .length;
+      });
+    if (!hasSourcePath && !hasSourcesArray)
+      return `List ${l.id}: chybí source.path nebo sources[].path.`;
     if (l.filters && typeof l.filters !== "object")
       return `List ${l.id}: filters musí být objekt.`;
   }

@@ -370,6 +370,40 @@
   // =========================
   // LISTS: sources + CSFD row
   // =========================
+  function ensureListModeField() {
+    let sel = $("f_mode");
+    if (sel) return sel;
+
+    const typeEl = $("f_type");
+    if (!typeEl) return null;
+
+    const wrap = document.createElement("label");
+    wrap.className = "field";
+    wrap.id = "f_mode_wrap";
+
+    const cap = document.createElement("span");
+    cap.className = "cap";
+    cap.textContent = "Rezim";
+
+    sel = document.createElement("select");
+    sel.id = "f_mode";
+    sel.innerHTML = `
+      <option value="">Vychozi (balanced)</option>
+      <option value="stable">Stable</option>
+      <option value="balanced">Balanced</option>
+      <option value="fresh">Fresh</option>
+    `;
+
+    wrap.appendChild(cap);
+    wrap.appendChild(sel);
+
+    const host = typeEl.closest(".formGrid") || typeEl.parentElement;
+    if (host && host.appendChild) host.appendChild(wrap);
+    else typeEl.insertAdjacentElement("afterend", wrap);
+
+    return sel;
+  }
+
   function fillSources() {
     const type = $("f_type")?.value || "movie";
     const sel = $("f_source");
@@ -738,6 +772,9 @@
     const id = String($("f_id")?.value || "").trim();
     const name = String($("f_name")?.value || "").trim();
     const type = $("f_type")?.value || "movie";
+    const mode = String(ensureListModeField()?.value || "")
+      .trim()
+      .toLowerCase();
 
     if (!id || !name) {
       alert("Vyplň id a name.");
@@ -761,6 +798,10 @@
       source: { path: $("f_source")?.value || "" },
       filters: {},
     };
+
+    if (mode === "stable" || mode === "balanced" || mode === "fresh") {
+      obj.mode = mode;
+    }
 
     const years = String($("f_years")?.value || "").trim();
     if (years) obj.filters.years = years;
@@ -805,8 +846,24 @@
     }
 
     const idx = state.lists.lists.findIndex((x) => x.id === id);
-    if (idx >= 0) state.lists.lists[idx] = obj;
-    else state.lists.lists.push(obj);
+    if (idx >= 0) {
+      const prev = state.lists.lists[idx] || {};
+      const preserved = {};
+      for (const k of [
+        "mode",
+        "sources",
+        "stability",
+        "diversity",
+        "novelty",
+        "sourcePolicy",
+        "debugItems",
+      ]) {
+        if (prev[k] !== undefined) preserved[k] = prev[k];
+      }
+      state.lists.lists[idx] = { ...preserved, ...obj };
+    } else {
+      state.lists.lists.push(obj);
+    }
 
     renderListsTable();
     renderSmartPicksSourcesUI(); // lists -> smartpicks list pickers
@@ -827,6 +884,7 @@
     if ($("f_id")) $("f_id").value = "";
     if ($("f_name")) $("f_name").value = "";
     if ($("f_type")) $("f_type").value = "movie";
+    if (ensureListModeField()) ensureListModeField().value = "";
 
     fillSources();
     if ($("f_source")) $("f_source").value = SOURCES_MOVIE[0].value;
@@ -867,6 +925,13 @@
     if ($("f_id")) $("f_id").value = x.id || "";
     if ($("f_name")) $("f_name").value = x.name || "";
     if ($("f_type")) $("f_type").value = x.type || "movie";
+    if (ensureListModeField()) {
+      const m = String(x.mode || "")
+        .trim()
+        .toLowerCase();
+      ensureListModeField().value =
+        m === "stable" || m === "balanced" || m === "fresh" ? m : "";
+    }
 
     fillSources();
     if ($("f_source")) {
@@ -2014,6 +2079,7 @@
   // INIT
   // =========================
   (async () => {
+    ensureListModeField();
     fillSources();
     initYearsUI();
     initSpYearsUI();

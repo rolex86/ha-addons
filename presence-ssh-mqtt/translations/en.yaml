@@ -37,6 +37,47 @@ configuration:
     name: Extended mode
     description: Adds extended attributes (SSID/VAP/rates/idle/mode/confidence). Does not change home/not_home logic.
 
+  confidence:
+    name: Confidence scoring
+    description: Configurable scoring for presence_confidence (attribute only, no effect on home/not_home).
+    fields:
+      enabled:
+        name: Enabled
+        description: Calculate presence_confidence only when both Extended mode and this switch are enabled.
+      rssi_thresholds:
+        name: RSSI thresholds
+        description: Four ascending thresholds for RSSI bucket scoring.
+      rssi_scores:
+        name: RSSI scores
+        description: Five bucket scores for RSSI (len = thresholds + 1).
+      idle_thresholds:
+        name: Idle thresholds
+        description: Two ascending thresholds for idle_s bucket scoring.
+      idle_scores:
+        name: Idle scores
+        description: Three bucket scores for idle_s (len = thresholds + 1).
+      rate_thresholds:
+        name: Rate thresholds
+        description: Three ascending thresholds for max(tx_mbps, rx_mbps) bucket scoring.
+      rate_scores:
+        name: Rate scores
+        description: Four bucket scores for rate (len = thresholds + 1).
+      band5_bonus:
+        name: 5 GHz bonus
+        description: Bonus points added when band is 5.
+      ssid_penalty_patterns:
+        name: SSID penalty patterns
+        description: Case-insensitive substrings that trigger SSID penalty (example cam/iot/guest).
+      ssid_penalty:
+        name: SSID penalty
+        description: Penalty points when SSID matches any penalty pattern.
+      clamp_min:
+        name: Clamp min
+        description: Minimum allowed confidence value.
+      clamp_max:
+        name: Clamp max
+        description: Maximum allowed confidence value.
+
   ssh:
     name: SSH
     description: Credentials and timeouts for SSH access to UniFi APs.

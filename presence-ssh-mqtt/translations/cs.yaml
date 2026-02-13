@@ -37,6 +37,47 @@ configuration:
     name: Extended mode
     description: Přidá rozšířené atributy (SSID/VAP/rates/idle/mode/confidence). Nemění logiku home/not_home.
 
+  confidence:
+    name: Confidence scoring
+    description: Konfigurovatelný výpočet presence_confidence (jen atribut, bez vlivu na home/not_home).
+    fields:
+      enabled:
+        name: Povolit
+        description: presence_confidence se počítá jen když je zapnutý Extended mode i tento přepínač.
+      rssi_thresholds:
+        name: RSSI prahy
+        description: Čtyři vzestupné prahy pro bucket scoring RSSI.
+      rssi_scores:
+        name: RSSI body
+        description: Pět bucket score hodnot pro RSSI (délka = prahy + 1).
+      idle_thresholds:
+        name: Idle prahy
+        description: Dva vzestupné prahy pro bucket scoring idle_s.
+      idle_scores:
+        name: Idle body
+        description: Tři bucket score hodnoty pro idle_s (délka = prahy + 1).
+      rate_thresholds:
+        name: Rate prahy
+        description: Tři vzestupné prahy pro max(tx_mbps, rx_mbps).
+      rate_scores:
+        name: Rate body
+        description: Čtyři bucket score hodnoty pro rate (délka = prahy + 1).
+      band5_bonus:
+        name: Bonus 5 GHz
+        description: Bonusové body při band = 5.
+      ssid_penalty_patterns:
+        name: SSID penalizační vzory
+        description: Case-insensitive podřetězce pro penalizaci SSID (např. cam/iot/guest).
+      ssid_penalty:
+        name: SSID penalizace
+        description: Počet bodů odečtených při shodě SSID se vzorem.
+      clamp_min:
+        name: Clamp minimum
+        description: Minimální povolená hodnota confidence.
+      clamp_max:
+        name: Clamp maximum
+        description: Maximální povolená hodnota confidence.
+
   ssh:
     name: SSH
     description: Přihlašovací údaje a timeouty pro SSH přístup na UniFi AP.

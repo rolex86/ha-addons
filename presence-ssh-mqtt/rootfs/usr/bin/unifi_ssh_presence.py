@@ -45,6 +45,22 @@ class MQTTConfig:
     client_id: str
 
 
+@dataclass
+class ConfidenceConfig:
+    enabled: bool
+    rssi_thresholds: List[int]
+    rssi_scores: List[int]
+    idle_thresholds: List[int]
+    idle_scores: List[int]
+    rate_thresholds: List[int]
+    rate_scores: List[int]
+    band5_bonus: int
+    ssid_penalty_patterns: List[str]
+    ssid_penalty: int
+    clamp_min: int
+    clamp_max: int
+
+
 OPTIONS_PATH = "/data/options.json"
 LEARN_SEEN_PATH = "/data/seen_devices.json"
 
@@ -290,49 +306,181 @@ def floor_from_ap_name(name: str) -> str:
     return n
 
 
-def presence_confidence_for_record(rec: dict) -> int:
-    score = 0
+def default_confidence_config() -> ConfidenceConfig:
+    return ConfidenceConfig(
+        enabled=True,
+        rssi_thresholds=[22, 26, 30, 34],
+        rssi_scores=[10, 25, 40, 55, 65],
+        idle_thresholds=[10, 120],
+        idle_scores=[15, 8, 0],
+        rate_thresholds=[20, 60, 90],
+        rate_scores=[5, 10, 15, 20],
+        band5_bonus=3,
+        ssid_penalty_patterns=["cam", "iot", "guest"],
+        ssid_penalty=10,
+        clamp_min=0,
+        clamp_max=100,
+    )
 
-    rssi = rec.get("rssi")
-    if isinstance(rssi, (int, float)):
-        if rssi >= 45:
-            score += 45
-        elif rssi >= 35:
-            score += 30
-        elif rssi >= 25:
-            score += 15
-        else:
-            score += 5
 
-    idle_s = rec.get("idle_s")
-    if isinstance(idle_s, (int, float)):
-        if idle_s <= 60:
-            score += 30
-        elif idle_s <= 300:
-            score += 15
+def parse_int_strict(value: object, field: str) -> int:
+    if isinstance(value, bool):
+        raise ValueError(f"{field} must be int")
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    raise ValueError(f"{field} must be int")
 
-    rates: List[float] = []
-    for key in ("tx_mbps", "rx_mbps"):
-        v = rec.get(key)
-        if isinstance(v, (int, float)):
-            rates.append(float(v))
-    if rates:
-        if max(rates) >= 50:
-            score += 20
-        else:
-            score += 10
 
+def parse_int_list(value: object, field: str, expected_len: int) -> List[int]:
+    if not isinstance(value, list):
+        raise ValueError(f"{field} must be list")
+    out: List[int] = []
+    for i, item in enumerate(value):
+        out.append(parse_int_strict(item, f"{field}[{i}]"))
+    if len(out) != expected_len:
+        raise ValueError(f"{field} must have length {expected_len}")
+    return out
+
+
+def parse_str_list(value: object, field: str) -> List[str]:
+    if not isinstance(value, list):
+        raise ValueError(f"{field} must be list")
+    out: List[str] = []
+    for i, item in enumerate(value):
+        if not isinstance(item, str):
+            raise ValueError(f"{field}[{i}] must be string")
+        txt = item.strip().lower()
+        if txt:
+            out.append(txt)
+    return out
+
+
+def ensure_range(value: int, field: str, min_val: int, max_val: int) -> int:
+    if value < min_val or value > max_val:
+        raise ValueError(f"{field} must be in range {min_val}..{max_val}")
+    return value
+
+
+def ensure_strictly_increasing(values: List[int], field: str) -> None:
+    if any(values[i] >= values[i + 1] for i in range(len(values) - 1)):
+        raise ValueError(f"{field} must be strictly increasing")
+
+
+def load_confidence_config(opts: dict) -> ConfidenceConfig:
+    defaults = default_confidence_config()
+    raw = opts.get("confidence", {})
+    if raw is None:
+        return defaults
+    if not isinstance(raw, dict):
+        print("[warn] invalid confidence config: expected object; using defaults")
+        return defaults
+
+    try:
+        enabled_raw = raw.get("enabled", defaults.enabled)
+        if not isinstance(enabled_raw, bool):
+            raise ValueError("enabled must be bool")
+        enabled = enabled_raw
+
+        rssi_thresholds = parse_int_list(raw.get("rssi_thresholds", defaults.rssi_thresholds), "rssi_thresholds", 4)
+        rssi_scores = parse_int_list(raw.get("rssi_scores", defaults.rssi_scores), "rssi_scores", 5)
+        idle_thresholds = parse_int_list(raw.get("idle_thresholds", defaults.idle_thresholds), "idle_thresholds", 2)
+        idle_scores = parse_int_list(raw.get("idle_scores", defaults.idle_scores), "idle_scores", 3)
+        rate_thresholds = parse_int_list(raw.get("rate_thresholds", defaults.rate_thresholds), "rate_thresholds", 3)
+        rate_scores = parse_int_list(raw.get("rate_scores", defaults.rate_scores), "rate_scores", 4)
+
+        if len(rssi_scores) != len(rssi_thresholds) + 1:
+            raise ValueError("rssi_scores length must be len(rssi_thresholds)+1")
+        if len(idle_scores) != len(idle_thresholds) + 1:
+            raise ValueError("idle_scores length must be len(idle_thresholds)+1")
+        if len(rate_scores) != len(rate_thresholds) + 1:
+            raise ValueError("rate_scores length must be len(rate_thresholds)+1")
+
+        ensure_strictly_increasing(rssi_thresholds, "rssi_thresholds")
+        ensure_strictly_increasing(idle_thresholds, "idle_thresholds")
+        ensure_strictly_increasing(rate_thresholds, "rate_thresholds")
+
+        band5_bonus = ensure_range(parse_int_strict(raw.get("band5_bonus", defaults.band5_bonus), "band5_bonus"), "band5_bonus", 0, 20)
+        ssid_penalty = ensure_range(parse_int_strict(raw.get("ssid_penalty", defaults.ssid_penalty), "ssid_penalty"), "ssid_penalty", 0, 30)
+        clamp_min = ensure_range(parse_int_strict(raw.get("clamp_min", defaults.clamp_min), "clamp_min"), "clamp_min", 0, 100)
+        clamp_max = ensure_range(parse_int_strict(raw.get("clamp_max", defaults.clamp_max), "clamp_max"), "clamp_max", 0, 100)
+        if clamp_min > clamp_max:
+            raise ValueError("clamp_min must be <= clamp_max")
+
+        ssid_penalty_patterns = parse_str_list(raw.get("ssid_penalty_patterns", defaults.ssid_penalty_patterns), "ssid_penalty_patterns")
+
+        return ConfidenceConfig(
+            enabled=enabled,
+            rssi_thresholds=rssi_thresholds,
+            rssi_scores=rssi_scores,
+            idle_thresholds=idle_thresholds,
+            idle_scores=idle_scores,
+            rate_thresholds=rate_thresholds,
+            rate_scores=rate_scores,
+            band5_bonus=band5_bonus,
+            ssid_penalty_patterns=ssid_penalty_patterns,
+            ssid_penalty=ssid_penalty,
+            clamp_min=clamp_min,
+            clamp_max=clamp_max,
+        )
+    except Exception as e:
+        print(f"[warn] invalid confidence config: {e}; using defaults")
+        return defaults
+
+
+def bucket_score(value: float, thresholds: List[int], scores: List[int]) -> int:
+    for i, threshold in enumerate(thresholds):
+        if value < threshold:
+            return int(scores[i])
+    return int(scores[-1])
+
+
+def numeric_or_none(value: object) -> Optional[float]:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        if isinstance(value, str) and value.strip():
+            return float(value.strip())
+    except Exception:
+        return None
+    return None
+
+
+def compute_presence_confidence(rec: dict, cfg: ConfidenceConfig) -> Tuple[int, str]:
+    rssi_num = numeric_or_none(rec.get("rssi"))
+    if rssi_num is None or rssi_num <= 0:
+        rssi_score = cfg.rssi_scores[0]
+    else:
+        rssi_score = bucket_score(rssi_num, cfg.rssi_thresholds, cfg.rssi_scores)
+
+    idle_num = numeric_or_none(rec.get("idle_s"))
+    if idle_num is None:
+        idle_score = cfg.idle_scores[-1]
+    else:
+        idle_score = bucket_score(idle_num, cfg.idle_thresholds, cfg.idle_scores)
+
+    tx_num = numeric_or_none(rec.get("tx_mbps")) or 0.0
+    rx_num = numeric_or_none(rec.get("rx_mbps")) or 0.0
+    rate = max(tx_num, rx_num)
+    rate_score = bucket_score(rate, cfg.rate_thresholds, cfg.rate_scores)
+
+    band_bonus = cfg.band5_bonus if rec.get("band") == "5" else 0
+
+    ssid_penalty_applied = 0
     ssid = rec.get("ssid")
     if isinstance(ssid, str) and ssid:
-        low = ssid.lower()
-        if any(x in low for x in ("cam", "iot", "guest")):
-            score -= 5
+        ssid_low = ssid.lower()
+        if any(pattern in ssid_low for pattern in cfg.ssid_penalty_patterns):
+            ssid_penalty_applied = cfg.ssid_penalty
 
-    if score < 0:
-        return 0
-    if score > 100:
-        return 100
-    return int(score)
+    raw = rssi_score + idle_score + rate_score + band_bonus - ssid_penalty_applied
+    score = max(cfg.clamp_min, min(cfg.clamp_max, raw))
+    breakdown = f"rssi={rssi_score} rate={rate_score} idle={idle_score} bonus={band_bonus} penalty={ssid_penalty_applied} raw={raw}"
+
+    return int(score), breakdown
 
 
 def is_randomized_mac(mac: str) -> bool:
@@ -562,6 +710,8 @@ def main() -> None:
     learn_mode = bool(opts.get("learn_mode", False))
     learn_max_entries = int(opts.get("learn_max_entries", 50))
     extended_mode = bool(opts.get("extended_mode", False))
+    confidence_cfg = load_confidence_config(opts)
+    confidence_enabled = extended_mode and confidence_cfg.enabled
 
     devices_raw = opts.get("devices", [])
     devices: List[Device] = []
@@ -743,7 +893,10 @@ def main() -> None:
                             ):
                                 if key in rec:
                                     rec2[key] = rec[key]
-                            rec2["presence_confidence"] = presence_confidence_for_record(rec2)
+                            if confidence_enabled:
+                                conf_score, conf_breakdown = compute_presence_confidence(rec2, confidence_cfg)
+                                rec2["presence_confidence"] = conf_score
+                                rec2["confidence_breakdown"] = conf_breakdown
 
                         if mac in device_by_mac:
                             dev = device_by_mac[mac]
@@ -863,8 +1016,10 @@ def main() -> None:
                         "mode": None,
                         "psmode": None,
                         "assoctime": None,
-                        "presence_confidence": None,
                     })
+                    if confidence_enabled:
+                        away_attrs["presence_confidence"] = None
+                        away_attrs["confidence_breakdown"] = None
 
                 publish_state(mqc, mqtt_cfg, mac, False)
                 publish_attrs(mqc, mqtt_cfg, mac, away_attrs)

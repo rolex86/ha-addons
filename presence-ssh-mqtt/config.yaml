@@ -1,7 +1,7 @@
 name: "UniFi SSH Presence (MQTT)"
 slug: "unifi_ssh_presence"
 description: "Presence bez UniFi Controlleru: SSH polling UniFi AP a MQTT autodiscovery device_tracker"
-version: "0.4.1"
+version: "0.4.2"
 url: "https://github.com/rolex86/ha-addons/tree/master/presence-ssh-mqtt"
 arch:
   - aarch64
@@ -45,6 +45,31 @@ options:
   # true = extended attributes + presence_confidence
   # NOTE: extended_mode does NOT change home/not_home decision logic.
   extended_mode: false
+
+  # Configurable confidence scoring (used only when extended_mode=true).
+  # Confidence is only an attribute and does NOT affect home/not_home state.
+  confidence:
+    enabled: true
+
+    # RSSI thresholds/scores (Atheros scale from wlanconfig).
+    rssi_thresholds: [22, 26, 30, 34]
+    rssi_scores: [10, 25, 40, 55, 65]
+
+    # idle_s thresholds/scores (seconds).
+    idle_thresholds: [10, 120]
+    idle_scores: [15, 8, 0]
+
+    # rate thresholds/scores where rate = max(tx_mbps, rx_mbps).
+    rate_thresholds: [20, 60, 90]
+    rate_scores: [5, 10, 15, 20]
+
+    # Optional fine tuning.
+    band5_bonus: 3
+    ssid_penalty_patterns: ["cam", "iot", "guest"]
+    ssid_penalty: 10
+
+    clamp_min: 0
+    clamp_max: 100
 
   ssh:
     # SSH username on UniFi AP.
@@ -120,6 +145,26 @@ schema:
   poll_interval_sec: int
   away_after_misses: int
   extended_mode: bool
+  confidence:
+    enabled: bool
+    rssi_thresholds:
+      - int
+    rssi_scores:
+      - int
+    idle_thresholds:
+      - int
+    idle_scores:
+      - int
+    rate_thresholds:
+      - int
+    rate_scores:
+      - int
+    band5_bonus: int(0,20)
+    ssid_penalty_patterns:
+      - str
+    ssid_penalty: int(0,30)
+    clamp_min: int(0,100)
+    clamp_max: int(0,100)
 
   ssh:
     username: str

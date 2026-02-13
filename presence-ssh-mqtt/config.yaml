@@ -1,7 +1,7 @@
 name: "UniFi SSH Presence (MQTT)"
 slug: "unifi_ssh_presence"
 description: "Presence bez UniFi Controlleru: SSH polling UniFi AP a MQTT autodiscovery device_tracker"
-version: "0.3.1"
+version: "0.3.2"
 url: "https://github.com/rolex86/ha-addons/tree/master/presence-ssh-mqtt"
 arch:
   - aarch64

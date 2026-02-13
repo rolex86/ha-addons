@@ -358,7 +358,14 @@ def main() -> None:
         known_hosts_strict=bool(opts["ssh"]["known_hosts_strict"]),
     )
 
-    aps = [AP(name=a["name"], host=a["host"]) for a in opts["aps"]]
+    aps_raw = opts.get("aps", [])
+    aps: List[AP] = []
+    for a in aps_raw:
+        name = (a.get("name") or "").strip()
+        host = (a.get("host") or "").strip()
+        if not (name and host):
+            continue
+        aps.append(AP(name=name, host=host))
 
     learn_mode = bool(opts.get("learn_mode", False))
     learn_max_entries = int(opts.get("learn_max_entries", 50))
@@ -372,8 +379,14 @@ def main() -> None:
             continue
         devices.append(Device(mac=mac, name=name, allow_randomized=bool(d.get("allow_randomized", False))))
 
-    if not devices:
-        raise SystemExit("No devices configured. Add devices: [{mac,name}] in add-on options.")
+    if not aps:
+        raise SystemExit("No APs configured. Add aps: [{name,host}] in add-on options.")
+
+    if not devices and not learn_mode:
+        raise SystemExit("No devices configured. Add devices: [{mac,name}] in add-on options or enable learn_mode.")
+
+    if not devices and learn_mode:
+        print("[unifi-ssh-presence] no tracked devices configured; running in learn-only mode")
 
     device_by_mac: Dict[str, Device] = {d.mac: d for d in devices}
 
@@ -482,9 +495,7 @@ def main() -> None:
                         if is_multicast_or_broadcast(mac):
                             continue
 
-                        # learn: ignore randomized MACs to avoid noise
-                        if learn_mode and is_randomized_mac(mac):
-                            continue
+                        is_randomized = is_randomized_mac(mac)
 
                         rec2 = dict(rec)
                         rec2["ap_name"] = ap.name
@@ -496,12 +507,15 @@ def main() -> None:
 
                         if mac in device_by_mac:
                             dev = device_by_mac[mac]
-                            if is_randomized_mac(mac) and not dev.allow_randomized:
+                            if is_randomized and not dev.allow_randomized:
                                 continue
                             rec2["friendly_name"] = dev.name
                             seen_ap_tracked[mac] = best_record(seen_ap_tracked.get(mac, rec2), rec2)
                         else:
                             if learn_mode:
+                                # learn: ignore randomized MACs to avoid noise
+                                if is_randomized:
+                                    continue
                                 seen_ap_unknown[mac] = best_record(seen_ap_unknown.get(mac, rec2), rec2)
 
                 # merge AP -> global

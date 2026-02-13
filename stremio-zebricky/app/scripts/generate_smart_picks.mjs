@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { getTraktKeys, getTmdbKeys } from "./_secrets.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -8,8 +9,14 @@ const __dirname = path.dirname(__filename);
 // HA-friendly persistent paths
 const DATA_DIR = process.env.DATA_DIR || "/data";
 const CONFIG_PATH = path.join(DATA_DIR, "config", "lists.trakt.json");
-const SECRETS_PATH = path.join(DATA_DIR, "config", "secrets.json");
 const LIST_DIR = path.join(DATA_DIR, "lists");
+const CACHE_DIR = path.join(DATA_DIR, "runtime");
+const TMDB_IMDB_MAP_PATH = path.join(CACHE_DIR, "tmdb_imdb_map.json");
+const TMDB_BASE = "https://api.themoviedb.org/3";
+const TMDB_MAP_OK_TTL_DAYS = Number(process.env.TMDB_MAP_OK_TTL_DAYS || 120);
+const TMDB_MAP_NOT_FOUND_TTL_DAYS = Number(
+  process.env.TMDB_MAP_NOT_FOUND_TTL_DAYS || 21,
+);
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
@@ -99,8 +106,54 @@ function overlapsAny(arrA, arrB) {
 function inferTypeFromPath(p) {
   const s = String(p || "").toLowerCase();
   if (s.startsWith("/shows/")) return "series";
+  if (
+    s.startsWith("/tv/") ||
+    s.startsWith("/trending/tv/") ||
+    s.startsWith("/discover/tv")
+  ) {
+    return "series";
+  }
   if (s.startsWith("/movies/")) return "movie";
+  if (
+    s.startsWith("/movie/") ||
+    s.startsWith("/trending/movie/") ||
+    s.startsWith("/discover/movie")
+  ) {
+    return "movie";
+  }
   return null;
+}
+
+function slugifyGenreName(name) {
+  return String(name || "")
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .replace(/--+/g, "-");
+}
+
+function buildTmdbUrl(pathname, params = {}, apiKey = "") {
+  const p = String(pathname || "").trim();
+  const normalizedPath = p.startsWith("/") ? p : `/${p}`;
+  const url = new URL(TMDB_BASE + normalizedPath);
+  if (apiKey) url.searchParams.set("api_key", apiKey);
+  for (const [k, v] of Object.entries(params)) {
+    if (v === undefined || v === null || v === "") continue;
+    url.searchParams.set(k, String(v));
+  }
+  return url;
+}
+
+function tmdbMediaType(profileType) {
+  return profileType === "series" ? "tv" : "movie";
+}
+
+function isFreshTs(ts, ttlDays) {
+  const n = Number(ts);
+  if (!Number.isFinite(n) || n <= 0) return false;
+  return Date.now() - n < ttlDays * 24 * 60 * 60 * 1000;
 }
 
 async function traktFetch(
@@ -138,6 +191,158 @@ async function traktFetch(
   } finally {
     clearTimeout(to);
   }
+}
+
+async function tmdbFetchPage(
+  pathname,
+  tmdb,
+  { page = 1, timeoutMs = 15000 } = {},
+) {
+  if (!tmdb?.accessToken && !tmdb?.apiKey) {
+    throw new Error(
+      "TMDB source configured, but missing tmdb access token or api_key.",
+    );
+  }
+
+  const url = buildTmdbUrl(pathname, { page }, tmdb?.apiKey || "");
+  const ctrl = new AbortController();
+  const to = setTimeout(() => ctrl.abort(), timeoutMs);
+
+  try {
+    const headers = { "content-type": "application/json" };
+    if (tmdb?.accessToken) headers.Authorization = `Bearer ${tmdb.accessToken}`;
+    const res = await fetch(url, { signal: ctrl.signal, headers });
+    if (!res.ok) {
+      const txt = await res.text().catch(() => "");
+      throw new Error(`TMDB ${res.status} ${pathname} :: ${txt.slice(0, 200)}`);
+    }
+    const json = await res.json();
+    return Array.isArray(json?.results) ? json.results : [];
+  } finally {
+    clearTimeout(to);
+  }
+}
+
+async function fetchTmdbGenresMap(profileType, tmdb, timeoutMs, cache) {
+  const media = tmdbMediaType(profileType);
+  if (cache[media]) return cache[media];
+  if (!tmdb?.accessToken && !tmdb?.apiKey) {
+    cache[media] = new Map();
+    return cache[media];
+  }
+
+  const url = buildTmdbUrl(`/genre/${media}/list`, { language: "en-US" }, tmdb.apiKey || "");
+  const ctrl = new AbortController();
+  const to = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const headers = { "content-type": "application/json" };
+    if (tmdb.accessToken) headers.Authorization = `Bearer ${tmdb.accessToken}`;
+    const res = await fetch(url, { signal: ctrl.signal, headers });
+    if (!res.ok) {
+      const txt = await res.text().catch(() => "");
+      throw new Error(`TMDB ${res.status} /genre/${media}/list :: ${txt.slice(0, 200)}`);
+    }
+    const json = await res.json();
+    const map = new Map();
+    for (const g of Array.isArray(json?.genres) ? json.genres : []) {
+      const id = Number(g?.id);
+      if (!Number.isFinite(id)) continue;
+      const slug = slugifyGenreName(g?.name);
+      if (slug) map.set(id, slug);
+    }
+    cache[media] = map;
+    return map;
+  } finally {
+    clearTimeout(to);
+  }
+}
+
+async function fetchTmdbExternalImdbId(profileType, tmdbId, tmdb, timeoutMs) {
+  const media = tmdbMediaType(profileType);
+  const url = buildTmdbUrl(`/${media}/${Number(tmdbId)}/external_ids`, {}, tmdb?.apiKey || "");
+  const ctrl = new AbortController();
+  const to = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const headers = { "content-type": "application/json" };
+    if (tmdb?.accessToken) headers.Authorization = `Bearer ${tmdb.accessToken}`;
+    const res = await fetch(url, { signal: ctrl.signal, headers });
+    if (!res.ok) {
+      const txt = await res.text().catch(() => "");
+      throw new Error(
+        `TMDB ${res.status} /${media}/${tmdbId}/external_ids :: ${txt.slice(0, 200)}`,
+      );
+    }
+    const json = await res.json();
+    const imdb = String(json?.imdb_id || "").trim();
+    return imdb.startsWith("tt") ? imdb : "";
+  } finally {
+    clearTimeout(to);
+  }
+}
+
+async function resolveTmdbImdbId({
+  profileType,
+  tmdbId,
+  tmdb,
+  timeoutMs,
+  tmdbImdbMap,
+}) {
+  const media = tmdbMediaType(profileType);
+  const key = `${media}:${Number(tmdbId)}`;
+  const cached = tmdbImdbMap[key];
+  const cachedImdb = String(cached?.imdb || "").trim();
+
+  if (cachedImdb.startsWith("tt") && isFreshTs(cached?.lastOkAt, TMDB_MAP_OK_TTL_DAYS)) {
+    return cachedImdb;
+  }
+  if (!cachedImdb && isFreshTs(cached?.lastNotFoundAt, TMDB_MAP_NOT_FOUND_TTL_DAYS)) {
+    return "";
+  }
+
+  if (!tmdb?.accessToken && !tmdb?.apiKey) return "";
+
+  try {
+    const imdb = await fetchTmdbExternalImdbId(profileType, tmdbId, tmdb, timeoutMs);
+    const now = Date.now();
+    if (imdb) {
+      tmdbImdbMap[key] = { imdb, lastOkAt: now };
+      return imdb;
+    }
+    tmdbImdbMap[key] = { imdb: "", lastNotFoundAt: now };
+    return "";
+  } catch {
+    return cachedImdb.startsWith("tt") ? cachedImdb : "";
+  }
+}
+
+function normalizeTmdbCandidate(item, profileType, genreMap) {
+  const tmdbId = Number(item?.id);
+  if (!Number.isFinite(tmdbId) || tmdbId <= 0) return null;
+
+  const name =
+    profileType === "series"
+      ? item?.name || item?.original_name || item?.title
+      : item?.title || item?.original_title || item?.name;
+  const date =
+    profileType === "series"
+      ? item?.first_air_date || item?.release_date
+      : item?.release_date || item?.first_air_date;
+  const m = String(date || "").match(/^(\d{4})/);
+  const year = m ? Number(m[1]) : undefined;
+
+  const genres = Array.isArray(item?.genre_ids)
+    ? item.genre_ids
+        .map((id) => genreMap.get(Number(id)) || "")
+        .filter(Boolean)
+    : [];
+
+  return {
+    tmdbId,
+    name: String(name || "").trim() || String(tmdbId),
+    year: Number.isFinite(Number(year)) ? Number(year) : undefined,
+    genres,
+    releaseInfo: Number.isFinite(Number(year)) ? String(year) : undefined,
+  };
 }
 
 function normalizeCandidate(item) {
@@ -313,12 +518,9 @@ async function main() {
   const cfg = await readJsonSafe(CONFIG_PATH, null);
   if (!cfg) throw new Error(`Missing config: ${CONFIG_PATH}`);
 
-  const secrets = await readJsonSafe(SECRETS_PATH, {
-    trakt: { client_id: "", client_secret: "" },
-  });
-  const clientId = String(secrets?.trakt?.client_id || "").trim();
-  if (!clientId)
-    throw new Error(`Missing secrets.trakt.client_id in ${SECRETS_PATH}`);
+  const { clientId } = await getTraktKeys();
+  const tmdb = await getTmdbKeys();
+  if (!clientId) throw new Error("Missing Trakt client_id.");
 
   const sp = cfg.smartPicks;
   if (!sp?.enabled) {
@@ -341,7 +543,16 @@ async function main() {
     ? Number(sp.defaultSize)
     : 10;
 
+  await fs.mkdir(CACHE_DIR, { recursive: true });
   await fs.mkdir(LIST_DIR, { recursive: true });
+  const tmdbImdbMap = await readJsonSafe(TMDB_IMDB_MAP_PATH, {});
+  const tmdbGenresCache = { movie: null, tv: null };
+
+  console.log(
+    "TMDB auth:",
+    tmdb.accessToken ? "access_token" : tmdb.apiKey ? "api_key" : "none",
+  );
+  console.log("TMDB->IMDb cache entries:", Object.keys(tmdbImdbMap).length);
 
   for (const profile of profiles) {
     const pid = String(profile?.id || "").trim();
@@ -363,6 +574,12 @@ async function main() {
         ? profile.sources.traktPaths
         : [];
 
+    let fromTmdb = Array.isArray(profile.fromTmdb)
+      ? profile.fromTmdb
+      : Array.isArray(profile?.sources?.tmdbPaths)
+        ? profile.sources.tmdbPaths
+        : [];
+
     let fromLists = Array.isArray(profile.fromLists)
       ? profile.fromLists
       : Array.isArray(profile?.sources?.listIds)
@@ -379,7 +596,7 @@ async function main() {
 
     // fallback: když uživatel odškrtne vše a nechá jen žánry/roky,
     // vezmeme aspoň široké Trakt seedy, aby bylo z čeho filtrovat.
-    if (!fromTrakt.length && !fromLists.length && hasAnyFilter) {
+    if (!fromTrakt.length && !fromTmdb.length && !fromLists.length && hasAnyFilter) {
       fromTrakt =
         ptype === "series"
           ? ["/shows/trending", "/shows/popular"]
@@ -392,6 +609,9 @@ async function main() {
     console.log(`\n[SmartPicks] ${pid} (${ptype}) size=${size}`);
     console.log(
       `  fromTrakt: ${fromTrakt.length ? fromTrakt.join(", ") : "(none)"}`,
+    );
+    console.log(
+      `  fromTmdb: ${fromTmdb.length ? fromTmdb.join(", ") : "(none)"}`,
     );
     console.log(
       `  fromLists: ${fromLists.length ? fromLists.join(", ") : "(none)"}`,
@@ -408,6 +628,24 @@ async function main() {
       }
     }
 
+    const candidatePages = Number.isFinite(Number(profile.candidatePages))
+      ? Number(profile.candidatePages)
+      : Number.isFinite(Number(defaults.candidatePages))
+        ? Number(defaults.candidatePages)
+        : 5;
+
+    const pageLimit = Number.isFinite(Number(profile.pageLimit))
+      ? Number(profile.pageLimit)
+      : Number.isFinite(Number(defaults.pageLimit))
+        ? Number(defaults.pageLimit)
+        : 100;
+
+    const tmdbResolveLimit = Number.isFinite(Number(profile.tmdbResolveLimit))
+      ? Number(profile.tmdbResolveLimit)
+      : Number.isFinite(Number(defaults.tmdbResolveLimit))
+        ? Number(defaults.tmdbResolveLimit)
+        : 120;
+
     // 2) trakt candidates
     const traktAll = [];
     for (const src of fromTrakt) {
@@ -421,18 +659,6 @@ async function main() {
         );
         continue;
       }
-
-      const candidatePages = Number.isFinite(Number(profile.candidatePages))
-        ? Number(profile.candidatePages)
-        : Number.isFinite(Number(defaults.candidatePages))
-          ? Number(defaults.candidatePages)
-          : 5;
-
-      const pageLimit = Number.isFinite(Number(profile.pageLimit))
-        ? Number(profile.pageLimit)
-        : Number.isFinite(Number(defaults.pageLimit))
-          ? Number(defaults.pageLimit)
-          : 100;
 
       for (let p = 1; p <= candidatePages; p++) {
         try {
@@ -456,8 +682,71 @@ async function main() {
       }
     }
 
+    // 3) tmdb candidates
+    const tmdbAll = [];
+    const hasTmdbAuth = !!tmdb?.accessToken || !!tmdb?.apiKey;
+    if (fromTmdb.length && !hasTmdbAuth) {
+      console.warn(
+        "  WARN: fromTmdb selected, but tmdb token/api_key is missing. Skipping TMDB sources.",
+      );
+    } else if (fromTmdb.length) {
+      const genreMap = await fetchTmdbGenresMap(
+        ptype,
+        tmdb,
+        timeoutMs,
+        tmdbGenresCache,
+      );
+      let resolvedTmdb = 0;
+
+      for (const src of fromTmdb) {
+        const srcPath = String(src || "").trim();
+        if (!srcPath.startsWith("/")) continue;
+
+        const inferred = inferTypeFromPath(srcPath);
+        if (inferred && inferred !== ptype) {
+          console.warn(
+            `  WARN: skipping ${srcPath} because it looks like ${inferred}, profile is ${ptype}`,
+          );
+          continue;
+        }
+
+        for (let p = 1; p <= candidatePages; p++) {
+          if (resolvedTmdb >= tmdbResolveLimit) break;
+          try {
+            const data = await tmdbFetchPage(srcPath, tmdb, {
+              page: p,
+              timeoutMs,
+            });
+            await sleep(sleepMs);
+
+            for (const row of Array.isArray(data) ? data : []) {
+              if (resolvedTmdb >= tmdbResolveLimit) break;
+              const base = normalizeTmdbCandidate(row, ptype, genreMap);
+              if (!base) continue;
+
+              const imdb = await resolveTmdbImdbId({
+                profileType: ptype,
+                tmdbId: base.tmdbId,
+                tmdb,
+                timeoutMs,
+                tmdbImdbMap,
+              });
+              resolvedTmdb++;
+              if (!imdb) continue;
+              tmdbAll.push({ ...base, imdb });
+            }
+          } catch (e) {
+            console.warn(
+              `  WARN: tmdb fetch failed ${srcPath} page=${p}: ${e?.message || e}`,
+            );
+            break;
+          }
+        }
+      }
+    }
+
     // merge + filter
-    let merged = mergeDedupe(localAll, traktAll);
+    let merged = mergeDedupe(localAll, traktAll, tmdbAll);
     merged = applyFilters(merged, profile);
 
     // volitelně soft CSFD filtry (pokud už položky mají csfdRating z dřívějška)
@@ -538,6 +827,7 @@ async function main() {
     }
   }
 
+  await writeJsonAtomic(TMDB_IMDB_MAP_PATH, tmdbImdbMap);
   console.log("\nDone.");
 }
 

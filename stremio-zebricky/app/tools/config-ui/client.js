@@ -125,6 +125,32 @@
     "/shows/played/weekly",
   ];
 
+  const SP_TMDB_MOVIE = [
+    "/trending/movie/day",
+    "/movie/popular",
+    "/movie/top_rated",
+    "/movie/now_playing",
+    "/movie/upcoming",
+    "/discover/movie?sort_by=popularity.desc",
+    "/discover/movie?sort_by=vote_count.desc",
+    "/discover/movie?sort_by=vote_average.desc&vote_count.gte=250",
+    "/discover/movie?sort_by=primary_release_date.desc",
+    "/discover/movie?include_adult=false&sort_by=popularity.desc",
+  ];
+
+  const SP_TMDB_SERIES = [
+    "/trending/tv/day",
+    "/tv/popular",
+    "/tv/top_rated",
+    "/tv/on_the_air",
+    "/tv/airing_today",
+    "/discover/tv?sort_by=popularity.desc",
+    "/discover/tv?sort_by=vote_count.desc",
+    "/discover/tv?sort_by=vote_average.desc&vote_count.gte=250",
+    "/discover/tv?sort_by=first_air_date.desc",
+    "/discover/tv?include_adult=false&sort_by=popularity.desc",
+  ];
+
   // Genres fallback (if Trakt fetch fails)
   const GENRES_FALLBACK = [
     { slug: "action", name: "Action" },
@@ -208,6 +234,9 @@
       tmdb: { access_token: "", api_key: "" },
     },
   };
+
+  // UI-only draft for lists[].sources editor (per-list multi-source picker)
+  let listSourceDraft = [];
 
   let genresCache = {
     movie: { items: GENRES_FALLBACK.slice(), loaded: false, lastError: "" },
@@ -491,63 +520,250 @@
     return out;
   }
 
-  function ensureListSourcesJsonField() {
-    let ta = $("f_sourcesJson");
-    if (ta) return ta;
+  function listSourceKey(src) {
+    const provider = src?.provider || inferSourceProviderFromPath(src?.path || "");
+    const path = String(src?.path || "").trim();
+    return `${provider}|${path}`;
+  }
+
+  function getListSourceSeeds(type, provider) {
+    const base = type === "series" ? SOURCES_SERIES : SOURCES_MOVIE;
+    return base.filter(
+      (s) => inferSourceProviderFromPath(s.value) === String(provider || "trakt"),
+    );
+  }
+
+  function upsertListSourceDraft(entry) {
+    const normalized = normalizeListSourceEntry(entry, 0);
+    if (!normalized) return;
+    const key = listSourceKey(normalized);
+    const idx = listSourceDraft.findIndex((x) => listSourceKey(x) === key);
+    if (idx >= 0) {
+      listSourceDraft[idx] = { ...listSourceDraft[idx], ...normalized };
+    } else {
+      listSourceDraft.push(normalized);
+    }
+  }
+
+  function removeListSourceDraftByKey(key) {
+    listSourceDraft = listSourceDraft.filter((x) => listSourceKey(x) !== key);
+  }
+
+  function handleAddCustomListSource() {
+    let raw = String($("f_customSource")?.value || "").trim();
+    if (!raw) return;
+    if (!raw.startsWith("/")) raw = "/" + raw;
+
+    try {
+      upsertListSourceDraft({ path: raw });
+      renderListSourcesPickerUI();
+      if ($("f_customSource")) $("f_customSource").value = "";
+    } catch (e) {
+      alert(String(e?.message || e));
+    }
+  }
+
+  function ensureListSourcesPickerField() {
+    let wrap = $("f_sourcesPicker_wrap");
+    if (wrap) return wrap;
 
     const sourceEl = $("f_source");
     if (!sourceEl) return null;
     const row = sourceEl.closest(".row2");
     if (!row || !row.parentElement) return null;
 
-    const wrap = document.createElement("div");
-    wrap.id = "f_sourcesJson_wrap";
+    wrap = document.createElement("div");
+    wrap.id = "f_sourcesPicker_wrap";
     wrap.style.marginTop = "12px";
     wrap.innerHTML = `
-      <label class="small">sources[] (multi-source, per-list, volitelné)</label>
-      <textarea
-        id="f_sourcesJson"
-        style="min-height:120px"
-        placeholder='[
-  {"id":"trakt_trending","path":"/movies/trending","weight":1.4,"candidatePages":5},
-  {"id":"tmdb_trending_day","provider":"tmdb","path":"/trending/movie/day","weight":0.55,"candidatePages":2}
-]'
-      ></textarea>
-      <details class="help">
+      <div class="subHead" style="margin-bottom:8px">
+        <strong>Zdroje</strong>
+        <span class="muted">Trakt + TMDB (per-list)</span>
+      </div>
+
+      <div class="muted" style="margin: 6px 0 8px"><strong>Trakt zdroje:</strong></div>
+      <div id="f_src_trakt" class="chipBox"></div>
+
+      <div class="muted" style="margin: 12px 0 8px"><strong>TMDB zdroje:</strong></div>
+      <div id="f_src_tmdb" class="chipBox"></div>
+
+      <div class="row" style="gap:8px; margin-top:10px">
+        <input
+          id="f_customSource"
+          type="text"
+          class="mono"
+          placeholder="vlastni /movies/... /shows/... /movie/... /tv/..."
+        />
+        <button id="btnListAddSource" class="btn small" type="button">Pridat</button>
+      </div>
+
+      <div class="muted" style="margin: 12px 0 8px">
+        <strong>Vybrane zdroje tohoto listu:</strong>
+      </div>
+      <div id="f_src_selected" class="checkList"></div>
+
+      <details class="help" style="margin-top: 10px">
         <summary>
           <span>Jak to funguje</span><span class="k">lists[].sources[]</span>
         </summary>
         <div class="helpBody">
-          Zdroje se nastavují <strong>pro konkrétní list</strong>. Když necháš prázdné,
-          použije se single <code>source.path</code> výše.
+          Kdyz nic nevyberes, pouzije se pouze <code>source.path</code>.
+          Kdyz vyberes zdroje, ulozi se <code>sources[]</code> pro tento list.
         </div>
       </details>
     `;
 
     row.insertAdjacentElement("afterend", wrap);
-    ta = $("f_sourcesJson");
-    return ta;
+
+    const btn = $("btnListAddSource");
+    if (btn && !btn.dataset.bound) {
+      btn.addEventListener("click", handleAddCustomListSource);
+      btn.dataset.bound = "1";
+    }
+    const input = $("f_customSource");
+    if (input && !input.dataset.bound) {
+      input.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter") {
+          ev.preventDefault();
+          handleAddCustomListSource();
+        }
+      });
+      input.dataset.bound = "1";
+    }
+
+    return wrap;
+  }
+
+  function renderListSourcesPickerUI() {
+    const wrap = ensureListSourcesPickerField();
+    if (!wrap) return;
+
+    const type = $("f_type")?.value || "movie";
+    const boxTrakt = $("f_src_trakt");
+    const boxTmdb = $("f_src_tmdb");
+    const boxSelected = $("f_src_selected");
+    if (!boxTrakt || !boxTmdb || !boxSelected) return;
+
+    const selectedKeys = new Set(listSourceDraft.map((x) => listSourceKey(x)));
+
+    const renderSeedBox = (host, seeds, provider) => {
+      host.innerHTML = "";
+      for (const seed of seeds) {
+        const normalized = normalizeListSourceEntry({
+          path: seed.value,
+          provider: provider === "tmdb" ? "tmdb" : undefined,
+        });
+        const key = listSourceKey(normalized);
+
+        const label = document.createElement("label");
+        label.className = "chip";
+
+        const cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.value = normalized.path;
+        cb.checked = selectedKeys.has(key);
+        cb.addEventListener("change", () => {
+          if (cb.checked) upsertListSourceDraft(normalized);
+          else removeListSourceDraftByKey(key);
+          renderListSourcesPickerUI();
+        });
+
+        const span = document.createElement("span");
+        span.className = "mono";
+        span.textContent = seed.value;
+
+        label.appendChild(cb);
+        label.appendChild(span);
+        host.appendChild(label);
+      }
+    };
+
+    renderSeedBox(boxTrakt, getListSourceSeeds(type, "trakt"), "trakt");
+    renderSeedBox(boxTmdb, getListSourceSeeds(type, "tmdb"), "tmdb");
+
+    boxSelected.innerHTML = "";
+    if (!listSourceDraft.length) {
+      const empty = document.createElement("div");
+      empty.className = "muted";
+      empty.textContent = "Zatim prazdne. Pouzije se source.path nahore.";
+      boxSelected.appendChild(empty);
+      return;
+    }
+
+    for (const src of listSourceDraft) {
+      const key = listSourceKey(src);
+      const provider = src.provider || inferSourceProviderFromPath(src.path);
+
+      const row = document.createElement("div");
+      row.className = "chkRow";
+      row.style.display = "grid";
+      row.style.gridTemplateColumns = "1fr 90px 110px 70px";
+      row.style.gap = "8px";
+      row.style.alignItems = "center";
+
+      const left = document.createElement("div");
+      left.innerHTML = `<span class="mono">${src.path}</span> <span class="muted">(${provider})</span>`;
+
+      const inWeight = document.createElement("input");
+      inWeight.type = "number";
+      inWeight.step = "0.05";
+      inWeight.min = "0.05";
+      inWeight.placeholder = "weight";
+      inWeight.value = src.weight !== undefined ? String(src.weight) : "";
+      inWeight.addEventListener("change", () => {
+        const n = Number(inWeight.value);
+        if (!Number.isFinite(n) || n <= 0) {
+          delete src.weight;
+          inWeight.value = "";
+        } else {
+          src.weight = Number(n.toFixed(3));
+        }
+      });
+
+      const inPages = document.createElement("input");
+      inPages.type = "number";
+      inPages.step = "1";
+      inPages.min = "1";
+      inPages.placeholder = "pages";
+      inPages.value =
+        src.candidatePages !== undefined ? String(src.candidatePages) : "";
+      inPages.addEventListener("change", () => {
+        const n = Number(inPages.value);
+        if (!Number.isFinite(n) || n <= 0) {
+          delete src.candidatePages;
+          inPages.value = "";
+        } else {
+          src.candidatePages = Math.floor(n);
+        }
+      });
+
+      const btnDel = document.createElement("button");
+      btnDel.type = "button";
+      btnDel.className = "btn small";
+      btnDel.textContent = "Odebrat";
+      btnDel.addEventListener("click", () => {
+        removeListSourceDraftByKey(key);
+        renderListSourcesPickerUI();
+      });
+
+      row.appendChild(left);
+      row.appendChild(inWeight);
+      row.appendChild(inPages);
+      row.appendChild(btnDel);
+      boxSelected.appendChild(row);
+    }
+  }
+
+  function setListSourceDraft(sources) {
+    listSourceDraft = normalizeListSourcesArray(
+      Array.isArray(sources) ? sources : [],
+    );
+    renderListSourcesPickerUI();
   }
 
   function readListSourcesFromUi() {
-    const ta = ensureListSourcesJsonField();
-    const raw = String(ta?.value || "").trim();
-    if (!raw) return { custom: false, sources: [] };
-
-    let parsed = null;
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      throw new Error("sources[] musí být validní JSON pole.");
-    }
-    if (!Array.isArray(parsed)) {
-      throw new Error("sources[] musí být JSON pole.");
-    }
-
-    const sources = normalizeListSourcesArray(parsed);
-    if (!sources.length) {
-      throw new Error("sources[] je prázdné nebo neplatné.");
-    }
+    const sources = normalizeListSourcesArray(listSourceDraft);
+    if (!sources.length) return { custom: false, sources: [] };
     return { custom: true, sources };
   }
 
@@ -568,6 +784,7 @@
 
     const csfdRow = $("csfdRow");
     if (csfdRow) csfdRow.style.display = type === "movie" ? "" : "none";
+    renderListSourcesPickerUI();
   }
 
   function setSelectValueEnsured(selectEl, value) {
@@ -1053,6 +1270,7 @@
       ]) {
         if (prev[k] !== undefined) preserved[k] = prev[k];
       }
+      if (!listSources.custom) delete preserved.sources;
       state.lists.lists[idx] = { ...preserved, ...obj };
     } else {
       state.lists.lists.push(obj);
@@ -1081,7 +1299,7 @@
 
     fillSources();
     if ($("f_source")) $("f_source").value = SOURCES_MOVIE[0].value;
-    if (ensureListSourcesJsonField()) ensureListSourcesJsonField().value = "";
+    setListSourceDraft([]);
 
     if ($("f_years")) $("f_years").value = "";
 
@@ -1131,11 +1349,7 @@
     const normalizedSources = normalizeListSourcesArray(
       Array.isArray(x.sources) ? x.sources : [],
     );
-    if (ensureListSourcesJsonField()) {
-      ensureListSourcesJsonField().value = normalizedSources.length
-        ? JSON.stringify(normalizedSources, null, 2)
-        : "";
-    }
+    setListSourceDraft(normalizedSources);
     if ($("f_source")) {
       const fallback =
         x.type === "series" ? SOURCES_SERIES[0].value : SOURCES_MOVIE[0].value;
@@ -1174,7 +1388,7 @@
   // =========================
   // SmartPicks normalization (IMPORTANT)
   // We always SAVE legacy format:
-  //   fromTrakt[], fromLists[], filters{years,genres,genresExclude}, + (optional csfdRules)
+  //   fromTrakt[], fromTmdb[], fromLists[], filters{years,genres,genresExclude}, + (optional csfdRules)
   // =========================
   function ensureSmartPicksExists() {
     if (!state.lists.smartPicks || typeof state.lists.smartPicks !== "object") {
@@ -1203,11 +1417,12 @@
       size: 10,
       // UI view model
       years: "",
-      sources: { traktPaths: [], listIds: [] },
+      sources: { traktPaths: [], tmdbPaths: [], listIds: [] },
       includeGenres: [],
       excludeGenres: [],
       // legacy disk model
       fromTrakt: [],
+      fromTmdb: [],
       fromLists: [],
       filters: {},
     };
@@ -1234,6 +1449,12 @@
           .map((s) => s.trim())
           .filter(Boolean)
       : [];
+    const fromTmdb = Array.isArray(out.fromTmdb)
+      ? out.fromTmdb
+          .map(safeStr)
+          .map((s) => s.trim())
+          .filter(Boolean)
+      : [];
     const fromLists = Array.isArray(out.fromLists)
       ? out.fromLists
           .map(safeStr)
@@ -1248,6 +1469,12 @@
           .map((s) => s.trim())
           .filter(Boolean)
       : [];
+    const sTmdb = Array.isArray(out?.sources?.tmdbPaths)
+      ? out.sources.tmdbPaths
+          .map(safeStr)
+          .map((s) => s.trim())
+          .filter(Boolean)
+      : [];
     const sLists = Array.isArray(out?.sources?.listIds)
       ? out.sources.listIds
           .map(safeStr)
@@ -1256,9 +1483,10 @@
       : [];
 
     const traktPaths = fromTrakt.length ? fromTrakt : sTrakt;
+    const tmdbPaths = fromTmdb.length ? fromTmdb : sTmdb;
     const listIds = fromLists.length ? fromLists : sLists;
 
-    out.sources = { traktPaths, listIds };
+    out.sources = { traktPaths, tmdbPaths, listIds };
 
     // Legacy filters
     const filters =
@@ -1290,6 +1518,7 @@
 
     // Rebuild legacy fields so they're always present in state
     out.fromTrakt = traktPaths.slice();
+    out.fromTmdb = tmdbPaths.slice();
     out.fromLists = listIds.slice();
     out.filters = { ...(filters || {}) };
     if (years) out.filters.years = years;
@@ -1332,6 +1561,12 @@
           .map((s) => s.trim())
           .filter(Boolean)
       : [];
+    const tmdbPaths = Array.isArray(uiProfile?.sources?.tmdbPaths)
+      ? uiProfile.sources.tmdbPaths
+          .map(safeStr)
+          .map((s) => s.trim())
+          .filter(Boolean)
+      : [];
     const listIds = Array.isArray(uiProfile?.sources?.listIds)
       ? uiProfile.sources.listIds
           .map(safeStr)
@@ -1340,6 +1575,7 @@
       : [];
 
     out.fromTrakt = traktPaths.slice();
+    out.fromTmdb = tmdbPaths.slice();
     out.fromLists = listIds.slice();
 
     // Filters: years + include/exclude genres as CSV (legacy stable)
@@ -1402,6 +1638,10 @@
 
   function getSpTraktSeeds(type) {
     return type === "series" ? SP_TRAKT_SERIES : SP_TRAKT_MOVIE;
+  }
+
+  function getSpTmdbSeeds(type) {
+    return type === "series" ? SP_TMDB_SERIES : SP_TMDB_MOVIE;
   }
 
   function setSpIncludeExcludeToHidden(include, exclude) {
@@ -1508,8 +1748,9 @@
   // =========================
   function getProfileSourceSummary(p) {
     const tp = Array.isArray(p?.fromTrakt) ? p.fromTrakt.length : 0;
+    const tm = Array.isArray(p?.fromTmdb) ? p.fromTmdb.length : 0;
     const li = Array.isArray(p?.fromLists) ? p.fromLists.length : 0;
-    return `${tp}× Trakt + ${li}× list`;
+    return `${tp}x Trakt + ${tm}x TMDB + ${li}x list`;
   }
 
   function renderSmartPicksTable() {
@@ -1582,6 +1823,12 @@
       .map((cb) => String(cb.value || "").trim())
       .filter(Boolean);
 
+    const tmdbPaths = Array.from(
+      document.querySelectorAll('#sp_src_tmdb input[type="checkbox"]:checked'),
+    )
+      .map((cb) => String(cb.value || "").trim())
+      .filter(Boolean);
+
     const listIds = Array.from(
       document.querySelectorAll('#sp_src_lists input[type="checkbox"]:checked'),
     )
@@ -1596,7 +1843,7 @@
       type,
       size,
       years,
-      sources: { traktPaths, listIds },
+      sources: { traktPaths, tmdbPaths, listIds },
       includeGenres: include,
       excludeGenres: exclude,
     };
@@ -1604,19 +1851,25 @@
 
   function renderSmartPicksSourcesUI() {
     const boxTrakt = $("sp_src_trakt");
-    if (!boxTrakt) return;
+    const boxTmdb = $("sp_src_tmdb");
+    if (!boxTrakt || !boxTmdb) return;
 
     const type = $("sp_type")?.value || "movie";
-    const seeds = getSpTraktSeeds(type);
+    const seedsTrakt = getSpTraktSeeds(type);
+    const seedsTmdb = getSpTmdbSeeds(type);
 
     const curProfile = getSmartPickFromForm(false) || smartPickDefaultProfile();
     const selectedTrakt = new Set(
       (curProfile?.sources?.traktPaths || []).map(String),
     );
+    const selectedTmdb = new Set(
+      (curProfile?.sources?.tmdbPaths || []).map(String),
+    );
 
     boxTrakt.innerHTML = "";
+    boxTmdb.innerHTML = "";
 
-    for (const p of seeds) {
+    for (const p of seedsTrakt) {
       const label = document.createElement("label");
       label.className = "chip";
 
@@ -1632,6 +1885,24 @@
       label.appendChild(cb);
       label.appendChild(span);
       boxTrakt.appendChild(label);
+    }
+
+    for (const p of seedsTmdb) {
+      const label = document.createElement("label");
+      label.className = "chip";
+
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.value = p;
+      cb.checked = selectedTmdb.has(p);
+
+      const span = document.createElement("span");
+      span.className = "mono";
+      span.textContent = p;
+
+      label.appendChild(cb);
+      label.appendChild(span);
+      boxTmdb.appendChild(label);
     }
 
     // lists (by type)
@@ -2219,10 +2490,12 @@
   });
 
   on("btnSpAddSource", "click", () => {
-    const v = String($("sp_customSource")?.value || "").trim();
+    let v = String($("sp_customSource")?.value || "").trim();
     if (!v) return;
+    if (!v.startsWith("/")) v = "/" + v;
 
-    const seedBox = $("sp_src_trakt");
+    const provider = inferSourceProviderFromPath(v);
+    const seedBox = provider === "tmdb" ? $("sp_src_tmdb") : $("sp_src_trakt");
     if (!seedBox) return;
 
     const exists = Array.from(
@@ -2298,8 +2571,9 @@
   // =========================
   (async () => {
     ensureListModeField();
-    ensureListSourcesJsonField();
+    ensureListSourcesPickerField();
     fillSources();
+    setListSourceDraft([]);
     initYearsUI();
     initSpYearsUI();
 

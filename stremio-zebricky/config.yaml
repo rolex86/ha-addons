@@ -1,7 +1,7 @@
 name: "Stremio - Vlastní žebříčky"
 slug: stremio_zebricky
 description: "Stremio addon server (7000) + Config UI (7788) s persistencí do /data."
-version: "0.0.15"
+version: "0.0.16"
 url: "https://github.com/rolex86/ha-addons/tree/master/stremio-zebricky#readme"
 
 arch:

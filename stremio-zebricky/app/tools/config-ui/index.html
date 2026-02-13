@@ -2228,7 +2228,7 @@
 
                 <div class="subHead">
                   <strong>Zdroje</strong>
-                  <span class="muted">Trakt + existující listy</span>
+                  <span class="muted">Trakt + TMDB + existujici listy</span>
                 </div>
 
                 <div class="muted" style="margin: 6px 0 8px">
@@ -2236,10 +2236,16 @@
                 </div>
                 <div id="sp_src_trakt" class="chipBox"></div>
 
+                <div class="muted" style="margin: 12px 0 8px">
+                  <strong>TMDB zdroje:</strong>
+                </div>
+                <div id="sp_src_tmdb" class="chipBox"></div>
+
+
                 <details class="help" style="margin-top: 10px">
                   <summary>
                     <span>Tipy pro Trakt zdroje</span
-                    ><span class="k">profiles[].fromTrakt</span>
+                    ><span class="k">profiles[].fromTrakt / profiles[].fromTmdb</span>
                   </summary>
                   <div class="helpBody">
                     Pokud vybereš jen filtry (years/genres) a žádné zdroje,
@@ -2254,7 +2260,7 @@
                     id="sp_customSource"
                     type="text"
                     class="mono"
-                    placeholder="vlastní /movies/... nebo /shows/..."
+                    placeholder="vlastni /movies/... /shows/... /movie/... /tv/..."
                   />
                   <button id="btnSpAddSource" class="btn small" type="button">
                     Přidat
@@ -2264,12 +2270,13 @@
                 <details class="help" style="margin-top: 10px">
                   <summary>
                     <span>Vlastní zdroj</span
-                    ><span class="k">custom Trakt path</span>
+                    ><span class="k">custom Trakt/TMDB path</span>
                   </summary>
                   <div class="helpBody">
-                    Sem zadej přímo Trakt path (musí začínat <code>/</code>),
-                    např. <code>/movies/trending</code>. Udržuj konzistenci s
-                    typem profilu.
+                    Sem zadej Trakt nebo TMDB path (musi zacinat <code>/</code>),
+                    napr. <code>/movies/trending</code> nebo
+                    <code>/trending/movie/day</code>. Udrzuj konzistenci s typem
+                    profilu.
                   </div>
                 </details>
 

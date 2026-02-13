@@ -311,14 +311,30 @@ function normalizeListsConfig(lists) {
     if (!l.filters) l.filters = {};
 
     // normalize ids/names
-    if (typeof l.id !== "string") l.id = String(l.id || "").trim();
-    if (typeof l.name !== "string") l.name = String(l.name || "").trim();
+    l.id = String(l.id || "").trim();
+    l.name = String(l.name || "").trim();
   }
 
   return lists;
 }
 
+function readProfileListRefs(profile) {
+  const legacy = Array.isArray(profile?.fromLists) ? profile.fromLists : [];
+  const modern = Array.isArray(profile?.sources?.listIds)
+    ? profile.sources.listIds
+    : [];
+
+  return Array.from(
+    new Set(
+      [...legacy, ...modern]
+        .map((x) => String(x || "").trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
 function isValidListsConfig(obj) {
+  // Validate base lists + SmartPicks reference integrity.
   if (!obj || typeof obj !== "object") return "Config není objekt.";
   if (!obj.defaults || typeof obj.defaults !== "object")
     return "Chybí defaults.";
@@ -336,6 +352,50 @@ function isValidListsConfig(obj) {
     if (l.filters && typeof l.filters !== "object")
       return `List ${l.id}: filters musí být objekt.`;
   }
+  const seenListIds = new Set();
+  for (const l of obj.lists) {
+    const id = String(l?.id || "").trim();
+    if (!id) return "List musi mit id.";
+    if (seenListIds.has(id)) return `Duplicitni list id: ${id}.`;
+    seenListIds.add(id);
+  }
+
+  if (obj.smartPicks !== undefined && obj.smartPicks !== null) {
+    if (typeof obj.smartPicks !== "object")
+      return "smartPicks musi byt objekt.";
+
+    const profiles = Array.isArray(obj.smartPicks.profiles)
+      ? obj.smartPicks.profiles
+      : [];
+    const profileIds = new Set();
+
+    for (const p of profiles) {
+      if (!p || typeof p !== "object")
+        return "SmartPicks profil musi byt objekt.";
+
+      const pid = String(p.id || "").trim();
+      if (!pid) return "SmartPicks profil musi mit id.";
+      if (profileIds.has(pid))
+        return `Duplicitni SmartPicks profil id: ${pid}.`;
+      if (seenListIds.has(pid))
+        return `Kolize id: ${pid} je v lists i smartPicks.`;
+
+      const type = String(p.type || "")
+        .trim()
+        .toLowerCase();
+      if (type !== "movie" && type !== "series")
+        return `SmartPicks ${pid}: type musi byt movie/series.`;
+
+      const refs = readProfileListRefs(p);
+      for (const ref of refs) {
+        if (!seenListIds.has(ref))
+          return `SmartPicks ${pid}: odkazuje na neexistujici list '${ref}'.`;
+      }
+
+      profileIds.add(pid);
+    }
+  }
+
   return null;
 }
 

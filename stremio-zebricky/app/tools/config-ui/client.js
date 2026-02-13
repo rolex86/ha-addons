@@ -744,6 +744,16 @@
       return;
     }
 
+    const collidesWithProfile = (state.lists?.smartPicks?.profiles || []).some(
+      (p) => String(p?.id || "").trim() === id,
+    );
+    if (collidesWithProfile) {
+      alert(
+        `ID koliduje se SmartPicks profilem (${id}). Pouzij jine id listu.`,
+      );
+      return;
+    }
+
     const obj = {
       id,
       name,
@@ -1514,6 +1524,14 @@
     ensureSmartPicksExists();
 
     const uiProfile = getSmartPickFromForm(true);
+    const collidesWithList = (state.lists?.lists || []).some(
+      (l) => String(l?.id || "").trim() === uiProfile.id,
+    );
+    if (collidesWithList) {
+      throw new Error(
+        `ID koliduje s beznym listem (${uiProfile.id}). Pouzij jine id profilu.`,
+      );
+    }
 
     // find existing (to preserve csfdRules + unknown fields)
     const idx = state.lists.smartPicks.profiles.findIndex(
@@ -1565,6 +1583,56 @@
   // =========================
   // Load / Save
   // =========================
+  function collectProfileListRefs(profile) {
+    const legacy = Array.isArray(profile?.fromLists) ? profile.fromLists : [];
+    const modern = Array.isArray(profile?.sources?.listIds)
+      ? profile.sources.listIds
+      : [];
+
+    return Array.from(
+      new Set(
+        [...legacy, ...modern]
+          .map((x) => String(x || "").trim())
+          .filter(Boolean),
+      ),
+    );
+  }
+
+  function validateStateBeforeSave() {
+    const lists = Array.isArray(state.lists?.lists) ? state.lists.lists : [];
+    const profiles = Array.isArray(state.lists?.smartPicks?.profiles)
+      ? state.lists.smartPicks.profiles
+      : [];
+
+    const listIds = new Set();
+    for (const l of lists) {
+      const id = String(l?.id || "").trim();
+      if (!id) throw new Error("List ma prazdne id.");
+      if (listIds.has(id)) throw new Error(`Duplicitni list id: ${id}.`);
+      listIds.add(id);
+    }
+
+    const profileIds = new Set();
+    for (const p of profiles) {
+      const pid = String(p?.id || "").trim();
+      if (!pid) throw new Error("SmartPicks profil ma prazdne id.");
+      if (profileIds.has(pid))
+        throw new Error(`Duplicitni SmartPicks profil id: ${pid}.`);
+      if (listIds.has(pid))
+        throw new Error(`Kolize id: ${pid} je v lists i smartPicks.`);
+
+      const refs = collectProfileListRefs(p);
+      for (const ref of refs) {
+        if (!listIds.has(ref))
+          throw new Error(
+            `SmartPicks ${pid} odkazuje na neexistujici list '${ref}'.`,
+          );
+      }
+
+      profileIds.add(pid);
+    }
+  }
+
   async function loadFromDisk() {
     setStatus("loading…");
     const data = await apiGetConfig();
@@ -1602,6 +1670,7 @@
     ensureSmartPicksExists();
 
     setStatus("saving…");
+    validateStateBeforeSave();
     const resp = await apiSaveConfig({
       lists: state.lists,
       secrets: state.secrets,

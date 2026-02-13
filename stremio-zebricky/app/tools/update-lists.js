@@ -407,7 +407,7 @@ async function detectScripts() {
   }
 
   // ----------------
-  // STEP 2: SmartPicks (always allowed, but doesn't trigger enrich by itself)
+  // STEP 2: SmartPicks
   // ----------------
   if (scripts.genSmartPicks) {
     log(`--- STEP 2: Generuji SmartPicks: ${rel(scripts.genSmartPicks)} ---`);
@@ -438,27 +438,36 @@ async function detectScripts() {
     log("--- STEP 2: (skip) generate_smart_picks.mjs not found ---");
   }
 
+  const afterAll = await snapshotListHashes();
+  const changedAfterAll = diffHashes(beforeAll, afterAll);
+  const smartChanged = changedAfterAll.filter((fn) =>
+    smartPickIds.has(idFromFilename(fn)),
+  );
+
   // ----------------
-  // STEP 3: Enrich (only if base lists changed)
+  // STEP 3: Enrich
   // ----------------
   if (disableEnrich) {
     log("--- STEP 3: SKIP enrich (DISABLE_ENRICH=1) ---");
   } else if (!scripts.enrichBest) {
     log("--- STEP 3: (skip) no enrich script found ---");
-  } else if (!baseChanged.length) {
+  } else if (!baseChanged.length && !smartChanged.length) {
     log("--- STEP 3: SKIP enrich (base listy se nezměnily) ---");
   } else {
-    log(`--- STEP 3: Enrich: ${rel(scripts.enrichBest)} ---`);
+    const lightMode = !baseChanged.length && smartChanged.length;
+    log(
+      `--- STEP 3: Enrich ${lightMode ? "(light smartpicks)" : "(full)"}: ${rel(scripts.enrichBest)} ---`,
+    );
 
-    const afterAll = await snapshotListHashes();
-    const changedAfterAll = diffHashes(beforeAll, afterAll);
-
-    // When base changed, enrich only relevant list outputs:
+    // Full mode:
     // - base lists (ids in config.lists[])
     // - smartpicks lists (ids in smartPicks.profiles[]) if they changed in this run too
+    // Light mode:
+    // - only changed smartpicks outputs (no heavy full enrich pressure)
     const targets = changedAfterAll.filter((fn) => {
       const id = idFromFilename(fn);
-      return baseListIds.has(id) || smartPickIds.has(id);
+      if (baseChanged.length) return baseListIds.has(id) || smartPickIds.has(id);
+      return smartPickIds.has(id);
     });
 
     await fsp.writeFile(
@@ -475,9 +484,9 @@ async function detectScripts() {
       const out = await runNodeScript(
         scripts.enrichBest,
         [],
-        "Enrich",
+        lightMode ? "Enrich (light smartpicks)" : "Enrich",
         { step: 3, steps: 3 },
-        { ENRICH_TARGETS_PATH },
+        { ENRICH_TARGETS_PATH, ...(lightMode ? { ENRICH_LIGHT: "1" } : {}) },
       );
 
       if (!out.ok) {

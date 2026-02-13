@@ -16,6 +16,12 @@ const CSFD_MAP_PATH = path.join(CACHE_DIR, "csfd_map.json");
 
 const TRAKT_BASE = "https://api.trakt.tv";
 const DEFAULT_TIMEOUT_MS = 15000;
+const CSFD_NOT_FOUND_TTL_DAYS = Number(
+  process.env.CSFD_NOT_FOUND_TTL_DAYS || 7,
+);
+const CSFD_ERROR_RETRY_MS = Number(
+  process.env.CSFD_ERROR_RETRY_MS || 30 * 60 * 1000,
+);
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -224,30 +230,70 @@ async function getCsfdInfo(
   ttlDays = 30,
 ) {
   const cached = csfdMap[imdb];
+  const now = Date.now();
 
-  if (cached?.last) {
-    const ageMs = Date.now() - cached.last;
-    const ttlMs = ttlDays * 24 * 60 * 60 * 1000;
-    if (ageMs < ttlMs && cached.csfdId !== undefined) {
-      return cached.csfdId
-        ? {
-            csfdId: cached.csfdId,
-            rating: cached.rating,
-            ratingCount: cached.ratingCount,
-            name: cached.name,
-            year: cached.year,
-          }
-        : null;
-    }
+  const okTtlMs = ttlDays * 24 * 60 * 60 * 1000;
+  const notFoundTtlMs = CSFD_NOT_FOUND_TTL_DAYS * 24 * 60 * 60 * 1000;
+  const errorRetryMs = CSFD_ERROR_RETRY_MS;
+
+  const toTs = (v) => {
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  };
+  const toNumOrNull = (v) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+  const cachedSuccess =
+    cached &&
+    cached.csfdId !== null &&
+    Number.isFinite(Number(cached.csfdId)) &&
+    Number.isFinite(Number(cached.rating))
+      ? {
+          csfdId: Number(cached.csfdId),
+          rating: Number(cached.rating),
+          ratingCount: toNumOrNull(cached.ratingCount),
+          name: cached.name,
+          year: cached.year,
+        }
+      : null;
+
+  // Backward compatibility for older cache shape:
+  // - "last" + rating => previous successful fetch
+  // - "last" + csfdId:null => previous search miss
+  // - "last" + csfdId but no rating => previous transient failure
+  const okTs = toTs(cached?.lastOkAt) || (cachedSuccess ? toTs(cached?.last) : 0);
+  if (cachedSuccess && okTs && now - okTs < okTtlMs) {
+    return cachedSuccess;
   }
 
-  let csfdId = cached?.csfdId ?? null;
+  const notFoundTs =
+    toTs(cached?.lastNotFoundAt) ||
+    (cached?.csfdId === null ? toTs(cached?.last) : 0);
+  if (cached?.csfdId === null && notFoundTs && now - notFoundTs < notFoundTtlMs) {
+    return null;
+  }
+
+  const errorTs =
+    toTs(cached?.lastErrorAt) ||
+    (cached?.csfdId !== null && !cachedSuccess ? toTs(cached?.last) : 0);
+  if (!cachedSuccess && errorTs && now - errorTs < errorRetryMs) {
+    return null;
+  }
+
+  let csfdId = Number.isFinite(Number(cached?.csfdId))
+    ? Number(cached.csfdId)
+    : null;
 
   try {
     if (!csfdId) csfdId = await findCsfdIdBySearch(title, year, sleepMs);
 
     if (!csfdId) {
-      csfdMap[imdb] = { csfdId: null, last: Date.now() };
+      csfdMap[imdb] = {
+        csfdId: null,
+        lastAttemptAt: now,
+        lastNotFoundAt: now,
+      };
       return null;
     }
 
@@ -266,15 +312,22 @@ async function getCsfdInfo(
       ratingCount,
       name,
       year: y,
-      last: Date.now(),
+      lastAttemptAt: now,
+      lastOkAt: now,
     };
 
     return { csfdId: Number(csfdId), rating, ratingCount, name, year: y };
-  } catch {
+  } catch (e) {
     csfdMap[imdb] = {
+      ...(cached && typeof cached === "object" ? cached : {}),
       csfdId: csfdId ? Number(csfdId) : null,
-      last: Date.now(),
+      lastAttemptAt: now,
+      lastErrorAt: now,
+      lastError: String(e?.message || e),
     };
+
+    // Keep a stale successful result as fallback on transient failures.
+    if (cachedSuccess) return cachedSuccess;
     return null;
   }
 }

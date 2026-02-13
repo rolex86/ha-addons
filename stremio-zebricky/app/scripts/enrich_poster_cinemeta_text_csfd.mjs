@@ -22,6 +22,7 @@ const CINEMETA_UA = process.env.CINEMETA_UA || "stremio-local-addon/0.0.6";
 
 const CACHE_TTL_DAYS = Number(process.env.ENRICH_CACHE_TTL_DAYS || 30);
 const FORCE = String(process.env.ENRICH_FORCE || "").trim() === "1";
+const LIGHT_MODE = String(process.env.ENRICH_LIGHT || "").trim() === "1";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -223,6 +224,23 @@ async function enrichItem(it, listType) {
   }
 
   // MOVIES: Cinemeta + CSFD
+  if (LIGHT_MODE) {
+    const before = sha1(it);
+
+    it.name = it.name || fallbackName;
+    it.year = it.year || fallbackYear;
+    it.genres = it.genres || fallbackGenres;
+    it.description = it.description || fallbackDesc;
+    it.releaseInfo = it.releaseInfo || it.year;
+
+    const after = sha1(it);
+    const didChange = before !== after || changed;
+
+    await saveCache(imdbId, pickCacheFromItem(it));
+    return didChange;
+  }
+
+  // MOVIES: full mode Cinemeta + CSFD
   let cs = null;
   try {
     if (!it.csfdId) {
@@ -350,7 +368,7 @@ async function main() {
   }
 
   console.log(
-    `Starting enrichment: files=${files.length}, listDir=${listDir}, cacheDir=${CACHE_DIR}, cacheTtlDays=${CACHE_TTL_DAYS}, force=${FORCE ? "1" : "0"}, sleepMs=${SLEEP_MS}, timeoutMs=${FETCH_TIMEOUT_MS}`
+    `Starting enrichment: files=${files.length}, listDir=${listDir}, cacheDir=${CACHE_DIR}, cacheTtlDays=${CACHE_TTL_DAYS}, force=${FORCE ? "1" : "0"}, lightMode=${LIGHT_MODE ? "1" : "0"}, sleepMs=${SLEEP_MS}, timeoutMs=${FETCH_TIMEOUT_MS}`
   );
 
   for (const f of files) {

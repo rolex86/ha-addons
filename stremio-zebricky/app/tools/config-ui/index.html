@@ -1571,6 +1571,40 @@
                 </div>
               </div>
 
+              <div id="f_sourcesPicker_wrap" style="margin-top: 12px">
+                <div class="subHead" style="margin-bottom: 8px">
+                  <strong>Zdroje</strong>
+                  <span class="muted">Trakt + TMDB (per-list)</span>
+                </div>
+
+                <div class="muted" style="margin: 6px 0 8px">
+                  <strong>Trakt zdroje:</strong>
+                </div>
+                <div id="f_src_trakt" class="chipBox"></div>
+
+                <div class="muted" style="margin: 12px 0 8px">
+                  <strong>TMDB zdroje:</strong>
+                </div>
+                <div id="f_src_tmdb" class="chipBox"></div>
+
+                <div class="row" style="gap: 8px; margin-top: 10px">
+                  <input
+                    id="f_customSource"
+                    type="text"
+                    class="mono"
+                    placeholder="vlastni /movies/... /shows/... /movie/... /tv/..."
+                  />
+                  <button id="btnListAddSource" class="btn small" type="button">
+                    Pridat
+                  </button>
+                </div>
+
+                <div class="muted" style="margin: 12px 0 8px">
+                  <strong>Vybrane zdroje tohoto listu:</strong>
+                </div>
+                <div id="f_src_selected" class="checkList"></div>
+              </div>
+
               <div style="margin-top: 12px">
                 <label class="small">Roky (od–do)</label>
                 <div class="yearGrid">

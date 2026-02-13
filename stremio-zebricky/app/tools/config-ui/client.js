@@ -563,9 +563,30 @@
     }
   }
 
+  function bindListSourcesPickerHandlers() {
+    const btn = $("btnListAddSource");
+    if (btn && !btn.dataset.bound) {
+      btn.addEventListener("click", handleAddCustomListSource);
+      btn.dataset.bound = "1";
+    }
+    const input = $("f_customSource");
+    if (input && !input.dataset.bound) {
+      input.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter") {
+          ev.preventDefault();
+          handleAddCustomListSource();
+        }
+      });
+      input.dataset.bound = "1";
+    }
+  }
+
   function ensureListSourcesPickerField() {
     let wrap = $("f_sourcesPicker_wrap");
-    if (wrap) return wrap;
+    if (wrap) {
+      bindListSourcesPickerHandlers();
+      return wrap;
+    }
 
     const sourceEl = $("f_source");
     if (!sourceEl) return null;
@@ -615,21 +636,7 @@
 
     row.insertAdjacentElement("afterend", wrap);
 
-    const btn = $("btnListAddSource");
-    if (btn && !btn.dataset.bound) {
-      btn.addEventListener("click", handleAddCustomListSource);
-      btn.dataset.bound = "1";
-    }
-    const input = $("f_customSource");
-    if (input && !input.dataset.bound) {
-      input.addEventListener("keydown", (ev) => {
-        if (ev.key === "Enter") {
-          ev.preventDefault();
-          handleAddCustomListSource();
-        }
-      });
-      input.dataset.bound = "1";
-    }
+    bindListSourcesPickerHandlers();
 
     return wrap;
   }

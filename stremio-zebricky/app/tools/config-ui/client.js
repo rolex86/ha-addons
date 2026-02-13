@@ -84,6 +84,8 @@
     { value: "/movies/played/all", label: "movies/played/all" },
     { value: "/movies/popular", label: "movies/popular" },
     { value: "/movies/trending", label: "movies/trending" },
+    { value: "/movie/popular", label: "TMDB movie/popular" },
+    { value: "/trending/movie/day", label: "TMDB trending/movie/day" },
   ];
 
   const SOURCES_SERIES = [
@@ -92,6 +94,8 @@
     { value: "/shows/played/all", label: "shows/played/all" },
     { value: "/shows/watched/all", label: "shows/watched/all" },
     { value: "/shows/collected/all", label: "shows/collected/all" },
+    { value: "/tv/popular", label: "TMDB tv/popular" },
+    { value: "/trending/tv/day", label: "TMDB trending/tv/day" },
   ];
 
   // SmartPicks: 10 "seed" endpoints per type
@@ -199,7 +203,10 @@
   // =========================
   let state = {
     lists: { defaults: { dupRules: {} }, lists: [], smartPicks: null },
-    secrets: { trakt: { client_id: "", client_secret: "" } },
+    secrets: {
+      trakt: { client_id: "", client_secret: "" },
+      tmdb: { access_token: "", api_key: "" },
+    },
   };
 
   let genresCache = {
@@ -709,13 +716,24 @@
       $("traktId").value = state.secrets?.trakt?.client_id ?? "";
     if ($("traktSecret"))
       $("traktSecret").value = state.secrets?.trakt?.client_secret ?? "";
+    if ($("tmdbToken"))
+      $("tmdbToken").value =
+        state.secrets?.tmdb?.access_token ?? state.secrets?.tmdb?.bearer_token ?? "";
+    if ($("tmdbApiKey"))
+      $("tmdbApiKey").value = state.secrets?.tmdb?.api_key ?? "";
   }
 
   function readSecretsFromUI() {
     state.secrets = state.secrets || {};
     state.secrets.trakt = state.secrets.trakt || {};
+    state.secrets.tmdb = state.secrets.tmdb || {};
     state.secrets.trakt.client_id = String($("traktId")?.value || "");
     state.secrets.trakt.client_secret = String($("traktSecret")?.value || "");
+    state.secrets.tmdb.access_token = String($("tmdbToken")?.value || "");
+    state.secrets.tmdb.api_key = String($("tmdbApiKey")?.value || "");
+    if (!state.secrets.tmdb.access_token && !state.secrets.tmdb.api_key) {
+      delete state.secrets.tmdb;
+    }
   }
 
   // =========================
@@ -1705,6 +1723,15 @@
     state.lists = data.lists || { defaults: { dupRules: {} }, lists: [] };
     state.secrets = data.secrets || {
       trakt: { client_id: "", client_secret: "" },
+      tmdb: { access_token: "", api_key: "" },
+    };
+    state.secrets.trakt = state.secrets.trakt || {
+      client_id: "",
+      client_secret: "",
+    };
+    state.secrets.tmdb = state.secrets.tmdb || {
+      access_token: "",
+      api_key: "",
     };
 
     state.lists.defaults = state.lists.defaults || {};
@@ -1793,7 +1820,10 @@
         ],
       },
     };
-    state.secrets = { trakt: { client_id: "", client_secret: "" } };
+    state.secrets = {
+      trakt: { client_id: "", client_secret: "" },
+      tmdb: { access_token: "", api_key: "" },
+    };
 
     writeDefaultsToUI();
     writeSecretsToUI();
@@ -2106,7 +2136,10 @@
         lists: [],
         smartPicks: { enabled: true, defaultSize: 10, profiles: [] },
       };
-      state.secrets = { trakt: { client_id: "", client_secret: "" } };
+      state.secrets = {
+        trakt: { client_id: "", client_secret: "" },
+        tmdb: { access_token: "", api_key: "" },
+      };
 
       writeDefaultsToUI();
       writeSecretsToUI();

@@ -47,3 +47,21 @@ export async function getTraktKeys() {
 
   return { clientId, clientSecret };
 }
+
+export async function getTmdbKeys() {
+  const secrets = await loadSecrets();
+
+  const accessToken = String(
+    process.env.TMDB_ACCESS_TOKEN ||
+      process.env.TMDB_BEARER_TOKEN ||
+      secrets?.tmdb?.access_token ||
+      secrets?.tmdb?.bearer_token ||
+      "",
+  ).trim();
+
+  const apiKey = String(
+    process.env.TMDB_API_KEY || secrets?.tmdb?.api_key || "",
+  ).trim();
+
+  return { accessToken, apiKey };
+}

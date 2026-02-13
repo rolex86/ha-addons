@@ -1347,6 +1347,40 @@
                 </div>
               </details>
 
+
+              <label class="small">TMDB Access Token (volitelne)</label>
+              <input
+                id="tmdbToken"
+                type="password"
+                placeholder="tmdb.access_token"
+              />
+              <details class="help">
+                <summary>
+                  <span>Kde to vzit</span
+                  ><span class="k">secrets.tmdb.access_token</span>
+                </summary>
+                <div class="helpBody">
+                  V TMDB API nastaveni vytvor v4 Read Access Token. Pouziva se pro
+                  TMDB sources (provider: <code>tmdb</code>).
+                </div>
+              </details>
+
+              <label class="small">TMDB API key (volitelne)</label>
+              <input
+                id="tmdbApiKey"
+                type="password"
+                placeholder="tmdb.api_key"
+              />
+              <details class="help">
+                <summary>
+                  <span>Kde to vzit</span
+                  ><span class="k">secrets.tmdb.api_key</span>
+                </summary>
+                <div class="helpBody">
+                  Alternativa k access tokenu. Staci vyplnit bud access token nebo
+                  api key.
+                </div>
+              </details>
               <div class="divider"></div>
               <p class="sub">
                 <strong>Tip:</strong> pokud jsi v LAN, nastav
@@ -1520,7 +1554,7 @@
                   </details>
                 </div>
                 <div>
-                  <label class="small">source.path (Trakt)</label>
+                  <label class="small">source.path (Trakt/TMDB)</label>
                   <select id="f_source"></select>
                   <details class="help">
                     <summary>
@@ -1528,9 +1562,9 @@
                       ><span class="k">lists[].source.path</span>
                     </summary>
                     <div class="helpBody">
-                      Trakt endpoint, např. <code>/movies/trending</code>,
-                      <code>/movies/popular</code>,
-                      <code>/shows/trending</code>. Udržuj konzistenci s
+                      Endpoint zdroje, napr. <code>/movies/trending</code>,
+                      <code>/movie/popular</code>, <code>/trending/movie/day</code>,
+                      nebo <code>/shows/trending</code>. Udrzuj konzistenci s
                       <code>type</code>.
                     </div>
                   </details>

@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import crypto from "node:crypto";
 import { csfd } from "node-csfd-api";
-import { getTraktKeys } from "./_secrets.mjs";
+import { getTraktKeys, getTmdbKeys } from "./_secrets.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -18,12 +18,18 @@ const STATE_DIR = path.join(RUNTIME_DIR, "lists-state");
 const SOURCE_SNAPSHOT_DIR = path.join(RUNTIME_DIR, "source-snapshots");
 
 const CSFD_MAP_PATH = path.join(CACHE_DIR, "csfd_map.json");
+const TMDB_IMDB_MAP_PATH = path.join(CACHE_DIR, "tmdb_imdb_map.json");
 const EXPOSURE_PATH = path.join(STATE_DIR, "exposure.json");
 
 const TRAKT_BASE = "https://api.trakt.tv";
+const TMDB_BASE = "https://api.themoviedb.org/3";
 const DEFAULT_TIMEOUT_MS = 15000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const ENGINE_VERSION = 2;
+const TMDB_MAP_OK_TTL_DAYS = Number(process.env.TMDB_MAP_OK_TTL_DAYS || 120);
+const TMDB_MAP_NOT_FOUND_TTL_DAYS = Number(
+  process.env.TMDB_MAP_NOT_FOUND_TTL_DAYS || 21,
+);
 
 const CSFD_NOT_FOUND_TTL_DAYS = Number(
   process.env.CSFD_NOT_FOUND_TTL_DAYS || 7,
@@ -298,7 +304,7 @@ function stableListSignature(obj) {
       topWindow: obj?.strategy?.topWindow,
     },
     sources: (obj.sources || [])
-      .map((s) => `${s.path}|${s.weight}`)
+      .map((s) => `${s.provider || "trakt"}:${s.path}|${s.weight}`)
       .sort(),
     items: (obj.items || []).map((x) => x.imdb),
     filters: obj.filters,
@@ -312,13 +318,80 @@ function sameSignature(a, b) {
   );
 }
 
-function buildUrl(pathname, params = {}) {
+function buildTraktUrl(pathname, params = {}) {
   const url = new URL(TRAKT_BASE + pathname);
   for (const [k, v] of Object.entries(params)) {
     if (v === undefined || v === null || v === "") continue;
     url.searchParams.set(k, String(v));
   }
   return url.toString();
+}
+
+function buildTmdbUrl(pathname, params = {}, apiKey = "") {
+  const p = String(pathname || "").trim();
+  const normalizedPath = p.startsWith("/") ? p : `/${p}`;
+  const url = new URL(TMDB_BASE + normalizedPath);
+  if (apiKey) url.searchParams.set("api_key", apiKey);
+  for (const [k, v] of Object.entries(params)) {
+    if (v === undefined || v === null || v === "") continue;
+    url.searchParams.set(k, String(v));
+  }
+  return url.toString();
+}
+
+function parseYearRange(v) {
+  const s = String(v || "").trim();
+  const m = s.match(/^(\d{4})\s*-\s*(\d{4})$/);
+  if (!m) return null;
+  let y1 = Number(m[1]);
+  let y2 = Number(m[2]);
+  if (!Number.isFinite(y1) || !Number.isFinite(y2)) return null;
+  if (y2 < y1) [y1, y2] = [y2, y1];
+  return { from: y1, to: y2 };
+}
+
+function slugifyGenreName(name) {
+  return String(name || "")
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .replace(/--+/g, "-");
+}
+
+function buildTmdbFilters(filters, listType, genreSlugToId) {
+  const out = {};
+  const src = filters && typeof filters === "object" ? filters : {};
+
+  for (const [k, v] of Object.entries(src)) {
+    if (k === "genres" || k === "years" || k === "genresExclude" || k === "excludeGenres")
+      continue;
+    if (v === undefined || v === null || v === "") continue;
+    out[k] = v;
+  }
+
+  const years = parseYearRange(src.years);
+  if (years) {
+    if (listType === "series") {
+      out["first_air_date.gte"] = `${years.from}-01-01`;
+      out["first_air_date.lte"] = `${years.to}-12-31`;
+    } else {
+      out["primary_release_date.gte"] = `${years.from}-01-01`;
+      out["primary_release_date.lte"] = `${years.to}-12-31`;
+    }
+  }
+
+  const genres = parseCsv(src.genres || "");
+  if (genres.length) {
+    const ids = genres
+      .map((g) => genreSlugToId.get(g))
+      .filter((x) => Number.isFinite(Number(x)))
+      .map((x) => Number(x));
+    if (ids.length) out.with_genres = ids.join(",");
+  }
+
+  return out;
 }
 
 async function fetchWithTimeout(
@@ -344,7 +417,7 @@ async function fetchTraktPage({
   timeoutMs,
 }) {
   const params = { ...(filters ?? {}), page, limit, extended: "full" };
-  const url = buildUrl(pathname, params);
+  const url = buildTraktUrl(pathname, params);
 
   console.log(`[TRAKT] GET ${pathname} page=${page} limit=${limit}`);
 
@@ -368,6 +441,41 @@ async function fetchTraktPage({
   return res.json();
 }
 
+async function fetchTmdbPage({
+  accessToken,
+  apiKey,
+  pathname,
+  filters,
+  page,
+  timeoutMs,
+}) {
+  if (!accessToken && !apiKey) {
+    throw new Error(
+      "TMDB source configured, but missing tmdb access token or api_key in secrets/env.",
+    );
+  }
+
+  const params = { ...(filters ?? {}), page };
+  const url = buildTmdbUrl(pathname, params, apiKey);
+  const headers = { "Content-Type": "application/json" };
+  if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
+
+  console.log(`[TMDB] GET ${pathname} page=${page}`);
+
+  const res = await fetchWithTimeout(
+    url,
+    { headers },
+    timeoutMs ?? DEFAULT_TIMEOUT_MS,
+  );
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`TMDB ${res.status} for ${url}\n${text}`);
+  }
+
+  const json = await res.json();
+  return Array.isArray(json?.results) ? json.results : [];
+}
+
 function normalizeTraktItem(raw, type) {
   const obj = type === "series" ? (raw?.show ?? raw) : (raw?.movie ?? raw);
 
@@ -388,6 +496,51 @@ function normalizeTraktItem(raw, type) {
   if (!imdb || typeof imdb !== "string" || !imdb.startsWith("tt")) return null;
 
   return { imdb, title, year, traktSignal, genres };
+}
+
+function normalizeTmdbItem(raw, type, genreIdToSlug) {
+  const tmdbId = Number(raw?.id);
+  if (!Number.isFinite(tmdbId) || tmdbId <= 0) return null;
+
+  const title =
+    type === "series"
+      ? raw?.name || raw?.original_name || raw?.title
+      : raw?.title || raw?.original_title || raw?.name;
+
+  const date =
+    type === "series"
+      ? raw?.first_air_date || raw?.release_date
+      : raw?.release_date || raw?.first_air_date;
+  const yearMatch = String(date || "").match(/^(\d{4})/);
+  const year = yearMatch ? Number(yearMatch[1]) : undefined;
+
+  let genres = [];
+  if (Array.isArray(raw?.genre_ids) && raw.genre_ids.length) {
+    genres = raw.genre_ids
+      .map((id) => genreIdToSlug.get(Number(id)) || "")
+      .filter(Boolean);
+  } else if (Array.isArray(raw?.genres) && raw.genres.length) {
+    genres = raw.genres
+      .map((g) =>
+        g && typeof g === "object"
+          ? genreIdToSlug.get(Number(g.id)) || slugifyGenreName(g.name)
+          : "",
+      )
+      .filter(Boolean);
+  }
+
+  const popularity = toNumber(raw?.popularity, 0);
+  const votes = toNumber(raw?.vote_count, 0);
+  const rating = toNumber(raw?.vote_average, 0);
+  const tmdbSignal = popularity + votes * 0.5 + rating * 10;
+
+  return {
+    tmdbId,
+    title: String(title || "").trim(),
+    year,
+    traktSignal: tmdbSignal,
+    genres: uniqLower(genres),
+  };
 }
 
 function formatCountK(n) {
@@ -575,6 +728,152 @@ function normalizeStoredCandidate(item) {
       : 0,
     genres: uniqLower(Array.isArray(item?.genres) ? item.genres : []),
   };
+}
+
+function tmdbMediaTypeOfListType(listType) {
+  return String(listType || "").trim().toLowerCase() === "series" ? "tv" : "movie";
+}
+
+function tmdbMapKey(listType, tmdbId) {
+  return `${tmdbMediaTypeOfListType(listType)}:${Number(tmdbId)}`;
+}
+
+function isFreshTs(ts, ttlDays) {
+  const t = Number(ts);
+  return Number.isFinite(t) && t > 0 && Date.now() - t < ttlDays * DAY_MS;
+}
+
+async function fetchTmdbGenresMap({ listType, tmdb, timeoutMs, tmdbGenresCache }) {
+  const media = tmdbMediaTypeOfListType(listType);
+  if (tmdbGenresCache[media]) return tmdbGenresCache[media];
+
+  if (!tmdb?.accessToken && !tmdb?.apiKey) {
+    throw new Error(
+      "TMDB source configured, but missing tmdb access token or api_key in secrets/env.",
+    );
+  }
+
+  const pathName = media === "tv" ? "/genre/tv/list" : "/genre/movie/list";
+  const url = buildTmdbUrl(pathName, { language: "en-US" }, tmdb.apiKey || "");
+  const headers = { "Content-Type": "application/json" };
+  if (tmdb.accessToken) headers.Authorization = `Bearer ${tmdb.accessToken}`;
+
+  const res = await fetchWithTimeout(
+    url,
+    { method: "GET", headers },
+    timeoutMs ?? DEFAULT_TIMEOUT_MS,
+  );
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`TMDB ${res.status} for ${url}\n${text}`);
+  }
+  const json = await res.json();
+  const list = Array.isArray(json?.genres) ? json.genres : [];
+
+  const idToSlug = new Map();
+  const slugToId = new Map();
+  for (const g of list) {
+    const id = Number(g?.id);
+    if (!Number.isFinite(id)) continue;
+    const slug = slugifyGenreName(g?.name || "");
+    if (!slug) continue;
+    idToSlug.set(id, slug);
+    if (!slugToId.has(slug)) slugToId.set(slug, id);
+  }
+
+  const out = { idToSlug, slugToId };
+  tmdbGenresCache[media] = out;
+  return out;
+}
+
+async function fetchTmdbExternalImdbId({ listType, tmdbId, tmdb, timeoutMs }) {
+  const media = tmdbMediaTypeOfListType(listType);
+  const pathName = `/${media}/${Number(tmdbId)}/external_ids`;
+  const url = buildTmdbUrl(pathName, {}, tmdb.apiKey || "");
+  const headers = { "Content-Type": "application/json" };
+  if (tmdb.accessToken) headers.Authorization = `Bearer ${tmdb.accessToken}`;
+
+  const res = await fetchWithTimeout(
+    url,
+    { method: "GET", headers },
+    timeoutMs ?? DEFAULT_TIMEOUT_MS,
+  );
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`TMDB ${res.status} for ${url}\n${text}`);
+  }
+
+  const json = await res.json();
+  const imdb = String(json?.imdb_id || "").trim();
+  return imdb.startsWith("tt") ? imdb : "";
+}
+
+async function resolveTmdbImdbId({
+  listType,
+  tmdbId,
+  tmdb,
+  tmdbImdbMap,
+  timeoutMs,
+  sleepMs,
+}) {
+  const key = tmdbMapKey(listType, tmdbId);
+  const cached = tmdbImdbMap[key];
+
+  if (cached && typeof cached === "object") {
+    const cachedImdb = String(cached.imdb || "").trim();
+    if (cachedImdb.startsWith("tt") && isFreshTs(cached.lastOkAt, TMDB_MAP_OK_TTL_DAYS)) {
+      return cachedImdb;
+    }
+    if (!cachedImdb && isFreshTs(cached.lastNotFoundAt, TMDB_MAP_NOT_FOUND_TTL_DAYS)) {
+      return "";
+    }
+  }
+
+  if (!tmdb?.accessToken && !tmdb?.apiKey) return "";
+
+  try {
+    const imdb = await fetchTmdbExternalImdbId({
+      listType,
+      tmdbId,
+      tmdb,
+      timeoutMs,
+    });
+    await sleep(Math.min(Math.max(Number(sleepMs) || 0, 0), 80));
+
+    const now = Date.now();
+    if (imdb) {
+      tmdbImdbMap[key] = {
+        imdb,
+        lastAttemptAt: now,
+        lastOkAt: now,
+      };
+      return imdb;
+    }
+
+    tmdbImdbMap[key] = {
+      imdb: "",
+      lastAttemptAt: now,
+      lastNotFoundAt: now,
+    };
+    return "";
+  } catch (e) {
+    const msg = String(e?.message || e);
+    const now = Date.now();
+
+    tmdbImdbMap[key] = {
+      ...(cached && typeof cached === "object" ? cached : {}),
+      lastAttemptAt: now,
+      lastErrorAt: now,
+      lastError: msg,
+    };
+
+    if (msg.includes("TMDB 401") || msg.includes("TMDB 403")) {
+      throw e;
+    }
+
+    const cachedImdb = String(cached?.imdb || "").trim();
+    return cachedImdb.startsWith("tt") ? cachedImdb : "";
+  }
 }
 
 async function saveSourceSnapshot(meta, items) {
@@ -784,6 +1083,24 @@ function resolveSourceDefs(def, defaults, fallbackPages) {
     fallbackPages,
   );
 
+  const normalizeSourceProvider = (providerRaw, sourcePath) => {
+    const p = String(providerRaw || "")
+      .trim()
+      .toLowerCase();
+    if (p === "trakt" || p === "tmdb") return p;
+    if (
+      sourcePath.startsWith("/movie/") ||
+      sourcePath.startsWith("/tv/") ||
+      sourcePath.startsWith("/trending/movie/") ||
+      sourcePath.startsWith("/trending/tv/") ||
+      sourcePath.startsWith("/discover/movie") ||
+      sourcePath.startsWith("/discover/tv")
+    ) {
+      return "tmdb";
+    }
+    return "trakt";
+  };
+
   for (let i = 0; i < raw.length; i++) {
     const src = raw[i];
     const sourceObj =
@@ -797,16 +1114,18 @@ function resolveSourceDefs(def, defaults, fallbackPages) {
     let sourcePath = String(sourceObj.path || "").trim();
     if (!sourcePath) continue;
     if (!sourcePath.startsWith("/")) sourcePath = `/${sourcePath}`;
+    const provider = normalizeSourceProvider(sourceObj.provider, sourcePath);
 
     const id = String(sourceObj.id || sourcePath || `src-${i + 1}`).trim();
     const weight = toPositiveNumber(sourceObj.weight, 1);
     const candidatePages = toPositiveInt(sourceObj.candidatePages, basePages);
-    const key = `${id}::${sourcePath}`;
+    const key = `${provider}::${id}::${sourcePath}`;
     if (seen.has(key)) continue;
     seen.add(key);
 
     out.push({
       id,
+      provider,
       path: sourcePath,
       weight,
       candidatePages,
@@ -818,6 +1137,9 @@ function resolveSourceDefs(def, defaults, fallbackPages) {
 
 async function collectSourceItems({
   clientId,
+  tmdb,
+  tmdbImdbMap,
+  tmdbGenresCache,
   listId,
   listType,
   sourceDef,
@@ -825,12 +1147,14 @@ async function collectSourceItems({
   pageLimit,
   timeoutMs,
   sleepMs,
+  includeSet,
   excludeSet,
   sourcePolicy,
 }) {
   const snapshotMeta = {
     listId,
     listType,
+    provider: sourceDef.provider || "trakt",
     path: sourceDef.path,
     filters: apiFilters,
   };
@@ -839,24 +1163,82 @@ async function collectSourceItems({
   let liveError = "";
 
   try {
-    for (let page = 1; page <= sourceDef.candidatePages; page++) {
-      const data = await fetchTraktPage({
-        clientId,
-        pathname: sourceDef.path,
-        filters: apiFilters,
-        page,
-        limit: pageLimit,
+    if (sourceDef.provider === "tmdb") {
+      const tmdbGenres = await fetchTmdbGenresMap({
+        listType,
+        tmdb,
         timeoutMs,
+        tmdbGenresCache,
       });
+      const tmdbFilters = buildTmdbFilters(
+        apiFilters,
+        listType,
+        tmdbGenres.slugToId,
+      );
 
-      for (const raw of Array.isArray(data) ? data : []) {
-        const it = normalizeTraktItem(raw, listType);
-        if (!it) continue;
-        if (excludeSet.size && hasAnyIntersection(it.genres, excludeSet)) continue;
-        if (!unique.has(it.imdb)) unique.set(it.imdb, it);
+      for (let page = 1; page <= sourceDef.candidatePages; page++) {
+        const data = await fetchTmdbPage({
+          accessToken: tmdb?.accessToken || "",
+          apiKey: tmdb?.apiKey || "",
+          pathname: sourceDef.path,
+          filters: tmdbFilters,
+          page,
+          timeoutMs,
+        });
+
+        for (const raw of Array.isArray(data) ? data : []) {
+          const base = normalizeTmdbItem(raw, listType, tmdbGenres.idToSlug);
+          if (!base) continue;
+          if (includeSet.size && !hasAnyIntersection(base.genres, includeSet))
+            continue;
+          if (excludeSet.size && hasAnyIntersection(base.genres, excludeSet))
+            continue;
+
+          const imdb = await resolveTmdbImdbId({
+            listType,
+            tmdbId: base.tmdbId,
+            tmdb,
+            tmdbImdbMap,
+            timeoutMs,
+            sleepMs,
+          });
+          if (!imdb) continue;
+
+          const item = {
+            imdb,
+            title: base.title,
+            year: base.year,
+            traktSignal: base.traktSignal,
+            genres: base.genres,
+          };
+          if (!unique.has(item.imdb)) unique.set(item.imdb, item);
+        }
+
+        await sleep(sleepMs);
       }
+    } else {
+      for (let page = 1; page <= sourceDef.candidatePages; page++) {
+        const data = await fetchTraktPage({
+          clientId,
+          pathname: sourceDef.path,
+          filters: apiFilters,
+          page,
+          limit: pageLimit,
+          timeoutMs,
+        });
 
-      await sleep(sleepMs);
+        for (const raw of Array.isArray(data) ? data : []) {
+          const it = normalizeTraktItem(raw, listType);
+          if (!it) continue;
+          if (includeSet.size && !hasAnyIntersection(it.genres, includeSet))
+            continue;
+          if (excludeSet.size && hasAnyIntersection(it.genres, excludeSet))
+            continue;
+          if (!unique.has(it.imdb)) unique.set(it.imdb, it);
+        }
+
+        await sleep(sleepMs);
+      }
     }
 
     const items = Array.from(unique.values());
@@ -878,7 +1260,7 @@ async function collectSourceItems({
   );
   if (snap?.items?.length) {
     console.warn(
-      `[SOURCE] ${sourceDef.path} live failed -> using snapshot (${snap.savedAt}): ${liveError}`,
+      `[SOURCE] ${sourceDef.provider || "trakt"}:${sourceDef.path} live failed -> using snapshot (${snap.savedAt}): ${liveError}`,
     );
     return {
       items: snap.items,
@@ -890,7 +1272,7 @@ async function collectSourceItems({
   }
 
   console.warn(
-    `[SOURCE] ${sourceDef.path} failed and no snapshot available: ${liveError}`,
+    `[SOURCE] ${sourceDef.provider || "trakt"}:${sourceDef.path} failed and no snapshot available: ${liveError}`,
   );
   return {
     items: [],
@@ -1267,6 +1649,9 @@ function buildWhySummary(item, listType) {
 
 async function generateOneList({
   clientId,
+  tmdb,
+  tmdbImdbMap,
+  tmdbGenresCache,
   def,
   defaults,
   csfdMap,
@@ -1300,6 +1685,7 @@ async function generateOneList({
   const excludeGenres = uniqLower(
     parseCsv(filters.genresExclude || filters.excludeGenres || ""),
   );
+  const includeSet = new Set(includeGenres);
   const excludeSet = new Set(excludeGenres);
 
   const apiFilters = { ...(filters || {}) };
@@ -1324,7 +1710,7 @@ async function generateOneList({
     `\n=== GENERATING: ${def.id} (${def.name ?? ""}) type=${listType} mode=${settings.mode} ===`,
   );
   console.log(
-    `sources=${sourceDefs.map((s) => `${s.path}*${s.weight}`).join(", ")} | final=${finalSize} | pages=${candidatePages} | limit=${pageLimit}`,
+    `sources=${sourceDefs.map((s) => `${s.provider}:${s.path}*${s.weight}`).join(", ")} | final=${finalSize} | pages=${candidatePages} | limit=${pageLimit}`,
   );
   if (includeGenres.length) console.log("includeGenres:", includeGenres.join(","));
   if (excludeGenres.length) console.log("excludeGenres:", excludeGenres.join(","));
@@ -1335,6 +1721,9 @@ async function generateOneList({
   for (const sourceDef of sourceDefs) {
     const collected = await collectSourceItems({
       clientId,
+      tmdb,
+      tmdbImdbMap,
+      tmdbGenresCache,
       listId: def.id,
       listType,
       sourceDef,
@@ -1342,12 +1731,14 @@ async function generateOneList({
       pageLimit,
       timeoutMs,
       sleepMs,
+      includeSet,
       excludeSet,
       sourcePolicy: settings.sources,
     });
 
     sourceReports.push({
       id: sourceDef.id,
+      provider: sourceDef.provider,
       path: sourceDef.path,
       weight: sourceDef.weight,
       status: collected.status,
@@ -1388,6 +1779,7 @@ async function generateOneList({
       cur.traktSignal = Math.max(cur.traktSignal, Number(it.traktSignal || 0));
       cur.genres = uniqLower([...(cur.genres || []), ...(it.genres || [])]);
       cur.sourceHits[sourceDef.id] = {
+        provider: sourceDef.provider,
         rank: idx + 1,
         total,
         status: collected.status,
@@ -1723,6 +2115,24 @@ function validateConfig(lists, secrets) {
     if (!String(def.name || "").trim()) throw err(`List ${def.id}: missing name.`);
     if (!hasSourceInDef(def))
       throw err(`List ${def.id}: missing source.path or sources[].path.`);
+
+    const srcDefs =
+      Array.isArray(def?.sources) && def.sources.length
+        ? def.sources
+        : def?.source
+          ? [def.source]
+          : [];
+    for (const src of srcDefs) {
+      if (!src || typeof src !== "object") continue;
+      const provider = String(src.provider || "")
+        .trim()
+        .toLowerCase();
+      if (provider && provider !== "trakt" && provider !== "tmdb") {
+        throw err(
+          `List ${def.id}: unsupported source.provider '${src.provider}'. Use trakt|tmdb.`,
+        );
+      }
+    }
   }
 }
 
@@ -1730,6 +2140,7 @@ async function main() {
   await ensureDirs();
 
   const { clientId } = await getTraktKeys();
+  const tmdb = await getTmdbKeys();
   if (!clientId) {
     throw new Error(
       "Missing Trakt Client ID (set env vars or /data/config/secrets.json).",
@@ -1737,6 +2148,10 @@ async function main() {
   }
 
   console.log("TRAKT_CLIENT_ID set:", !!clientId);
+  console.log(
+    "TMDB auth:",
+    tmdb.accessToken ? "access_token" : tmdb.apiKey ? "api_key" : "none",
+  );
   console.log("Config path:", CONFIG_PATH);
 
   const config = await readJsonSafe(CONFIG_PATH, null);
@@ -1753,6 +2168,7 @@ async function main() {
   );
 
   const csfdMap = await readJsonSafe(CSFD_MAP_PATH, {});
+  const tmdbImdbMap = await readJsonSafe(TMDB_IMDB_MAP_PATH, {});
   const exposureState = await readJsonSafe(EXPOSURE_PATH, {
     version: 1,
     lastRunAt: null,
@@ -1763,7 +2179,13 @@ async function main() {
   }
 
   console.log("CSFD cache entries:", Object.keys(csfdMap).length);
+  console.log("TMDB->IMDb cache entries:", Object.keys(tmdbImdbMap).length);
   console.log("Exposure entries:", Object.keys(exposureState.items).length);
+
+  const tmdbGenresCache = {
+    movie: null,
+    tv: null,
+  };
 
   const usedCountsByType = new Map([
     ["movie", new Map()],
@@ -1774,6 +2196,9 @@ async function main() {
   for (const def of config.lists) {
     const summary = await generateOneList({
       clientId,
+      tmdb,
+      tmdbImdbMap,
+      tmdbGenresCache,
       def,
       defaults,
       csfdMap,
@@ -1790,6 +2215,7 @@ async function main() {
   );
 
   await writeJsonAtomic(CSFD_MAP_PATH, csfdMap);
+  await writeJsonAtomic(TMDB_IMDB_MAP_PATH, tmdbImdbMap);
   await writeJsonAtomic(EXPOSURE_PATH, exposureState);
 
   console.log("\nSummary:");

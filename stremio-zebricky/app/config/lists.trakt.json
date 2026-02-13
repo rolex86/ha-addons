@@ -196,6 +196,20 @@
           "path": "/movies/recommended",
           "weight": 1.1,
           "candidatePages": 3
+        },
+        {
+          "id": "tmdb_trending_day",
+          "provider": "tmdb",
+          "path": "/trending/movie/day",
+          "weight": 0.55,
+          "candidatePages": 2
+        },
+        {
+          "id": "tmdb_popular",
+          "provider": "tmdb",
+          "path": "/movie/popular",
+          "weight": 0.45,
+          "candidatePages": 2
         }
       ],
       "mode": "fresh",

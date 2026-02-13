@@ -5,7 +5,7 @@
 <p>Add-on má dvě části:</p>
 <ul>
   <li>Stremio addon server (manifest + katalogy) na portu 7000</li>
-  <li>Config UI na portu 7788 (správa listů, Trakt klíčů a spuštění aktualizace)</li>
+  <li>Config UI na portu 7788 (sprava listu, Trakt/TMDB klicu a spusteni aktualizace)</li>
 </ul>
 
 <p>Data (konfigurace, vygenerované listy a cache) se ukládají do <code>/data</code>, takže po restartu nebo aktualizaci add-onu nic nezmizí.</p>
@@ -16,7 +16,7 @@
   <li>Konfigurační UI pro:
     <ul>
       <li><code>lists.trakt.json</code> (definice listů a SmartPicks profilů)</li>
-      <li><code>secrets.json</code> (Trakt client_id / client_secret)</li>
+      <li><code>secrets.json</code> (Trakt client_id / client_secret + volitelne TMDB)</li>
       <li>spuštění update procesu (generování listů + SmartPicks + enrich)</li>
     </ul>
   </li>
@@ -56,6 +56,7 @@
 <ol>
   <li>Otevři Config UI na <code>http://HOME_ASSISTANT_IP:7788/</code></li>
   <li>Vyplň Trakt <code>client_id</code> a <code>client_secret</code>, ulož konfiguraci</li>
+  <li>Volitelne pridej TMDB do <code>secrets.json</code> (pro <code>provider: "tmdb"</code> zdroje): <code>tmdb.access_token</code> nebo <code>tmdb.api_key</code></li>
   <li>Spusť update (v UI)</li>
   <li>Ve Stremiu přidej addon přes manifest URL: <code>http://HOME_ASSISTANT_IP:7000/manifest.json</code></li>
 </ol>

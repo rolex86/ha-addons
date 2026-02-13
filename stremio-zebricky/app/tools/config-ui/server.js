@@ -328,7 +328,12 @@ function normalizeListsConfig(lists) {
 
     // infer if missing/invalid
     if (t !== "movie" && t !== "series") {
-      t = rawPath.startsWith("/shows/") ? "series" : "movie";
+      t =
+        rawPath.startsWith("/shows/") ||
+        rawPath.startsWith("/tv/") ||
+        rawPath.startsWith("/trending/tv/")
+          ? "series"
+          : "movie";
     }
     l.type = t;
 
@@ -391,6 +396,21 @@ function isValidListsConfig(obj) {
       });
     if (!hasSourcePath && !hasSourcesArray)
       return `List ${l.id}: chybí source.path nebo sources[].path.`;
+    const allSources =
+      Array.isArray(l?.sources) && l.sources.length
+        ? l.sources
+        : l?.source
+          ? [l.source]
+          : [];
+    for (const s of allSources) {
+      if (!s || typeof s !== "object") continue;
+      const provider = String(s.provider || "")
+        .trim()
+        .toLowerCase();
+      if (provider && provider !== "trakt" && provider !== "tmdb") {
+        return `List ${l.id}: source.provider musi byt trakt nebo tmdb.`;
+      }
+    }
     if (l.filters && typeof l.filters !== "object")
       return `List ${l.id}: filters musí být objekt.`;
   }
@@ -442,13 +462,22 @@ function isValidListsConfig(obj) {
 }
 
 function isValidSecrets(obj) {
-  if (!obj || typeof obj !== "object") return "Secrets není objekt.";
+  if (!obj || typeof obj !== "object") return "Secrets neni objekt.";
   if (!obj.trakt || typeof obj.trakt !== "object")
-    return "Chybí secrets.trakt.";
+    return "Chybi secrets.trakt.";
   if (typeof obj.trakt.client_id !== "string")
-    return "secrets.trakt.client_id musí být string.";
+    return "secrets.trakt.client_id musi byt string.";
   if (typeof obj.trakt.client_secret !== "string")
-    return "secrets.trakt.client_secret musí být string.";
+    return "secrets.trakt.client_secret musi byt string.";
+  if (obj.tmdb !== undefined && obj.tmdb !== null) {
+    if (typeof obj.tmdb !== "object") return "secrets.tmdb musi byt objekt.";
+    if (obj.tmdb.access_token !== undefined && typeof obj.tmdb.access_token !== "string")
+      return "secrets.tmdb.access_token musi byt string.";
+    if (obj.tmdb.api_key !== undefined && typeof obj.tmdb.api_key !== "string")
+      return "secrets.tmdb.api_key musi byt string.";
+    if (obj.tmdb.bearer_token !== undefined && typeof obj.tmdb.bearer_token !== "string")
+      return "secrets.tmdb.bearer_token musi byt string.";
+  }
   return null;
 }
 
@@ -767,7 +796,10 @@ async function handle(req, res) {
       smartPicks: { enabled: true, defaultSize: 10, profiles: [] },
     };
 
-    const secretsFallback = { trakt: { client_id: "", client_secret: "" } };
+    const secretsFallback = {
+      trakt: { client_id: "", client_secret: "" },
+      tmdb: { access_token: "", api_key: "" },
+    };
 
     let lists = await readJsonSafe(LISTS_PATH, listsFallback);
     let secrets = await readJsonSafe(SECRETS_PATH, secretsFallback);
@@ -781,6 +813,12 @@ async function handle(req, res) {
       secrets.trakt.client_id = String(secrets.trakt.client_id || "");
     if (typeof secrets.trakt.client_secret !== "string")
       secrets.trakt.client_secret = String(secrets.trakt.client_secret || "");
+    if (!secrets.tmdb || typeof secrets.tmdb !== "object")
+      secrets.tmdb = secretsFallback.tmdb;
+    if (typeof secrets.tmdb.access_token !== "string")
+      secrets.tmdb.access_token = String(secrets.tmdb.access_token || "");
+    if (typeof secrets.tmdb.api_key !== "string")
+      secrets.tmdb.api_key = String(secrets.tmdb.api_key || "");
 
     return sendJson(
       res,

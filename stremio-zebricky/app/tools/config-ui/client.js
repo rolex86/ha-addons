@@ -1903,7 +1903,7 @@
     };
   }
 
-  function renderSmartPicksSourcesUI() {
+  function renderSmartPicksSourcesUI(profileOverride = null) {
     const boxTrakt = $("sp_src_trakt");
     const boxTmdb = $("sp_src_tmdb");
     if (!boxTrakt || !boxTmdb) return;
@@ -1912,7 +1912,11 @@
     const seedsTrakt = getSpTraktSeeds(type);
     const seedsTmdb = getSpTmdbSeeds(type);
 
-    const curProfile = getSmartPickFromForm(false) || smartPickDefaultProfile();
+    const curProfile = normalizeSmartPickProfileOnRead(
+      profileOverride && typeof profileOverride === "object"
+        ? profileOverride
+        : getSmartPickFromForm(false) || smartPickDefaultProfile(),
+    );
     const selectedTrakt = new Set(
       (curProfile?.sources?.traktPaths || []).map(String),
     );
@@ -2101,7 +2105,7 @@
     if ($("sp_genreSearch")) $("sp_genreSearch").value = "";
 
     setSpIncludeExcludeToHidden([], []);
-    renderSmartPicksSourcesUI();
+    renderSmartPicksSourcesUI(p);
     renderSmartPicksGenresUI();
   }
 
@@ -2123,7 +2127,7 @@
     syncSpYearsUIFromHidden();
 
     setSpIncludeExcludeToHidden(p.includeGenres || [], p.excludeGenres || []);
-    renderSmartPicksSourcesUI();
+    renderSmartPicksSourcesUI(p);
     renderSmartPicksGenresUI();
   }
 

@@ -78,6 +78,38 @@
   // =========================
   // constants (list sources + smartpicks seeds)
   // =========================
+  const TRAKT_MOVIE_SOURCE_OPTIONS = [
+    { value: "/movies/trending", label: "Trakt: Trendy" },
+    { value: "/movies/popular", label: "Trakt: Populární" },
+    { value: "/movies/recommended", label: "Trakt: Doporučené" },
+    { value: "/movies/anticipated", label: "Trakt: Očekávané" },
+    { value: "/movies/boxoffice", label: "Trakt: Box office" },
+    { value: "/movies/watched/all", label: "Trakt: Sledované (all-time)" },
+    { value: "/movies/collected/all", label: "Trakt: Ve sbírkách (all-time)" },
+    { value: "/movies/played/all", label: "Trakt: Přehrávané (all-time)" },
+    {
+      value: "/movies/collected/weekly",
+      label: "Trakt: Ve sbírkách (týden)",
+    },
+    { value: "/movies/watched/weekly", label: "Trakt: Sledované (týden)" },
+  ];
+
+  const TRAKT_SERIES_SOURCE_OPTIONS = [
+    { value: "/shows/trending", label: "Trakt: Trendy" },
+    { value: "/shows/popular", label: "Trakt: Populární" },
+    { value: "/shows/recommended", label: "Trakt: Doporučené" },
+    { value: "/shows/anticipated", label: "Trakt: Očekávané" },
+    { value: "/shows/watched/all", label: "Trakt: Sledované (all-time)" },
+    { value: "/shows/collected/all", label: "Trakt: Ve sbírkách (all-time)" },
+    { value: "/shows/played/all", label: "Trakt: Přehrávané (all-time)" },
+    { value: "/shows/watched/weekly", label: "Trakt: Sledované (týden)" },
+    {
+      value: "/shows/collected/weekly",
+      label: "Trakt: Ve sbírkách (týden)",
+    },
+    { value: "/shows/played/weekly", label: "Trakt: Přehrávané (týden)" },
+  ];
+
   const TMDB_MOVIE_SOURCE_OPTIONS = [
     { value: "/trending/movie/day", label: "TMDB: Trendy dnes" },
     { value: "/movie/popular", label: "TMDB: Populární" },
@@ -135,58 +167,23 @@
   ];
 
   const SOURCES_MOVIE = [
-    { value: "/movies/watched/all", label: "Trakt: Sledované (all-time)" },
-    { value: "/movies/collected/all", label: "Trakt: Ve sbírkách (all-time)" },
-    { value: "/movies/played/all", label: "Trakt: Přehrávané (all-time)" },
-    { value: "/movies/popular", label: "Trakt: Populární" },
-    { value: "/movies/trending", label: "Trakt: Trendy" },
+    ...TRAKT_MOVIE_SOURCE_OPTIONS,
     ...TMDB_MOVIE_SOURCE_OPTIONS,
   ];
 
   const SOURCES_SERIES = [
-    { value: "/shows/trending", label: "Trakt: Trendy" },
-    { value: "/shows/popular", label: "Trakt: Populární" },
-    { value: "/shows/played/all", label: "Trakt: Přehrávané (all-time)" },
-    { value: "/shows/watched/all", label: "Trakt: Sledované (all-time)" },
-    { value: "/shows/collected/all", label: "Trakt: Ve sbírkách (all-time)" },
+    ...TRAKT_SERIES_SOURCE_OPTIONS,
     ...TMDB_SERIES_SOURCE_OPTIONS,
   ];
 
   // SmartPicks seed endpoints per type
-  const SP_TRAKT_MOVIE = [
-    { value: "/movies/trending", label: "Trakt: Trendy" },
-    { value: "/movies/popular", label: "Trakt: Populární" },
-    { value: "/movies/recommended", label: "Trakt: Doporučené" },
-    { value: "/movies/anticipated", label: "Trakt: Očekávané" },
-    { value: "/movies/boxoffice", label: "Trakt: Box office" },
-    { value: "/movies/watched/all", label: "Trakt: Sledované (all-time)" },
-    { value: "/movies/collected/all", label: "Trakt: Ve sbírkách (all-time)" },
-    { value: "/movies/played/all", label: "Trakt: Přehrávané (all-time)" },
-    {
-      value: "/movies/collected/weekly",
-      label: "Trakt: Ve sbírkách (týden)",
-    },
-    { value: "/movies/watched/weekly", label: "Trakt: Sledované (týden)" },
-  ];
-
-  const SP_TRAKT_SERIES = [
-    { value: "/shows/trending", label: "Trakt: Trendy" },
-    { value: "/shows/popular", label: "Trakt: Populární" },
-    { value: "/shows/recommended", label: "Trakt: Doporučené" },
-    { value: "/shows/anticipated", label: "Trakt: Očekávané" },
-    { value: "/shows/watched/all", label: "Trakt: Sledované (all-time)" },
-    { value: "/shows/collected/all", label: "Trakt: Ve sbírkách (all-time)" },
-    { value: "/shows/played/all", label: "Trakt: Přehrávané (all-time)" },
-    { value: "/shows/watched/weekly", label: "Trakt: Sledované (týden)" },
-    {
-      value: "/shows/collected/weekly",
-      label: "Trakt: Ve sbírkách (týden)",
-    },
-    { value: "/shows/played/weekly", label: "Trakt: Přehrávané (týden)" },
-  ];
-
+  const SP_TRAKT_MOVIE = TRAKT_MOVIE_SOURCE_OPTIONS;
+  const SP_TRAKT_SERIES = TRAKT_SERIES_SOURCE_OPTIONS;
   const SP_TMDB_MOVIE = TMDB_MOVIE_SOURCE_OPTIONS;
   const SP_TMDB_SERIES = TMDB_SERIES_SOURCE_OPTIONS;
+
+  const DEFAULT_LIST_SOURCE_MOVIE = "/movies/watched/all";
+  const DEFAULT_LIST_SOURCE_SERIES = "/shows/trending";
 
   function normalizeSourceSeed(seed) {
     const value = String(
@@ -1355,7 +1352,7 @@
     if (ensureListModeField()) ensureListModeField().value = "";
 
     fillSources();
-    if ($("f_source")) $("f_source").value = SOURCES_MOVIE[0].value;
+    if ($("f_source")) $("f_source").value = DEFAULT_LIST_SOURCE_MOVIE;
     setListSourceDraft([]);
 
     if ($("f_years")) $("f_years").value = "";
@@ -1409,7 +1406,7 @@
     setListSourceDraft(normalizedSources);
     if ($("f_source")) {
       const fallback =
-        x.type === "series" ? SOURCES_SERIES[0].value : SOURCES_MOVIE[0].value;
+        x.type === "series" ? DEFAULT_LIST_SOURCE_SERIES : DEFAULT_LIST_SOURCE_MOVIE;
       const selectedPath =
         x.source?.path ||
         (normalizedSources.length ? normalizedSources[0].path : "") ||

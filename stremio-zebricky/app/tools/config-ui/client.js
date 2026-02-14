@@ -78,78 +78,126 @@
   // =========================
   // constants (list sources + smartpicks seeds)
   // =========================
+  const TMDB_MOVIE_SOURCE_OPTIONS = [
+    { value: "/trending/movie/day", label: "TMDB: Trendy dnes" },
+    { value: "/movie/popular", label: "TMDB: Populární" },
+    { value: "/movie/top_rated", label: "TMDB: Nejlépe hodnocené" },
+    { value: "/movie/now_playing", label: "TMDB: V kinech" },
+    { value: "/movie/upcoming", label: "TMDB: Chystané" },
+    {
+      value: "/discover/movie?sort_by=popularity.desc",
+      label: "TMDB Discover: Popularita",
+    },
+    {
+      value: "/discover/movie?sort_by=vote_count.desc",
+      label: "TMDB Discover: Nejvíc hlasů",
+    },
+    {
+      value: "/discover/movie?sort_by=vote_average.desc&vote_count.gte=250",
+      label: "TMDB Discover: Nejlépe hodnocené (250+ hlasů)",
+    },
+    {
+      value: "/discover/movie?sort_by=primary_release_date.desc",
+      label: "TMDB Discover: Nejnovější premiéry",
+    },
+    {
+      value: "/discover/movie?include_adult=false&sort_by=popularity.desc",
+      label: "TMDB Discover: Popularita (bez adult)",
+    },
+  ];
+
+  const TMDB_SERIES_SOURCE_OPTIONS = [
+    { value: "/trending/tv/day", label: "TMDB: Trendy dnes" },
+    { value: "/tv/popular", label: "TMDB: Populární" },
+    { value: "/tv/top_rated", label: "TMDB: Nejlépe hodnocené" },
+    { value: "/tv/on_the_air", label: "TMDB: Právě vysílané" },
+    { value: "/tv/airing_today", label: "TMDB: Dnes vysílané" },
+    {
+      value: "/discover/tv?sort_by=popularity.desc",
+      label: "TMDB Discover: Popularita",
+    },
+    {
+      value: "/discover/tv?sort_by=vote_count.desc",
+      label: "TMDB Discover: Nejvíc hlasů",
+    },
+    {
+      value: "/discover/tv?sort_by=vote_average.desc&vote_count.gte=250",
+      label: "TMDB Discover: Nejlépe hodnocené (250+ hlasů)",
+    },
+    {
+      value: "/discover/tv?sort_by=first_air_date.desc",
+      label: "TMDB Discover: Nejnovější premiéry",
+    },
+    {
+      value: "/discover/tv?include_adult=false&sort_by=popularity.desc",
+      label: "TMDB Discover: Popularita (bez adult)",
+    },
+  ];
+
   const SOURCES_MOVIE = [
-    { value: "/movies/watched/all", label: "movies/watched/all (klasiky)" },
-    { value: "/movies/collected/all", label: "movies/collected/all (sbírky)" },
-    { value: "/movies/played/all", label: "movies/played/all" },
-    { value: "/movies/popular", label: "movies/popular" },
-    { value: "/movies/trending", label: "movies/trending" },
-    { value: "/movie/popular", label: "TMDB movie/popular" },
-    { value: "/trending/movie/day", label: "TMDB trending/movie/day" },
+    { value: "/movies/watched/all", label: "Trakt: Sledované (all-time)" },
+    { value: "/movies/collected/all", label: "Trakt: Ve sbírkách (all-time)" },
+    { value: "/movies/played/all", label: "Trakt: Přehrávané (all-time)" },
+    { value: "/movies/popular", label: "Trakt: Populární" },
+    { value: "/movies/trending", label: "Trakt: Trendy" },
+    ...TMDB_MOVIE_SOURCE_OPTIONS,
   ];
 
   const SOURCES_SERIES = [
-    { value: "/shows/trending", label: "shows/trending" },
-    { value: "/shows/popular", label: "shows/popular" },
-    { value: "/shows/played/all", label: "shows/played/all" },
-    { value: "/shows/watched/all", label: "shows/watched/all" },
-    { value: "/shows/collected/all", label: "shows/collected/all" },
-    { value: "/tv/popular", label: "TMDB tv/popular" },
-    { value: "/trending/tv/day", label: "TMDB trending/tv/day" },
+    { value: "/shows/trending", label: "Trakt: Trendy" },
+    { value: "/shows/popular", label: "Trakt: Populární" },
+    { value: "/shows/played/all", label: "Trakt: Přehrávané (all-time)" },
+    { value: "/shows/watched/all", label: "Trakt: Sledované (all-time)" },
+    { value: "/shows/collected/all", label: "Trakt: Ve sbírkách (all-time)" },
+    ...TMDB_SERIES_SOURCE_OPTIONS,
   ];
 
-  // SmartPicks: 10 "seed" endpoints per type
+  // SmartPicks seed endpoints per type
   const SP_TRAKT_MOVIE = [
-    "/movies/trending",
-    "/movies/popular",
-    "/movies/recommended",
-    "/movies/anticipated",
-    "/movies/boxoffice",
-    "/movies/watched/all",
-    "/movies/collected/all",
-    "/movies/played/all",
-    "/movies/collected/weekly",
-    "/movies/watched/weekly",
+    { value: "/movies/trending", label: "Trakt: Trendy" },
+    { value: "/movies/popular", label: "Trakt: Populární" },
+    { value: "/movies/recommended", label: "Trakt: Doporučené" },
+    { value: "/movies/anticipated", label: "Trakt: Očekávané" },
+    { value: "/movies/boxoffice", label: "Trakt: Box office" },
+    { value: "/movies/watched/all", label: "Trakt: Sledované (all-time)" },
+    { value: "/movies/collected/all", label: "Trakt: Ve sbírkách (all-time)" },
+    { value: "/movies/played/all", label: "Trakt: Přehrávané (all-time)" },
+    {
+      value: "/movies/collected/weekly",
+      label: "Trakt: Ve sbírkách (týden)",
+    },
+    { value: "/movies/watched/weekly", label: "Trakt: Sledované (týden)" },
   ];
 
   const SP_TRAKT_SERIES = [
-    "/shows/trending",
-    "/shows/popular",
-    "/shows/recommended",
-    "/shows/anticipated",
-    "/shows/watched/all",
-    "/shows/collected/all",
-    "/shows/played/all",
-    "/shows/watched/weekly",
-    "/shows/collected/weekly",
-    "/shows/played/weekly",
+    { value: "/shows/trending", label: "Trakt: Trendy" },
+    { value: "/shows/popular", label: "Trakt: Populární" },
+    { value: "/shows/recommended", label: "Trakt: Doporučené" },
+    { value: "/shows/anticipated", label: "Trakt: Očekávané" },
+    { value: "/shows/watched/all", label: "Trakt: Sledované (all-time)" },
+    { value: "/shows/collected/all", label: "Trakt: Ve sbírkách (all-time)" },
+    { value: "/shows/played/all", label: "Trakt: Přehrávané (all-time)" },
+    { value: "/shows/watched/weekly", label: "Trakt: Sledované (týden)" },
+    {
+      value: "/shows/collected/weekly",
+      label: "Trakt: Ve sbírkách (týden)",
+    },
+    { value: "/shows/played/weekly", label: "Trakt: Přehrávané (týden)" },
   ];
 
-  const SP_TMDB_MOVIE = [
-    "/trending/movie/day",
-    "/movie/popular",
-    "/movie/top_rated",
-    "/movie/now_playing",
-    "/movie/upcoming",
-    "/discover/movie?sort_by=popularity.desc",
-    "/discover/movie?sort_by=vote_count.desc",
-    "/discover/movie?sort_by=vote_average.desc&vote_count.gte=250",
-    "/discover/movie?sort_by=primary_release_date.desc",
-    "/discover/movie?include_adult=false&sort_by=popularity.desc",
-  ];
+  const SP_TMDB_MOVIE = TMDB_MOVIE_SOURCE_OPTIONS;
+  const SP_TMDB_SERIES = TMDB_SERIES_SOURCE_OPTIONS;
 
-  const SP_TMDB_SERIES = [
-    "/trending/tv/day",
-    "/tv/popular",
-    "/tv/top_rated",
-    "/tv/on_the_air",
-    "/tv/airing_today",
-    "/discover/tv?sort_by=popularity.desc",
-    "/discover/tv?sort_by=vote_count.desc",
-    "/discover/tv?sort_by=vote_average.desc&vote_count.gte=250",
-    "/discover/tv?sort_by=first_air_date.desc",
-    "/discover/tv?include_adult=false&sort_by=popularity.desc",
-  ];
+  function normalizeSourceSeed(seed) {
+    const value = String(
+      seed && typeof seed === "object" ? (seed.value ?? "") : (seed ?? ""),
+    ).trim();
+    if (!value) return null;
+    const label = String(
+      seed && typeof seed === "object" ? (seed.label ?? value) : value,
+    ).trim();
+    return { value, label: label || value };
+  }
 
   // Genres fallback (if Trakt fetch fails)
   const GENRES_FALLBACK = [
@@ -655,7 +703,9 @@
 
     const renderSeedBox = (host, seeds, provider) => {
       host.innerHTML = "";
-      for (const seed of seeds) {
+      for (const seedRaw of seeds) {
+        const seed = normalizeSourceSeed(seedRaw);
+        if (!seed) continue;
         const normalized = normalizeListSourceEntry({
           path: seed.value,
           provider: provider === "tmdb" ? "tmdb" : undefined,
@@ -676,8 +726,8 @@
         });
 
         const span = document.createElement("span");
-        span.className = "mono";
-        span.textContent = seed.value;
+        span.textContent = seed.label;
+        span.title = seed.value;
 
         label.appendChild(cb);
         label.appendChild(span);
@@ -1876,41 +1926,52 @@
     boxTrakt.innerHTML = "";
     boxTmdb.innerHTML = "";
 
-    for (const p of seedsTrakt) {
-      const label = document.createElement("label");
-      label.className = "chip";
+    const toSeedValueSet = (seeds) => {
+      const out = new Set();
+      for (const seedRaw of seeds) {
+        const seed = normalizeSourceSeed(seedRaw);
+        if (seed?.value) out.add(seed.value);
+      }
+      return out;
+    };
 
-      const cb = document.createElement("input");
-      cb.type = "checkbox";
-      cb.value = p;
-      cb.checked = selectedTrakt.has(p);
-
-      const span = document.createElement("span");
-      span.className = "mono";
-      span.textContent = p;
-
-      label.appendChild(cb);
-      label.appendChild(span);
-      boxTrakt.appendChild(label);
+    const traktSeedsAll = seedsTrakt.slice();
+    const knownTraktValues = toSeedValueSet(traktSeedsAll);
+    for (const value of selectedTrakt) {
+      if (!knownTraktValues.has(value)) traktSeedsAll.push({ value, label: value });
     }
 
-    for (const p of seedsTmdb) {
-      const label = document.createElement("label");
-      label.className = "chip";
-
-      const cb = document.createElement("input");
-      cb.type = "checkbox";
-      cb.value = p;
-      cb.checked = selectedTmdb.has(p);
-
-      const span = document.createElement("span");
-      span.className = "mono";
-      span.textContent = p;
-
-      label.appendChild(cb);
-      label.appendChild(span);
-      boxTmdb.appendChild(label);
+    const tmdbSeedsAll = seedsTmdb.slice();
+    const knownTmdbValues = toSeedValueSet(tmdbSeedsAll);
+    for (const value of selectedTmdb) {
+      if (!knownTmdbValues.has(value)) tmdbSeedsAll.push({ value, label: value });
     }
+
+    const renderSeedGroup = (host, seeds, selectedValues) => {
+      for (const seedRaw of seeds) {
+        const seed = normalizeSourceSeed(seedRaw);
+        if (!seed) continue;
+
+        const label = document.createElement("label");
+        label.className = "chip";
+
+        const cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.value = seed.value;
+        cb.checked = selectedValues.has(seed.value);
+
+        const span = document.createElement("span");
+        span.textContent = seed.label;
+        span.title = seed.value;
+
+        label.appendChild(cb);
+        label.appendChild(span);
+        host.appendChild(label);
+      }
+    };
+
+    renderSeedGroup(boxTrakt, traktSeedsAll, selectedTrakt);
+    renderSeedGroup(boxTmdb, tmdbSeedsAll, selectedTmdb);
 
     // lists (by type)
     const boxLists = $("sp_src_lists");
@@ -1935,8 +1996,8 @@
     }
 
     for (const li of listIds) {
-      const row = document.createElement("label");
-      row.className = "chkRow";
+      const label = document.createElement("label");
+      label.className = "chkRow";
 
       const cb = document.createElement("input");
       cb.type = "checkbox";
@@ -1946,9 +2007,9 @@
       const txt = document.createElement("span");
       txt.textContent = `${li.name} (${li.id})`;
 
-      row.appendChild(cb);
-      row.appendChild(txt);
-      boxLists.appendChild(row);
+      label.appendChild(cb);
+      label.appendChild(txt);
+      boxLists.appendChild(label);
     }
   }
 

@@ -52,9 +52,271 @@ const updateState = {
   exitCode: null,
   pid: null,
   progress: { label: "", done: 0, total: 0 },
+  summary: null,
   lines: [],
   clients: new Set(), // SSE clients
 };
+
+function cleanUpdateLine(line) {
+  return String(line || "")
+    .replace(/^\[\d{2}:\d{2}:\d{2}\]\s*/, "")
+    .trim();
+}
+
+function parseCsvList(raw) {
+  const text = String(raw || "").trim();
+  if (!text || text === "(none)") return [];
+  return text
+    .split(",")
+    .map((x) => x.trim())
+    .filter(Boolean);
+}
+
+function formatDurationHms(ms) {
+  if (!Number.isFinite(ms) || ms < 0) return "00:00:00";
+  const totalSec = Math.round(ms / 1000);
+  const hh = Math.floor(totalSec / 3600);
+  const mm = Math.floor((totalSec % 3600) / 60);
+  const ss = totalSec % 60;
+  return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
+}
+
+function previewIds(ids, max = 8) {
+  const arr = Array.isArray(ids) ? ids.filter(Boolean) : [];
+  if (!arr.length) return "(none)";
+  if (arr.length <= max) return arr.join(", ");
+  return `${arr.slice(0, max).join(", ")} (+${arr.length - max} další)`;
+}
+
+function buildUpdateSummary(state) {
+  const all = Array.isArray(state?.lines) ? state.lines : [];
+
+  // Parse only the latest run (from the last UPDATE START marker).
+  let startIdx = -1;
+  for (let i = all.length - 1; i >= 0; i--) {
+    if (cleanUpdateLine(all[i]).startsWith("== UPDATE START")) {
+      startIdx = i;
+      break;
+    }
+  }
+  const lines = startIdx >= 0 ? all.slice(startIdx) : all;
+
+  const baseSummaries = [];
+  const smartSeen = new Set();
+  const smartChanged = new Set();
+  const smartUnchanged = new Set();
+
+  let step3Mode = "";
+  let baseChangedIds = [];
+  let enrichTargets = [];
+  let warnings = 0;
+  let errors = 0;
+  let retries = 0;
+  let http429 = 0;
+  let http5xx = 0;
+  let enrichStats = null;
+
+  for (const raw of lines) {
+    const line = cleanUpdateLine(raw);
+    if (!line) continue;
+
+    if (/\bWARN\b/i.test(line)) warnings++;
+    if (/^(ERROR|FATAL):/i.test(line) || /\bSTEP FAILED\b/i.test(line))
+      errors++;
+    if (/\bretr(y|ies)\b/i.test(line)) retries++;
+    if (/\b429\b/.test(line)) http429++;
+    if (/\b5\d\d\b/.test(line) && /(http|status|tmdb|trakt|csfd|cinemeta)/i.test(line))
+      http5xx++;
+
+    let m = line.match(/^Base list changes:\s*(.+)$/i);
+    if (m) {
+      baseChangedIds = parseCsvList(m[1]);
+      continue;
+    }
+
+    m = line.match(/^Enrich targets:\s*(.+)$/i);
+    if (m) {
+      enrichTargets = parseCsvList(m[1]);
+      continue;
+    }
+
+    m = line.match(/^--- STEP 3:\s*(.+?)\s*---$/i);
+    if (m) {
+      step3Mode = String(m[1] || "").trim();
+      continue;
+    }
+
+    m = line.match(
+      /^-\s+([^:]+):\s*selected=(\d+),\s*written=(true|false),\s*overlap=([0-9.]+)%/i,
+    );
+    if (m) {
+      baseSummaries.push({
+        id: String(m[1] || "").trim(),
+        selected: Number(m[2]),
+        written: String(m[3]).toLowerCase() === "true",
+        overlapPct: Number(m[4]),
+      });
+      continue;
+    }
+
+    m = line.match(/^\[SmartPicks\]\s+([^\s]+)\s+\((movie|series)\)\s+size=\d+/i);
+    if (m) {
+      smartSeen.add(String(m[1] || "").trim());
+      continue;
+    }
+
+    m = line.match(/🟩\s+([^:]+):\s*CHANGED\s*->\s*written\s*\(items=(\d+),\s*candidates=(\d+)\)/i);
+    if (m) {
+      smartChanged.add(String(m[1] || "").trim());
+      continue;
+    }
+
+    m = line.match(/🟨\s+([^:]+):\s*UNCHANGED\s*->\s*skip write\s*\(items=(\d+),\s*candidates=(\d+)\)/i);
+    if (m) {
+      smartUnchanged.add(String(m[1] || "").trim());
+      continue;
+    }
+
+    m = line.match(
+      /^Done\.\s+files=(\d+)\s+unchangedFiles=(\d+)\s+items=(\d+)\s+cacheHits=(\d+)\s+cacheMisses=(\d+)\s+posterUpdates=(\d+)\s+descUpdates=(\d+)\s+cinemetaFails=(\d+)\s+csfdFails=(\d+)/i,
+    );
+    if (m) {
+      enrichStats = {
+        files: Number(m[1]),
+        unchangedFiles: Number(m[2]),
+        items: Number(m[3]),
+        cacheHits: Number(m[4]),
+        cacheMisses: Number(m[5]),
+        posterUpdates: Number(m[6]),
+        descUpdates: Number(m[7]),
+        cinemetaFails: Number(m[8]),
+        csfdFails: Number(m[9]),
+      };
+      continue;
+    }
+  }
+
+  const baseTotal = baseSummaries.length;
+  const baseChanged = baseTotal
+    ? baseSummaries.filter((x) => x.written).length
+    : baseChangedIds.length;
+  const baseUnchanged = baseTotal ? baseTotal - baseChanged : 0;
+
+  const smartChangedCount = smartChanged.size;
+  const smartUnchangedCount = smartUnchanged.size;
+  const smartTotal = Math.max(
+    smartSeen.size,
+    smartChangedCount + smartUnchangedCount,
+  );
+  const smartFailed = Math.max(
+    0,
+    smartTotal - smartChangedCount - smartUnchangedCount,
+  );
+
+  const total = baseTotal + smartTotal;
+  const changed = baseChanged + smartChangedCount;
+  const unchanged = baseUnchanged + smartUnchangedCount;
+  const failed = smartFailed;
+
+  const startedAt = Number(state?.startedAt || 0);
+  const endedAt = Number(state?.endedAt || 0);
+  const durationMs =
+    startedAt > 0 && endedAt >= startedAt ? endedAt - startedAt : null;
+  const duration = formatDurationHms(durationMs);
+
+  const code =
+    state?.exitCode === null || state?.exitCode === undefined
+      ? null
+      : Number(state.exitCode);
+  const ok = code === 0;
+  const status = ok ? "OK" : "FAIL";
+
+  const listBits = [];
+  if (total > 0) listBits.push(`listy ${total}`);
+  if (changed > 0 || unchanged > 0 || failed > 0) {
+    listBits.push(
+      `(zmeneno ${changed}, beze zmeny ${unchanged}${failed ? `, failed ${failed}` : ""})`,
+    );
+  }
+
+  const shortLine = [
+    `${status} code=${code ?? "?"}`,
+    `trvani=${duration}`,
+    listBits.join(" ").trim(),
+    `warningy ${warnings}`,
+  ]
+    .filter(Boolean)
+    .join(" | ");
+
+  const detailLines = [];
+  detailLines.push(`result: ${status} (code=${code ?? "?"})`);
+  detailLines.push(
+    `run: start=${startedAt ? new Date(startedAt).toISOString() : "-"} end=${endedAt ? new Date(endedAt).toISOString() : "-"} duration=${duration}`,
+  );
+  if (baseTotal || baseChangedIds.length) {
+    detailLines.push(
+      `base lists: total=${baseTotal} changed=${baseChanged} unchanged=${baseUnchanged}`,
+    );
+    if (baseChangedIds.length) {
+      detailLines.push(`base changed ids: ${previewIds(baseChangedIds, 10)}`);
+    }
+  }
+  if (smartTotal) {
+    detailLines.push(
+      `smartpicks: total=${smartTotal} changed=${smartChangedCount} unchanged=${smartUnchangedCount}${smartFailed ? ` failed=${smartFailed}` : ""}`,
+    );
+    if (smartChangedCount) {
+      detailLines.push(
+        `smartpicks changed ids: ${previewIds(Array.from(smartChanged), 10)}`,
+      );
+    }
+  }
+  if (step3Mode) detailLines.push(`enrich mode: ${step3Mode}`);
+  if (enrichTargets.length) {
+    detailLines.push(
+      `enrich targets: ${enrichTargets.length} (${previewIds(enrichTargets, 8)})`,
+    );
+  }
+  if (enrichStats) {
+    detailLines.push(
+      `enrich stats: files=${enrichStats.files} unchangedFiles=${enrichStats.unchangedFiles} items=${enrichStats.items} cacheHits=${enrichStats.cacheHits} cacheMisses=${enrichStats.cacheMisses} posterUpdates=${enrichStats.posterUpdates} descUpdates=${enrichStats.descUpdates} cinemetaFails=${enrichStats.cinemetaFails} csfdFails=${enrichStats.csfdFails}`,
+    );
+  }
+  detailLines.push(
+    `warnings=${warnings} errors=${errors}${retries ? ` retries=${retries}` : ""}${http429 || http5xx ? ` (429=${http429}, 5xx=${http5xx})` : ""}`,
+  );
+
+  return {
+    runId: String(startedAt || Date.now()),
+    ok,
+    status,
+    code,
+    startedAt,
+    endedAt,
+    durationMs,
+    duration,
+    counts: {
+      total,
+      changed,
+      unchanged,
+      failed,
+      baseTotal,
+      baseChanged,
+      baseUnchanged,
+      smartTotal,
+      smartChanged: smartChangedCount,
+      smartUnchanged: smartUnchangedCount,
+      smartFailed,
+      warnings,
+      errors,
+      retries,
+      http429,
+      http5xx,
+    },
+    shortLine,
+    detailLines,
+  };
+}
 
 function pushUpdateLine(line) {
   const s = String(line || "").replace(/\r?\n$/, "");
@@ -119,6 +381,7 @@ function startUpdateProcess() {
   updateState.exitCode = null;
   updateState.pid = null;
   updateState.progress = { label: "", done: 0, total: 0 };
+  updateState.summary = null;
 
   pushUpdateLine(
     `== UPDATE START ${new Date(updateState.startedAt).toISOString()} ==`,
@@ -158,11 +421,19 @@ function startUpdateProcess() {
       `== UPDATE END code=${updateState.exitCode} ${new Date(updateState.endedAt).toISOString()} ==`,
     );
 
+    updateState.summary = buildUpdateSummary(updateState);
+
     // notify clients that it's done
     for (const res of updateState.clients) {
       try {
         res.write(
-          `event: done\ndata: ${JSON.stringify({ ok: code === 0, code })}\n\n`,
+          `event: done\ndata: ${JSON.stringify({
+            ok: code === 0,
+            code,
+            startedAt: updateState.startedAt,
+            endedAt: updateState.endedAt,
+            summary: updateState.summary,
+          })}\n\n`,
         );
       } catch {}
     }
@@ -651,6 +922,7 @@ async function handle(req, res) {
         exitCode: updateState.exitCode,
         pid: updateState.pid,
         progress: updateState.progress,
+        summary: updateState.summary,
         lastLine: updateState.lines.length
           ? updateState.lines[updateState.lines.length - 1]
           : "",
@@ -689,7 +961,11 @@ async function handle(req, res) {
     res.write(
       `event: status\ndata: ${JSON.stringify({
         running: updateState.running,
+        startedAt: updateState.startedAt,
+        endedAt: updateState.endedAt,
+        exitCode: updateState.exitCode,
         progress: updateState.progress,
+        summary: updateState.summary,
       })}\n\n`,
     );
 

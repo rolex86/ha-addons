@@ -936,6 +936,34 @@
         white-space: pre-wrap;
       }
 
+      .logBox details.updateFinalSummary {
+        margin-top: 8px;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.04);
+        padding: 6px 8px;
+      }
+
+      .logBox details.updateFinalSummary > summary {
+        cursor: pointer;
+        user-select: none;
+        font-weight: 700;
+        color: #d3fff2;
+      }
+
+      .logBox details.updateFinalSummary > summary::-webkit-details-marker {
+        color: rgba(211, 255, 242, 0.9);
+      }
+
+      .logBox .updateFinalSummaryBody {
+        margin: 8px 0 2px;
+        white-space: pre-wrap;
+        font-family: var(--mono);
+        font-size: 12px;
+        line-height: 1.45;
+        color: rgba(238, 246, 255, 0.95);
+      }
+
       /* ===========================
          Mobile UX improvements
          =========================== */

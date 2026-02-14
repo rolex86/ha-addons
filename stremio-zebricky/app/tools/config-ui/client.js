@@ -2730,6 +2730,7 @@
   // Update runner UI (optional)
   // =========================
   let updateES = null;
+  let lastRenderedUpdateRunId = "";
 
   function nowStamp() {
     const d = new Date();
@@ -2746,6 +2747,43 @@
     el.textContent = `[${nowStamp()}] ${String(line || "")}`;
     box.appendChild(el);
     box.scrollTop = box.scrollHeight;
+  }
+
+  function appendFinalUpdateSummary(summary, fallbackShortLine = "") {
+    const box = $("updateLog");
+    if (!box) return false;
+
+    const runId = String(summary?.runId || "").trim();
+    if (runId && runId === lastRenderedUpdateRunId) return true;
+
+    const shortLine = String(summary?.shortLine || fallbackShortLine || "").trim();
+    const detailLines = Array.isArray(summary?.detailLines)
+      ? summary.detailLines
+          .map((x) => String(x || "").trim())
+          .filter(Boolean)
+      : [];
+
+    if (!shortLine && !detailLines.length) return false;
+
+    const details = document.createElement("details");
+    details.className = "updateFinalSummary";
+
+    const sm = document.createElement("summary");
+    sm.textContent = `[${nowStamp()}] ${shortLine || "FINAL SUMMARY"}`;
+    details.appendChild(sm);
+
+    if (detailLines.length) {
+      const pre = document.createElement("pre");
+      pre.className = "updateFinalSummaryBody";
+      pre.textContent = detailLines.join("\n");
+      details.appendChild(pre);
+    }
+
+    box.appendChild(details);
+    box.scrollTop = box.scrollHeight;
+
+    if (runId) lastRenderedUpdateRunId = runId;
+    return true;
   }
 
   function humanProgress(progress) {
@@ -2811,13 +2849,18 @@
       try {
         const msg = JSON.parse(ev.data);
         setUpdateUIStatus(msg);
+        if (!msg?.running && msg?.summary) {
+          appendFinalUpdateSummary(msg.summary);
+        }
       } catch {}
     });
 
     updateES.addEventListener("done", (ev) => {
       try {
         const msg = JSON.parse(ev.data);
-        appendUpdateLog(`== HOTOVO · ok=${msg?.ok} · code=${msg?.code} ==`);
+        const fallback = `== HOTOVO · ok=${msg?.ok} · code=${msg?.code} ==`;
+        const rendered = appendFinalUpdateSummary(msg?.summary, fallback);
+        if (!rendered) appendUpdateLog(fallback);
       } catch {
         appendUpdateLog("== HOTOVO ==");
       }
@@ -3038,6 +3081,7 @@
   on("btnClearUpdateLog", "click", () => {
     const box = $("updateLog");
     if (box) box.innerHTML = "";
+    lastRenderedUpdateRunId = "";
   });
 
   // =========================
@@ -3054,6 +3098,7 @@
     try {
       const st = await apiUpdateStatus();
       setUpdateUIStatus(st);
+      if (!st?.running && st?.summary) appendFinalUpdateSummary(st.summary);
       openUpdateStream();
     } catch {
       // server might not have update endpoints yet; ignore

@@ -1990,6 +1990,38 @@
                 </button>
               </div>
 
+              <div class="hr"></div>
+
+              <div class="subHead">
+                <strong>RAW JSON listu</strong>
+                <span class="muted">kopie / import jednoho listu</span>
+              </div>
+              <textarea
+                id="f_raw"
+                class="mono"
+                style="width: 100%; min-height: 170px; resize: vertical"
+                placeholder='{"id":"my_list","name":"Můj list", ...}'
+              ></textarea>
+              <div
+                class="row"
+                style="
+                  gap: 8px;
+                  margin-top: 8px;
+                  justify-content: flex-end;
+                  flex-wrap: wrap;
+                "
+              >
+                <button id="btnListRawFromForm" class="btn small" type="button">
+                  Načíst z editoru
+                </button>
+                <button id="btnListRawCopy" class="btn small" type="button">
+                  Kopírovat RAW
+                </button>
+                <button id="btnListRawApply" class="btn small primary" type="button">
+                  Použít RAW do UI
+                </button>
+              </div>
+
               <details class="help" style="margin-top: 12px">
                 <summary>
                   <span>Uložit list vs Uložit vše na disk</span
@@ -2381,6 +2413,38 @@
                     se jen kvůli chybějícím datům).
                   </div>
                 </details>
+
+                <div class="hr"></div>
+
+                <div class="subHead">
+                  <strong>RAW JSON SmartPicks profilu</strong>
+                  <span class="muted">kopie / import jednoho profilu</span>
+                </div>
+                <textarea
+                  id="sp_raw"
+                  class="mono"
+                  style="width: 100%; min-height: 170px; resize: vertical"
+                  placeholder='{"id":"sp_me","name":"Pro mě", ...}'
+                ></textarea>
+                <div
+                  class="row"
+                  style="
+                    gap: 8px;
+                    margin-top: 8px;
+                    justify-content: flex-end;
+                    flex-wrap: wrap;
+                  "
+                >
+                  <button id="btnSpRawFromForm" class="btn small" type="button">
+                    Načíst z editoru
+                  </button>
+                  <button id="btnSpRawCopy" class="btn small" type="button">
+                    Kopírovat RAW
+                  </button>
+                  <button id="btnSpRawApply" class="btn small primary" type="button">
+                    Použít RAW do UI
+                  </button>
+                </div>
 
                 <div class="hr"></div>
 

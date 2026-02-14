@@ -75,6 +75,46 @@
     return x === null || x === undefined ? "" : String(x);
   }
 
+  function deepCloneJson(v, fallback = null) {
+    try {
+      return JSON.parse(JSON.stringify(v));
+    } catch {
+      return fallback;
+    }
+  }
+
+  function toPrettyJson(v) {
+    return JSON.stringify(v, null, 2);
+  }
+
+  async function copyTextToClipboard(text) {
+    const t = String(text || "");
+    if (!t) return false;
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(t);
+        return true;
+      }
+    } catch {}
+
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = t;
+      ta.setAttribute("readonly", "readonly");
+      ta.style.position = "fixed";
+      ta.style.top = "-9999px";
+      ta.style.left = "-9999px";
+      document.body.appendChild(ta);
+      ta.select();
+      ta.setSelectionRange(0, ta.value.length);
+      const ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      return !!ok;
+    } catch {
+      return false;
+    }
+  }
+
   // =========================
   // constants (list sources + smartpicks seeds)
   // =========================
@@ -1219,6 +1259,188 @@
     }
   }
 
+  function normalizeListTypeValue(typeRaw, sourcePathRaw) {
+    const sourcePath = String(sourcePathRaw || "")
+      .trim()
+      .toLowerCase();
+    let t = String(typeRaw || "")
+      .trim()
+      .toLowerCase();
+
+    if (t === "movies" || t === "movie" || t === "film" || t === "films") t = "movie";
+    if (t === "shows" || t === "show" || t === "tv" || t === "series") t = "series";
+
+    if (t !== "movie" && t !== "series") {
+      t =
+        sourcePath.startsWith("/shows/") ||
+        sourcePath.startsWith("/tv/") ||
+        sourcePath.startsWith("/trending/tv/")
+          ? "series"
+          : "movie";
+    }
+
+    return t;
+  }
+
+  function setListRawEditor(obj) {
+    const el = $("f_raw");
+    if (!el) return;
+    if (!obj || typeof obj !== "object") {
+      el.value = "";
+      return;
+    }
+    el.value = toPrettyJson(obj);
+  }
+
+  function buildListRawDraftFromForm() {
+    const id = String($("f_id")?.value || "").trim();
+    const name = String($("f_name")?.value || "").trim();
+    const typeUi = $("f_type")?.value || "movie";
+    const mode = String(ensureListModeField()?.value || "")
+      .trim()
+      .toLowerCase();
+
+    if (!id && !name) return null;
+
+    const prev = id
+      ? deepCloneJson(state.lists.lists.find((x) => x.id === id), null) || {}
+      : {};
+    const out = prev && typeof prev === "object" ? prev : {};
+
+    if (id) out.id = id;
+    if (name) out.name = name;
+
+    const sourcePathUi = String($("f_source")?.value || "").trim();
+    const sourcePath = sourcePathUi
+      ? sourcePathUi.startsWith("/")
+        ? sourcePathUi
+        : `/${sourcePathUi}`
+      : "";
+
+    if (!out.source || typeof out.source !== "object") out.source = {};
+    if (sourcePath) out.source.path = sourcePath;
+
+    let listSources = { custom: false, sources: [] };
+    try {
+      listSources = readListSourcesFromUi();
+    } catch {}
+    if (listSources.custom && listSources.sources.length) {
+      out.sources = listSources.sources;
+      out.source = { ...(out.source || {}), path: listSources.sources[0].path };
+    } else {
+      delete out.sources;
+    }
+
+    out.type = normalizeListTypeValue(typeUi, out?.source?.path || sourcePath || "");
+
+    if (mode === "stable" || mode === "balanced" || mode === "fresh") out.mode = mode;
+    else delete out.mode;
+
+    if (!out.filters || typeof out.filters !== "object") out.filters = {};
+    const years = String($("f_years")?.value || "").trim();
+    if (years) out.filters.years = years;
+    else delete out.filters.years;
+
+    const inc = String($("f_genres")?.value || "").trim();
+    const exc = String(ensureListExcludeHidden()?.value || "").trim();
+    if (inc) out.filters.genres = inc;
+    else delete out.filters.genres;
+    if (exc) out.filters.genresExclude = exc;
+    else delete out.filters.genresExclude;
+
+    if (!Object.keys(out.filters).length) out.filters = {};
+
+    const overrides = {
+      candidatePages: numOrUndef($("f_candidatePages")?.value),
+      pageLimit: numOrUndef($("f_pageLimit")?.value),
+      finalSize: numOrUndef($("f_finalSize")?.value),
+      sleepMs: numOrUndef($("f_sleepMs")?.value),
+      timeoutMs: numOrUndef($("f_timeoutMs")?.value),
+    };
+    for (const [k, v] of Object.entries(overrides)) {
+      if (v !== undefined) out[k] = v;
+      else delete out[k];
+    }
+
+    const hardTop = numOrUndef($("f_hardTop")?.value);
+    const penalty = numOrUndef($("f_penalty")?.value);
+    if (hardTop !== undefined || penalty !== undefined) {
+      out.dupRules = out.dupRules && typeof out.dupRules === "object" ? out.dupRules : {};
+      if (hardTop !== undefined) out.dupRules.hardBlockTop = hardTop;
+      else delete out.dupRules.hardBlockTop;
+      if (penalty !== undefined) out.dupRules.penaltyPerHit = penalty;
+      else delete out.dupRules.penaltyPerHit;
+      if (!Object.keys(out.dupRules).length) delete out.dupRules;
+    } else {
+      delete out.dupRules;
+    }
+
+    if (out.type === "movie") {
+      const minR = numOrUndef($("f_minRating")?.value);
+      const minC = numOrUndef($("f_minCount")?.value);
+      const maxC = numOrUndef($("f_maxCount")?.value);
+      if (minR !== undefined || minC !== undefined || maxC !== undefined) {
+        out.csfdRules =
+          out.csfdRules && typeof out.csfdRules === "object" ? out.csfdRules : {};
+        if (minR !== undefined) out.csfdRules.minRating = minR;
+        else delete out.csfdRules.minRating;
+        if (minC !== undefined) out.csfdRules.minCount = minC;
+        else delete out.csfdRules.minCount;
+        if (maxC !== undefined) out.csfdRules.maxCount = maxC;
+        else delete out.csfdRules.maxCount;
+        if (!Object.keys(out.csfdRules).length) delete out.csfdRules;
+      } else {
+        delete out.csfdRules;
+      }
+    } else {
+      delete out.csfdRules;
+    }
+
+    return out;
+  }
+
+  function refreshListRawFromCurrentForm() {
+    const raw = buildListRawDraftFromForm();
+    setListRawEditor(raw);
+    return raw;
+  }
+
+  function normalizeListRawForImport(rawObj) {
+    if (!rawObj || typeof rawObj !== "object" || Array.isArray(rawObj)) {
+      throw new Error("RAW list JSON musí být objekt.");
+    }
+
+    const out = deepCloneJson(rawObj, {}) || {};
+    out.id = String(out.id || "").trim();
+    out.name = String(out.name || "").trim();
+    if (!out.id) throw new Error("RAW list JSON musí obsahovat 'id'.");
+    if (!out.name) throw new Error("RAW list JSON musí obsahovat 'name'.");
+
+    const sources = normalizeListSourcesArray(Array.isArray(out.sources) ? out.sources : []);
+    if (sources.length) out.sources = sources;
+    else delete out.sources;
+
+    let sourcePath = String(out?.source?.path || "").trim();
+    if (!sourcePath && sources.length) sourcePath = String(sources[0]?.path || "").trim();
+    if (sourcePath && !sourcePath.startsWith("/")) sourcePath = `/${sourcePath}`;
+    if (!sourcePath) throw new Error("RAW list JSON: chybí source.path nebo sources[].path.");
+
+    out.source =
+      out.source && typeof out.source === "object" ? { ...out.source, path: sourcePath } : { path: sourcePath };
+
+    out.type = normalizeListTypeValue(out.type, sourcePath);
+
+    const m = String(out.mode || "")
+      .trim()
+      .toLowerCase();
+    if (m === "stable" || m === "balanced" || m === "fresh") out.mode = m;
+    else delete out.mode;
+
+    if (!out.filters || typeof out.filters !== "object") out.filters = {};
+
+    return out;
+  }
+
   function upsertList() {
     const id = String($("f_id")?.value || "").trim();
     const name = String($("f_name")?.value || "").trim();
@@ -1330,6 +1552,8 @@
       state.lists.lists.push(obj);
     }
 
+    const saved = state.lists.lists.find((x) => x.id === id) || obj;
+    setListRawEditor(saved);
     renderListsTable();
     renderSmartPicksSourcesUI(); // lists -> smartpicks list pickers
     setStatus("list uložen v UI");
@@ -1382,6 +1606,7 @@
 
     syncYearsUIFromText();
     await syncListGenresUI();
+    refreshListRawFromCurrentForm();
   }
 
   async function loadListToForm(id) {
@@ -1437,6 +1662,53 @@
 
     syncYearsUIFromText();
     await syncListGenresUI();
+    setListRawEditor(x);
+  }
+
+  function loadListRawToEditorFromForm() {
+    const raw = refreshListRawFromCurrentForm();
+    if (!raw) throw new Error("List editor je prázdný.");
+    setStatus("RAW list JSON načten z editoru");
+  }
+
+  async function copyListRawFromEditor() {
+    const txt = String($("f_raw")?.value || "").trim();
+    if (!txt) throw new Error("RAW list JSON je prázdný.");
+    const ok = await copyTextToClipboard(txt);
+    if (!ok) throw new Error("Kopírování RAW JSON selhalo.");
+    setStatus("RAW list JSON zkopírován");
+  }
+
+  async function applyListRawFromEditor() {
+    const txt = String($("f_raw")?.value || "").trim();
+    if (!txt) throw new Error("RAW list JSON je prázdný.");
+
+    let parsed = null;
+    try {
+      parsed = JSON.parse(txt);
+    } catch (e) {
+      throw new Error(`RAW list JSON není validní JSON: ${e?.message || e}`);
+    }
+
+    const imported = normalizeListRawForImport(parsed);
+    const collidesWithProfile = (state.lists?.smartPicks?.profiles || []).some(
+      (p) => String(p?.id || "").trim() === imported.id,
+    );
+    if (collidesWithProfile) {
+      throw new Error(
+        `ID koliduje se SmartPicks profilem (${imported.id}). Pouzij jine id listu.`,
+      );
+    }
+
+    const idx = state.lists.lists.findIndex((x) => x.id === imported.id);
+    if (idx >= 0) state.lists.lists[idx] = imported;
+    else state.lists.lists.push(imported);
+
+    renderListsTable();
+    renderSmartPicksSourcesUI();
+    await loadListToForm(imported.id);
+    setStatus("List přepsán z RAW JSON v UI");
+    alert("List přepsán z RAW JSON v UI (nezapomeň uložit na disk).");
   }
 
   // =========================
@@ -2089,6 +2361,92 @@
     setSpIncludeExcludeToHidden(incArr, excArr);
   }
 
+  function setSmartPickRawEditor(obj) {
+    const el = $("sp_raw");
+    if (!el) return;
+    if (!obj || typeof obj !== "object") {
+      el.value = "";
+      return;
+    }
+    el.value = toPrettyJson(obj);
+  }
+
+  function buildSmartPickRawDraftFromForm() {
+    ensureSmartPicksExists();
+    const uiProfile = getSmartPickFromForm(false) || smartPickDefaultProfile();
+    const pid = String(uiProfile?.id || "").trim();
+    const existing = pid
+      ? state.lists.smartPicks.profiles.find((x) => String(x?.id || "").trim() === pid)
+      : null;
+    const legacy = toLegacySmartPickProfile(uiProfile, existing || {});
+    return legacy;
+  }
+
+  function refreshSmartPickRawFromCurrentForm() {
+    const raw = buildSmartPickRawDraftFromForm();
+    setSmartPickRawEditor(raw);
+    return raw;
+  }
+
+  function loadSmartPickRawToEditorFromForm() {
+    const raw = refreshSmartPickRawFromCurrentForm();
+    if (!raw || !String(raw.id || "").trim()) {
+      throw new Error("SmartPicks editor je prázdný.");
+    }
+    setStatus("RAW SmartPicks JSON načten z editoru");
+  }
+
+  async function copySmartPickRawFromEditor() {
+    const txt = String($("sp_raw")?.value || "").trim();
+    if (!txt) throw new Error("RAW SmartPicks JSON je prázdný.");
+    const ok = await copyTextToClipboard(txt);
+    if (!ok) throw new Error("Kopírování RAW JSON selhalo.");
+    setStatus("RAW SmartPicks JSON zkopírován");
+  }
+
+  function applySmartPickRawFromEditor() {
+    ensureSmartPicksExists();
+
+    const txt = String($("sp_raw")?.value || "").trim();
+    if (!txt) throw new Error("RAW SmartPicks JSON je prázdný.");
+
+    let parsed = null;
+    try {
+      parsed = JSON.parse(txt);
+    } catch (e) {
+      throw new Error(`RAW SmartPicks JSON není validní JSON: ${e?.message || e}`);
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("RAW SmartPicks JSON musí být objekt.");
+    }
+
+    const normalized = normalizeSmartPickProfileOnRead(parsed);
+    const legacy = toLegacySmartPickProfile(normalized, parsed);
+    const pid = String(legacy?.id || "").trim();
+    if (!pid) throw new Error("RAW SmartPicks JSON musí obsahovat 'id'.");
+    if (!String(legacy?.name || "").trim()) {
+      throw new Error("RAW SmartPicks JSON musí obsahovat 'name'.");
+    }
+
+    const collidesWithList = (state.lists?.lists || []).some(
+      (l) => String(l?.id || "").trim() === pid,
+    );
+    if (collidesWithList) {
+      throw new Error(`ID koliduje s beznym listem (${pid}). Pouzij jine id profilu.`);
+    }
+
+    const idx = state.lists.smartPicks.profiles.findIndex(
+      (x) => String(x?.id || "").trim() === pid,
+    );
+    if (idx >= 0) state.lists.smartPicks.profiles[idx] = legacy;
+    else state.lists.smartPicks.profiles.push(legacy);
+
+    renderSmartPicksTable();
+    loadSmartPickToForm(pid);
+    setStatus("SmartPicks profil přepsán z RAW JSON v UI");
+    alert("SmartPicks profil přepsán z RAW JSON v UI (nezapomeň uložit na disk).");
+  }
+
   function clearSmartPickForm() {
     if (!$("sp_id")) return;
 
@@ -2107,6 +2465,7 @@
     setSpIncludeExcludeToHidden([], []);
     renderSmartPicksSourcesUI(p);
     renderSmartPicksGenresUI();
+    setSmartPickRawEditor(toLegacySmartPickProfile(p, {}));
   }
 
   function loadSmartPickToForm(profileId) {
@@ -2129,6 +2488,7 @@
     setSpIncludeExcludeToHidden(p.includeGenres || [], p.excludeGenres || []);
     renderSmartPicksSourcesUI(p);
     renderSmartPicksGenresUI();
+    setSmartPickRawEditor(raw);
   }
 
   function upsertSmartPickProfile() {
@@ -2156,6 +2516,7 @@
     if (idx >= 0) state.lists.smartPicks.profiles[idx] = legacy;
     else state.lists.smartPicks.profiles.push(legacy);
 
+    setSmartPickRawEditor(legacy);
     renderSmartPicksTable();
     setStatus("SmartPicks profil uložen v UI");
     alert("SmartPicks profil uložen v UI (nezapomeň uložit na disk).");
@@ -2480,6 +2841,7 @@
     fillSources();
     syncYearsUIFromText();
     await syncListGenresUI();
+    refreshListRawFromCurrentForm();
   });
 
   on("btnNew", "click", async () => {
@@ -2492,6 +2854,27 @@
 
   on("btnUpsert", "click", () => upsertList());
   on("btnDelete", "click", () => deleteList());
+  on("btnListRawFromForm", "click", () => {
+    try {
+      loadListRawToEditorFromForm();
+    } catch (e) {
+      alert(e.message);
+    }
+  });
+  on("btnListRawCopy", "click", async () => {
+    try {
+      await copyListRawFromEditor();
+    } catch (e) {
+      alert(e.message);
+    }
+  });
+  on("btnListRawApply", "click", async () => {
+    try {
+      await applyListRawFromEditor();
+    } catch (e) {
+      alert(e.message);
+    }
+  });
 
   on("btnSort", "click", () => {
     state.lists.lists.sort((a, b) =>
@@ -2543,12 +2926,34 @@
     }
   });
   on("btnSpDelete", "click", () => deleteSmartPickProfile());
+  on("btnSpRawFromForm", "click", () => {
+    try {
+      loadSmartPickRawToEditorFromForm();
+    } catch (e) {
+      alert(e.message);
+    }
+  });
+  on("btnSpRawCopy", "click", async () => {
+    try {
+      await copySmartPickRawFromEditor();
+    } catch (e) {
+      alert(e.message);
+    }
+  });
+  on("btnSpRawApply", "click", () => {
+    try {
+      applySmartPickRawFromEditor();
+    } catch (e) {
+      alert(e.message);
+    }
+  });
 
   on("sp_type", "change", async () => {
     try {
       renderSmartPicksSourcesUI();
       await renderSmartPicksGenresUI();
       syncSpYearsUIFromHidden();
+      refreshSmartPickRawFromCurrentForm();
     } catch {}
   });
 

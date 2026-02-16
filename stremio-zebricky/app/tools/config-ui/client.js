@@ -3098,7 +3098,8 @@
     try {
       const st = await apiUpdateStatus();
       setUpdateUIStatus(st);
-      if (!st?.running && st?.summary) appendFinalUpdateSummary(st.summary);
+      // For finished historical runs, render summary via SSE status after log replay,
+      // so the collapsible summary stays at the end of the log.
       openUpdateStream();
     } catch {
       // server might not have update endpoints yet; ignore

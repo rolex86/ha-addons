@@ -138,6 +138,18 @@ function normalizeRecipe(recipe) {
       : f.year_max === null
         ? null
         : toNumOr(f.year_max, null);
+  f.duration_min =
+    f.duration_min === "" || f.duration_min === undefined
+      ? null
+      : f.duration_min === null
+        ? null
+        : toNumOr(f.duration_min, null);
+  f.duration_max =
+    f.duration_max === "" || f.duration_max === undefined
+      ? null
+      : f.duration_max === null
+        ? null
+        : toNumOr(f.duration_max, null);
   // optional tempo fields (generator supports)
   if (f.tempo_min === undefined) f.tempo_min = null;
   if (f.tempo_max === undefined) f.tempo_max = null;

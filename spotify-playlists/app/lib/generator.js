@@ -10,6 +10,7 @@
 // - Diversity constraints enforced ACROSS the whole final list:
 //   max_per_artist, max_per_album, avoid_same_artist_in_row
 // - Tempo filtering via Spotify audio features when needed
+// - Track length filtering via duration_ms
 
 const { loadCatalog, observeGenres, saveCatalog } = require("./genre_catalog");
 const {
@@ -343,6 +344,35 @@ function getRecipeFilters(recipe) {
         f.allow_unknown_genres === "1" ||
         f.allow_unknown_genres === 1;
 
+  const durationMinRaw =
+    f.duration_min === null ||
+    f.duration_min === "" ||
+    f.duration_min === undefined
+      ? null
+      : Number(f.duration_min);
+  const durationMaxRaw =
+    f.duration_max === null ||
+    f.duration_max === "" ||
+    f.duration_max === undefined
+      ? null
+      : Number(f.duration_max);
+
+  let durationMinSec = Number.isFinite(durationMinRaw)
+    ? Math.max(0, Math.round(durationMinRaw))
+    : null;
+  let durationMaxSec = Number.isFinite(durationMaxRaw)
+    ? Math.max(0, Math.round(durationMaxRaw))
+    : null;
+  if (
+    durationMinSec !== null &&
+    durationMaxSec !== null &&
+    durationMinSec > durationMaxSec
+  ) {
+    const tmp = durationMinSec;
+    durationMinSec = durationMaxSec;
+    durationMaxSec = tmp;
+  }
+
   return {
     explicit: explicitPolicy,
     year_min:
@@ -361,6 +391,12 @@ function getRecipeFilters(recipe) {
       f.tempo_max === null || f.tempo_max === "" || f.tempo_max === undefined
         ? null
         : Number(f.tempo_max),
+    duration_min: durationMinSec,
+    duration_max: durationMaxSec,
+    duration_min_ms:
+      durationMinSec === null ? null : Math.round(durationMinSec * 1000),
+    duration_max_ms:
+      durationMaxSec === null ? null : Math.round(durationMaxSec * 1000),
 
     genres_mode: genresMode,
     genres_include: genresInclude,
@@ -531,6 +567,7 @@ function normalizeTrack(t) {
   return {
     id: t?.id,
     explicit: Boolean(t?.explicit),
+    duration_ms: typeof t?.duration_ms === "number" ? t.duration_ms : null,
     release_date: t?.album?.release_date || null,
     popularity: typeof t?.popularity === "number" ? t.popularity : null,
     tempo: typeof t?.tempo === "number" ? t.tempo : null, // enriched if needed
@@ -544,6 +581,12 @@ function normalizeTrack(t) {
 
 function tempoWanted(filters) {
   return filters && (filters.tempo_min !== null || filters.tempo_max !== null);
+}
+
+function durationWanted(filters) {
+  return (
+    filters && (filters.duration_min_ms !== null || filters.duration_max_ms !== null)
+  );
 }
 
 function applyFiltersAndDedup(rawTracks, { excludedSet, filters, popularity }) {
@@ -568,6 +611,21 @@ function applyFiltersAndDedup(rawTracks, { excludedSet, filters, popularity }) {
     if (filters.year_min !== null && y !== null && y < filters.year_min)
       continue;
     if (filters.year_max !== null && y !== null && y > filters.year_max)
+      continue;
+
+    // duration range (ms)
+    if (durationWanted(filters) && typeof t.duration_ms !== "number") continue;
+    if (
+      filters.duration_min_ms !== null &&
+      typeof t.duration_ms === "number" &&
+      t.duration_ms < filters.duration_min_ms
+    )
+      continue;
+    if (
+      filters.duration_max_ms !== null &&
+      typeof t.duration_ms === "number" &&
+      t.duration_ms > filters.duration_max_ms
+    )
       continue;
 
     // tempo range (requires enrichment)
@@ -724,6 +782,44 @@ async function enrichTempoIfNeeded(sp, tracks, filters) {
   return { tracks: out, ok: true };
 }
 
+async function enrichDurationIfNeeded(sp, tracks, filters) {
+  if (!durationWanted(filters)) return { tracks, ok: true };
+
+  const arr = Array.isArray(tracks) ? tracks : [];
+  const missingIds = uniqIds(
+    arr
+      .map((t) =>
+        t?.id && typeof t?.duration_ms !== "number" ? String(t.id) : null,
+      )
+      .filter(Boolean),
+  );
+  if (!missingIds.length) return { tracks: arr, ok: true };
+
+  const durationById = new Map();
+  for (let i = 0; i < missingIds.length; i += 50) {
+    const chunk = missingIds.slice(i, i + 50);
+    const resp = await spRetry(() => sp.getTracks(chunk));
+    for (const t of resp.body?.tracks || []) {
+      if (!t?.id) continue;
+      if (typeof t.duration_ms === "number") {
+        durationById.set(String(t.id), t.duration_ms);
+      }
+    }
+  }
+
+  if (!durationById.size) return { tracks: arr, ok: true };
+
+  const out = arr.map((t) => {
+    if (!t?.id) return t;
+    if (typeof t.duration_ms === "number") return t;
+    const duration = durationById.get(String(t.id));
+    if (typeof duration === "number") return { ...t, duration_ms: duration };
+    return t;
+  });
+
+  return { tracks: out, ok: true };
+}
+
 /* -------- Spotify pool sources -------- */
 
 async function fetchAllPlaylistTrackItems(sp, playlistId, maxCandidates) {
@@ -744,7 +840,7 @@ async function fetchAllPlaylistTrackItems(sp, playlistId, maxCandidates) {
         limit,
         offset,
         fields:
-          "items(track(id,uri,name,explicit,popularity,album(id,release_date),artists(id,name))),next",
+          "items(track(id,uri,name,explicit,duration_ms,popularity,album(id,release_date),artists(id,name))),next",
       }),
     );
 
@@ -844,11 +940,18 @@ async function fetchSearchTracks(sp, query, market, maxCandidates) {
   return items;
 }
 
-/* -------- Spotify Recommendations (seed genres + tempo) -------- */
+/* -------- Spotify Recommendations (seed genres + tempo + duration) -------- */
 
 async function fetchRecommendations(
   sp,
-  { market, seed_genres, tempo_min, tempo_max },
+  {
+    market,
+    seed_genres,
+    tempo_min,
+    tempo_max,
+    duration_min_ms,
+    duration_max_ms,
+  },
 ) {
   const params = {
     market,
@@ -861,6 +964,10 @@ async function fetchRecommendations(
     params.min_tempo = Number(tempo_min);
   if (tempo_max !== null && tempo_max !== undefined)
     params.max_tempo = Number(tempo_max);
+  if (duration_min_ms !== null && duration_min_ms !== undefined)
+    params.min_duration_ms = Number(duration_min_ms);
+  if (duration_max_ms !== null && duration_max_ms !== undefined)
+    params.max_duration_ms = Number(duration_max_ms);
 
   const resp = await spRetry(() => sp.getRecommendations(params));
   return resp.body?.tracks || [];
@@ -899,6 +1006,8 @@ async function poolFromRecommendations({
       seed_genres: seedGenres,
       tempo_min: filters.tempo_min,
       tempo_max: filters.tempo_max,
+      duration_min_ms: filters.duration_min_ms,
+      duration_max_ms: filters.duration_max_ms,
     });
     raw.push(...got);
   }
@@ -909,6 +1018,12 @@ async function poolFromRecommendations({
     raw.splice(0, raw.length, ...(enr.tracks || raw));
   } catch {
     meta?.notes?.push("tempo_enrich_failed_recommendations");
+  }
+  try {
+    const enr = await enrichDurationIfNeeded(sp, raw, filters);
+    raw.splice(0, raw.length, ...(enr.tracks || raw));
+  } catch {
+    meta?.notes?.push("duration_enrich_failed_recommendations");
   }
 
   // Baseline pool (filters + dedup, but WITHOUT exclusion) so server.js can judge
@@ -2195,6 +2310,12 @@ async function poolFromSources({
   } catch {
     meta?.notes?.push("tempo_enrich_failed_sources");
   }
+  try {
+    const enr = await enrichDurationIfNeeded(sp, raw, filters);
+    raw.splice(0, raw.length, ...(enr.tracks || raw));
+  } catch {
+    meta?.notes?.push("duration_enrich_failed_sources");
+  }
 
   let candidates = applyFiltersAndDedup(raw, {
     excludedSet: excludedSet || new Set(),
@@ -2383,6 +2504,14 @@ async function generateTracksWithMeta({
       } catch {
         meta.notes.push("tempo_enrich_failed_audiodb");
       }
+      try {
+        const enr = await timeStep(meta, "audiodb:duration_enrich", () =>
+          enrichDurationIfNeeded(sp, chartTracks, filters),
+        );
+        chartTracks = enr.tracks || chartTracks;
+      } catch {
+        meta.notes.push("duration_enrich_failed_audiodb");
+      }
 
       // apply filters (no popularity shaping for charts)
       chartTracks = applyFiltersAndDedup(chartTracks, {
@@ -2451,6 +2580,14 @@ async function generateTracksWithMeta({
       discovered = enr.tracks || discovered;
     } catch {
       meta.notes.push("tempo_enrich_failed_discovery");
+    }
+    try {
+      const enr = await timeStep(meta, "discovery:duration_enrich", () =>
+        enrichDurationIfNeeded(sp, discovered, filters),
+      );
+      discovered = enr.tracks || discovered;
+    } catch {
+      meta.notes.push("duration_enrich_failed_discovery");
     }
 
     // apply filters (including popularity shaping for discovery)

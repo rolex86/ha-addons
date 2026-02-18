@@ -27,6 +27,9 @@ let SPOTIFY_GENRE_SEEDS_META = {
 // Auto-roots cache (derived from SPOTIFY_GENRE_SEEDS)
 let AUTO_ROOTS_CACHE = null;
 
+const DURATION_FILTER_MIN_SEC = 0;
+const DURATION_FILTER_MAX_SEC = 1800; // 30:00
+
 /* ---------------- helpers ---------------- */
 
 function setMsg(text, kind) {
@@ -169,6 +172,22 @@ function toNumOrNull(v) {
 function toNumOrZero(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
+}
+
+function clampDurationSec(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return DURATION_FILTER_MIN_SEC;
+  return Math.max(
+    DURATION_FILTER_MIN_SEC,
+    Math.min(DURATION_FILTER_MAX_SEC, Math.round(n)),
+  );
+}
+
+function durationLabel(sec) {
+  const s = Math.max(0, Math.round(Number(sec) || 0));
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return `${m}:${String(r).padStart(2, "0")}`;
 }
 
 function splitComma(v) {
@@ -843,6 +862,16 @@ function helpFor(k) {
         `,
       );
 
+    case "filters.duration_range":
+      return helpBlock(
+        "Délka tracku",
+        `
+          <div>Filtr podle délky tracku. Posuvníky nastavují rozsah v sekundách, ale v UI je vidíš jako <code>m:ss</code>.</div>
+          <div>Zaškrtávátka <code>Min</code>/<code>Max</code> určují, jestli se má limit použít. Když je vypneš, příslušná hranice se nefiltruje.</div>
+          <div class="helpExample"><strong>Příklad:</strong> <code>1:34</code> až <code>6:00</code></div>
+        `,
+      );
+
     case "filters.tempo_min":
       return helpBlock(
         "Tempo min",
@@ -1111,6 +1140,8 @@ function normalizeRecipe(r) {
   if (!r.filters.explicit) r.filters.explicit = "allow";
   if (r.filters.year_min === undefined) r.filters.year_min = null;
   if (r.filters.year_max === undefined) r.filters.year_max = null;
+  if (r.filters.duration_min === undefined) r.filters.duration_min = null;
+  if (r.filters.duration_max === undefined) r.filters.duration_max = null;
   if (r.filters.tempo_min === undefined) r.filters.tempo_min = null;
   if (r.filters.tempo_max === undefined) r.filters.tempo_max = null;
 
@@ -1234,6 +1265,8 @@ function recipeTemplate() {
       explicit: "allow", // allow|exclude|only
       year_min: null,
       year_max: null,
+      duration_min: null,
+      duration_max: null,
       tempo_min: null,
       tempo_max: null,
 
@@ -1447,6 +1480,23 @@ function renderRecipeEditor(r) {
   const adv = r.advanced || {};
   const reco = r.recommendations || {};
   const mix = r.mix || {};
+
+  const durationMinSec =
+    filters.duration_min == null
+      ? DURATION_FILTER_MIN_SEC
+      : clampDurationSec(filters.duration_min);
+  const durationMaxSec =
+    filters.duration_max == null
+      ? DURATION_FILTER_MAX_SEC
+      : clampDurationSec(filters.duration_max);
+  const durationMinSafe = Math.min(durationMinSec, durationMaxSec);
+  const durationMaxSafe = Math.max(durationMinSec, durationMaxSec);
+  const durationMinHidden =
+    filters.duration_min == null ? "" : String(durationMinSafe);
+  const durationMaxHidden =
+    filters.duration_max == null ? "" : String(durationMaxSafe);
+  const durationMinEnabled = filters.duration_min != null;
+  const durationMaxEnabled = filters.duration_max != null;
 
   return `
     <div class="formgrid">
@@ -1972,6 +2022,79 @@ function renderRecipeEditor(r) {
         ${helpFor("filters.year_max")}
       </label>
 
+      <label class="field span2">
+        <div class="label">Track length range</div>
+        <div class="durRange" data-duration-range>
+          <input
+            data-k="filters.duration_min"
+            data-duration-hidden="min"
+            type="hidden"
+            value="${escapeHtml(durationMinHidden)}"
+          >
+          <input
+            data-k="filters.duration_max"
+            data-duration-hidden="max"
+            type="hidden"
+            value="${escapeHtml(durationMaxHidden)}"
+          >
+
+          <div class="durRangeHead">
+            <label class="durToggle">
+              <input
+                data-duration-enable="min"
+                type="checkbox"
+                ${durationMinEnabled ? "checked" : ""}
+              >
+              Min
+            </label>
+            <strong data-duration-label="min">${escapeHtml(
+              durationMinEnabled ? durationLabel(durationMinSafe) : "no min",
+            )}</strong>
+
+            <label class="durToggle">
+              <input
+                data-duration-enable="max"
+                type="checkbox"
+                ${durationMaxEnabled ? "checked" : ""}
+              >
+              Max
+            </label>
+            <strong data-duration-label="max">${escapeHtml(
+              durationMaxEnabled ? durationLabel(durationMaxSafe) : "no max",
+            )}</strong>
+          </div>
+
+          <div class="durRangeRow">
+            <span class="durRangeTag">Min</span>
+            <input
+              data-duration-slider="min"
+              type="range"
+              min="${DURATION_FILTER_MIN_SEC}"
+              max="${DURATION_FILTER_MAX_SEC}"
+              step="1"
+              value="${durationMinSafe}"
+            >
+          </div>
+
+          <div class="durRangeRow">
+            <span class="durRangeTag">Max</span>
+            <input
+              data-duration-slider="max"
+              type="range"
+              min="${DURATION_FILTER_MIN_SEC}"
+              max="${DURATION_FILTER_MAX_SEC}"
+              step="1"
+              value="${durationMaxSafe}"
+            >
+          </div>
+
+          <div class="durRangeHint">
+            Uncheck Min/Max for no limit. Display format is <code>m:ss</code>.
+          </div>
+        </div>
+        ${helpFor("filters.duration_range")}
+      </label>
+
       <label class="field">
         <div class="label">Tempo min (BPM)</div>
         <input data-k="filters.tempo_min" type="number" value="${escapeHtml(
@@ -2187,6 +2310,8 @@ function saveRecipeFromBlock(recipeId) {
     if (
       k === "filters.year_min" ||
       k === "filters.year_max" ||
+      k === "filters.duration_min" ||
+      k === "filters.duration_max" ||
       k === "history.rolling_days" ||
       k === "history.auto_flush.threshold_pct" ||
       k === "history.auto_flush.min_pool" ||
@@ -2245,6 +2370,67 @@ function saveRecipeFromBlock(recipeId) {
 
   // Remove accidental old keys if user had "limits"
   // (engine uses diversity, but we don't break the config)
+}
+
+function wireDurationRangeFilters() {
+  document.querySelectorAll("[data-duration-range]").forEach((wrap) => {
+    const minSlider = wrap.querySelector('input[data-duration-slider="min"]');
+    const maxSlider = wrap.querySelector('input[data-duration-slider="max"]');
+    const minHidden = wrap.querySelector('input[data-duration-hidden="min"]');
+    const maxHidden = wrap.querySelector('input[data-duration-hidden="max"]');
+    const minEnabled = wrap.querySelector('input[data-duration-enable="min"]');
+    const maxEnabled = wrap.querySelector('input[data-duration-enable="max"]');
+    const minLabel = wrap.querySelector('[data-duration-label="min"]');
+    const maxLabel = wrap.querySelector('[data-duration-label="max"]');
+
+    if (
+      !minSlider ||
+      !maxSlider ||
+      !minHidden ||
+      !maxHidden ||
+      !minEnabled ||
+      !maxEnabled
+    )
+      return;
+
+    const sync = (changed) => {
+      let minSec = clampDurationSec(minSlider.value);
+      let maxSec = clampDurationSec(maxSlider.value);
+
+      if (changed === "min") minEnabled.checked = true;
+      if (changed === "max") maxEnabled.checked = true;
+
+      if (minSec > maxSec) {
+        if (changed === "min") maxSec = minSec;
+        else minSec = maxSec;
+      }
+
+      minSlider.value = String(minSec);
+      maxSlider.value = String(maxSec);
+
+      minSlider.disabled = !minEnabled.checked;
+      maxSlider.disabled = !maxEnabled.checked;
+
+      minHidden.value = minEnabled.checked ? String(minSec) : "";
+      maxHidden.value = maxEnabled.checked ? String(maxSec) : "";
+
+      if (minLabel)
+        minLabel.textContent = minEnabled.checked
+          ? durationLabel(minSec)
+          : "no min";
+      if (maxLabel)
+        maxLabel.textContent = maxEnabled.checked
+          ? durationLabel(maxSec)
+          : "no max";
+    };
+
+    minSlider.addEventListener("input", () => sync("min"));
+    maxSlider.addEventListener("input", () => sync("max"));
+    minEnabled.addEventListener("change", () => sync("toggle_min"));
+    maxEnabled.addEventListener("change", () => sync("toggle_max"));
+
+    sync("init");
+  });
 }
 
 /* ---------------- genre picker (Spotify seeds) ---------------- */
@@ -3303,6 +3489,7 @@ function renderAccordion() {
   });
 
   // Wire & populate per-recipe genre picker UI
+  wireDurationRangeFilters();
   wireObservedGenrePanels();
   wireGenreListInputs();
 }

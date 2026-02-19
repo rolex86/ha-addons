@@ -5,7 +5,6 @@ import { scoreCandidate } from "../utils/scoring.js";
 import { sxxexx } from "../utils/text.js";
 import { parseId } from "../ids.js";
 import { cache } from "../utils/cache.js";
-import { httpGet, httpHead } from "../utils/http.js";
 import { elapsedMs, errorMeta, log, sanitizeUrl, summarizeId } from "../utils/log.js";
 
 const STREAM_INFLIGHT = new Map();
@@ -14,7 +13,6 @@ const MAX_STREAMS = 15;
 const MAX_QUERY_VARIANTS = 8;
 const MAX_CANDIDATES_TO_RESOLVE = 40;
 const RESOLVE_CONCURRENCY = 4;
-const SIZE_PROBE_CONCURRENCY = 6;
 const SEARCH_PER_QUERY_MIN = 20;
 const SEARCH_PER_QUERY_MAX = 60;
 
@@ -77,6 +75,28 @@ function formatBytes(bytes) {
 
   const precision = value >= 100 ? 0 : value >= 10 ? 1 : 2;
   return `${value.toFixed(precision)} ${units[idx]}`;
+}
+
+function hasSizeToken(text) {
+  return /\b\d+(?:[.,]\d+)?\s*(?:tb|gb|mb|kb|b)\b/i.test(String(text || ""));
+}
+
+function parseSizeFromTitleBytes(title) {
+  const text = String(title || "");
+  const m = /(\d+(?:[.,]\d+)?)\s*(tb|gb|mb|kb|b)\b/i.exec(text);
+  if (!m) return -1;
+
+  const value = parseFloat(m[1].replace(",", "."));
+  if (!Number.isFinite(value) || value <= 0) return -1;
+
+  const unit = m[2].toUpperCase();
+  let mult = 1;
+  if (unit === "KB") mult = 1024;
+  if (unit === "MB") mult = 1024 ** 2;
+  if (unit === "GB") mult = 1024 ** 3;
+  if (unit === "TB") mult = 1024 ** 4;
+
+  return Math.round(value * mult);
 }
 
 function buildInflightKey(type, stremioId, config = {}) {
@@ -154,53 +174,6 @@ async function mapConcurrent(items, concurrency, worker) {
   return out;
 }
 
-async function probeContentLength(url) {
-  const cacheKey = `size:${url}`;
-  const cached = cache.get(cacheKey);
-  if (cached !== undefined) return cached;
-
-  let size = -1;
-
-  try {
-    const { res } = await httpHead(url, {
-      throwOnHttpError: false,
-      timeoutMs: 8000,
-    });
-    if (res.ok) {
-      const len = parseInt(res.headers.get("content-length") || "", 10);
-      if (Number.isFinite(len) && len > 0) size = len;
-    }
-  } catch {
-    // ignore, fallback to range probe
-  }
-
-  if (size <= 0) {
-    try {
-      const { res } = await httpGet(url, {
-        throwOnHttpError: false,
-        timeoutMs: 8000,
-        headers: { Range: "bytes=0-0" },
-      });
-      if (res.ok || res.status === 206) {
-        const contentRange = String(res.headers.get("content-range") || "");
-        const fromRange = /\/(\d+)\s*$/i.exec(contentRange);
-        if (fromRange) {
-          const n = parseInt(fromRange[1], 10);
-          if (Number.isFinite(n) && n > 0) size = n;
-        } else {
-          const len = parseInt(res.headers.get("content-length") || "", 10);
-          if (Number.isFinite(len) && len > 0) size = len;
-        }
-      }
-    } catch {
-      // ignore
-    }
-  }
-
-  cache.set(cacheKey, size, { ttl: 6 * 60 * 60 * 1000 });
-  return size;
-}
-
 export const StreamService = {
   async streamsForId(type, stremioId, config = {}) {
     const key = buildInflightKey(type, stremioId, config);
@@ -265,20 +238,15 @@ export const StreamService = {
       const resolved = await PREHRAJTO.resolveStream(pid.value, config);
       if (!resolved) return { streams: [] };
 
-      const sizeBytes = await probeContentLength(resolved.url);
-      const sizeText = formatBytes(sizeBytes);
-      const title = sizeText ? `Prehraj.to • ${sizeText}` : "Prehraj.to";
-
       log.info("streamsForId:pt_url resolved", {
         ms: elapsedMs(startedAt),
         url: sanitizeUrl(resolved.url),
-        sizeBytes,
       });
       return {
         streams: [
           buildStreamEntry({
             url: resolved.url,
-            title,
+            title: "Prehraj.to",
             subtitles: resolved.subtitles,
           }),
         ],
@@ -526,28 +494,28 @@ export const StreamService = {
       return { streams: [] };
     }
 
-    const sizedRows = await mapConcurrent(
-      uniqueResolved,
-      SIZE_PROBE_CONCURRENCY,
-      async (row) => {
-        const sizeBytes = await probeContentLength(row.streamUrl);
-        return { ...row, sizeBytes };
-      },
-    );
-
-    const finalRows = sizedRows
-      .filter(Boolean)
+    const rankedRows = uniqueResolved
+      .map((row) => ({
+        ...row,
+        parsedSizeBytes: parseSizeFromTitleBytes(row.sourceTitle),
+      }))
       .sort((a, b) => {
-        const sa = Number.isFinite(a.sizeBytes) ? a.sizeBytes : -1;
-        const sb = Number.isFinite(b.sizeBytes) ? b.sizeBytes : -1;
+        const sa = Number.isFinite(a.parsedSizeBytes) ? a.parsedSizeBytes : -1;
+        const sb = Number.isFinite(b.parsedSizeBytes) ? b.parsedSizeBytes : -1;
         if (sb !== sa) return sb - sa;
-        return b.score - a.score;
+        const byTitle = String(a.sourceTitle || "").localeCompare(
+          String(b.sourceTitle || ""),
+          "cs",
+          { sensitivity: "base" },
+        );
+        if (byTitle !== 0) return byTitle;
+        return String(a.sourceUrl || "").localeCompare(String(b.sourceUrl || ""));
       })
       .slice(0, MAX_STREAMS);
 
-    const streams = finalRows.map((row) => {
-      const sizeText = formatBytes(row.sizeBytes);
-      const title = sizeText
+    const streams = rankedRows.map((row) => {
+      const sizeText = formatBytes(row.parsedSizeBytes);
+      const title = sizeText && !hasSizeToken(row.sourceTitle)
         ? `Prehraj.to • ${row.sourceTitle} • ${sizeText}`
         : `Prehraj.to • ${row.sourceTitle}`;
 
@@ -563,10 +531,10 @@ export const StreamService = {
       candidateCount: candidates.length,
       resolvedUnique: uniqueResolved.length,
       streams: streams.length,
+      withParsedSize: rankedRows.filter((r) => r.parsedSizeBytes > 0).length,
       ms: elapsedMs(startedAt),
     });
 
     return { streams };
   },
 };
-

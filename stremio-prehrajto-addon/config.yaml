@@ -1,0 +1,51 @@
+name: "Stremio Prehraj.to Add-on"
+slug: "stremio_prehrajto"
+description: "Stremio add-on s TMDB katalogem a resolverem prehraj.to."
+version: "0.1.0"
+url: "https://github.com/rolex86/ha-addons/tree/master/stremio-prehrajto-addon"
+
+arch:
+  - aarch64
+  - amd64
+  - armv7
+  - i386
+
+startup: services
+boot: auto
+init: false
+
+webui: "http://[HOST]:[PORT:7654]/configure"
+panel_icon: mdi:play-circle-outline
+panel_title: "Stremio Prehraj.to"
+
+ports:
+  7654/tcp: 7654
+ports_description:
+  7654/tcp: "Stremio addon HTTP"
+
+map:
+  - data:rw
+
+options:
+  base_url: "http://homeassistant.local:7654"
+  tmdb_api_key: ""
+  tmdb_language: "cs-CZ"
+  tmdb_image_base: "https://image.tmdb.org/t/p/w500"
+  prehrajto_base: "https://prehraj.to"
+  prehrajto_user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122 Safari/537.36"
+  default_search_limit: 20
+  default_premium: false
+  cache_ttl_seconds: 900
+  config_secret: "change-me-please"
+
+schema:
+  base_url: str
+  tmdb_api_key: password
+  tmdb_language: str
+  tmdb_image_base: str
+  prehrajto_base: str
+  prehrajto_user_agent: str
+  default_search_limit: int(5,80)
+  default_premium: bool
+  cache_ttl_seconds: int(30,86400)
+  config_secret: password

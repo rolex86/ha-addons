@@ -1,0 +1,10 @@
+build_from:
+  aarch64: ghcr.io/hassio-addons/base-nodejs:stable
+  amd64: ghcr.io/hassio-addons/base-nodejs:stable
+  armv7: ghcr.io/hassio-addons/base-nodejs:stable
+  i386: ghcr.io/hassio-addons/base-nodejs:stable
+
+labels:
+  org.opencontainers.image.title: "Stremio Prehraj.to Add-on"
+  org.opencontainers.image.description: "Stremio addon with TMDB catalog and prehraj.to resolver"
+  org.opencontainers.image.source: "https://github.com/rolex86/ha-addons"

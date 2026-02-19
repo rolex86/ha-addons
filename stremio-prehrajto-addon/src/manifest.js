@@ -1,7 +1,7 @@
 export function buildManifest() {
   return {
     id: "org.prehrajto.addon.node",
-    version: "0.1.4",
+    version: "0.1.5",
     name: "Prehraj.to",
     description:
       "Dodatečný stream source přes prehraj.to pro Cinemeta položky.",

@@ -2,6 +2,7 @@
 
 Addon je ted zamereny primarne jako `stream source` pro existujici Cinemeta/StreamCinema obsah.
 Nevystavuje vlastni katalog, ve Stremiu se zobrazuje jako dalsi zdroj streamu.
+Resolver vraci az 15 streamu serazenych podle detekovane velikosti (nejvetsi prvni) a zkousi vice variant nazvu (CZ/original/rok).
 
 ## Home Assistant Add-on
 

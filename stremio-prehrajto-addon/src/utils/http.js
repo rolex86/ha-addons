@@ -39,6 +39,38 @@ export async function httpGet(
   }
 }
 
+export async function httpHead(
+  url,
+  {
+    headers = {},
+    timeoutMs = 15000,
+    redirect = "follow",
+    throwOnHttpError = true,
+  } = {},
+) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+
+  try {
+    const res = await fetch(url, {
+      method: "HEAD",
+      headers: {
+        "User-Agent": ENV.PREHRAJTO_USER_AGENT,
+        ...headers,
+      },
+      redirect,
+      signal: ctrl.signal,
+    });
+
+    if (throwOnHttpError && !res.ok) {
+      throw buildHttpError("HEAD", url, res, "");
+    }
+    return { res };
+  } finally {
+    clearTimeout(t);
+  }
+}
+
 export async function httpPost(
   url,
   body,

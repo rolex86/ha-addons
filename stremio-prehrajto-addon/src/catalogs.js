@@ -4,25 +4,31 @@ export const CATALOGS = [
     id: "movie_popular",
     type: "movie",
     name: "Prehraj.to (TMDB) • Filmy • Popular",
-    extraSupported: ["skip"],
+    extra: [{ name: "skip", isRequired: false }],
   },
   {
     id: "movie_trending",
     type: "movie",
     name: "Prehraj.to (TMDB) • Filmy • Trending",
-    extraSupported: ["skip"],
+    extra: [{ name: "skip", isRequired: false }],
   },
   {
     id: "movie_by_genre",
     type: "movie",
     name: "Prehraj.to (TMDB) • Filmy • Žánr",
-    extraSupported: ["genre", "skip"],
+    extra: [
+      { name: "genre", isRequired: false },
+      { name: "skip", isRequired: false },
+    ],
   },
   {
     id: "movie_by_year",
     type: "movie",
     name: "Prehraj.to (TMDB) • Filmy • Rok",
-    extraSupported: ["year", "skip"],
+    extra: [
+      { name: "year", isRequired: false },
+      { name: "skip", isRequired: false },
+    ],
   },
 
   // Series
@@ -30,25 +36,31 @@ export const CATALOGS = [
     id: "series_popular",
     type: "series",
     name: "Prehraj.to (TMDB) • Seriály • Popular",
-    extraSupported: ["skip"],
+    extra: [{ name: "skip", isRequired: false }],
   },
   {
     id: "series_trending",
     type: "series",
     name: "Prehraj.to (TMDB) • Seriály • Trending",
-    extraSupported: ["skip"],
+    extra: [{ name: "skip", isRequired: false }],
   },
   {
     id: "series_by_genre",
     type: "series",
     name: "Prehraj.to (TMDB) • Seriály • Žánr",
-    extraSupported: ["genre", "skip"],
+    extra: [
+      { name: "genre", isRequired: false },
+      { name: "skip", isRequired: false },
+    ],
   },
   {
     id: "series_by_year",
     type: "series",
     name: "Prehraj.to (TMDB) • Seriály • Rok",
-    extraSupported: ["year", "skip"],
+    extra: [
+      { name: "year", isRequired: false },
+      { name: "skip", isRequired: false },
+    ],
   },
 
   // Direct search on prehraj.to
@@ -56,6 +68,9 @@ export const CATALOGS = [
     id: "pt_search",
     type: "movie",
     name: "Prehraj.to • Hledání (přímé)",
-    extraSupported: ["search", "skip"],
+    extra: [
+      { name: "search", isRequired: true },
+      { name: "skip", isRequired: false },
+    ],
   },
 ];

@@ -28,6 +28,11 @@ Otevři:
 nebo sdílej:
 `https://tv.stremio.com/#/addons?addon=http%3A%2F%2Flocalhost%3A7654%2Fmanifest.json`
 
+Troubleshooting `Failed to fetch`:
+- `BASE_URL` musi byt URL dostupna ze zarizeni, kde bezi Stremio (ne jen z HA hosta).
+- Pro Stremio Web (`https://web.strem.io` / `https://tv.stremio.com`) je obvykle potreba HTTPS URL (HTTP byva blokovane mixed-content politikou).
+- Over endpoint rucne: `http://HA_IP:7654/manifest.json` musi vratit validni JSON.
+
 ## Config
 
 `http://localhost:7654/configure`

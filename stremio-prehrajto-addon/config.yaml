@@ -1,7 +1,7 @@
 name: "Stremio Prehraj.to Add-on"
 slug: "stremio_prehrajto"
 description: "Stremio add-on s TMDB katalogem a resolverem prehraj.to."
-version: "0.1.0"
+version: "0.1.1"
 url: "https://github.com/rolex86/ha-addons/tree/master/stremio-prehrajto-addon"
 
 arch:

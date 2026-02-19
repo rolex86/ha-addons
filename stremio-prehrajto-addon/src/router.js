@@ -69,6 +69,7 @@ export function buildRouter() {
         type,
         id: summarizeId(id),
         limit: config.limit,
+        streamLimit: config.streamLimit,
         premium: config.premium,
         hasEmail: Boolean(config.email),
       });
@@ -135,6 +136,13 @@ function renderConfigureHtml() {
         <input id="limit" value="${ENV.DEFAULT_SEARCH_LIMIT}" />
       </div>
       <div>
+        <label>Počet vrácených streamů</label>
+        <input id="stream_limit" value="${ENV.DEFAULT_STREAMS_LIMIT}" />
+      </div>
+    </div>
+
+    <div class="row">
+      <div>
         <label>Premium režim</label>
         <input id="premium" type="checkbox" ${ENV.DEFAULT_PREMIUM ? "checked" : ""} />
       </div>
@@ -160,6 +168,7 @@ function renderConfigureHtml() {
       email: document.getElementById("email").value.trim(),
       password: document.getElementById("password").value,
       limit: document.getElementById("limit").value.trim(),
+      streamLimit: document.getElementById("stream_limit").value.trim(),
       premium: document.getElementById("premium").checked
     };
 

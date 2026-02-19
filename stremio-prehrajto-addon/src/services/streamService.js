@@ -12,6 +12,7 @@ const NO_STREAMS_TTL_MS = 180_000;
 const MAX_STREAMS = 15;
 const MAX_QUERY_VARIANTS = 8;
 const MAX_CANDIDATES_TO_RESOLVE = 40;
+const RESOLVE_FACTOR = 3;
 const RESOLVE_CONCURRENCY = 4;
 const SEARCH_PER_QUERY_MIN = 20;
 const SEARCH_PER_QUERY_MAX = 60;
@@ -99,6 +100,12 @@ function parseSizeFromTitleBytes(title) {
   return Math.round(value * mult);
 }
 
+function clampStreamLimit(v) {
+  const n = parseInt(v, 10);
+  if (Number.isNaN(n)) return 5;
+  return Math.max(1, Math.min(MAX_STREAMS, n));
+}
+
 function buildInflightKey(type, stremioId, config = {}) {
   return [
     String(type || ""),
@@ -106,6 +113,7 @@ function buildInflightKey(type, stremioId, config = {}) {
     config.premium ? "1" : "0",
     String(config.email || "").toLowerCase(),
     String(config.limit || ""),
+    String(config.streamLimit || ""),
   ].join("|");
 }
 
@@ -417,6 +425,7 @@ export const StreamService = {
     log.debug("streamsFromQueries:start", {
       queries: normalizedQueries,
       searchPerQuery,
+      streamLimit: config?.streamLimit,
       wantedTitle: wanted.wantedTitle || "",
       wantedYear: wanted.wantedYear || "",
       wantedSxxExx: wanted.wantedSxxExx || "",
@@ -451,10 +460,16 @@ export const StreamService = {
       }))
       .sort((a, b) => b.s - a.s);
 
-    const toResolve = scored.slice(0, Math.min(scored.length, MAX_CANDIDATES_TO_RESOLVE));
+    const maxStreams = clampStreamLimit(config?.streamLimit);
+    const maxResolve = Math.min(
+      MAX_CANDIDATES_TO_RESOLVE,
+      Math.max(maxStreams * RESOLVE_FACTOR, maxStreams),
+    );
+    const toResolve = scored.slice(0, Math.min(scored.length, maxResolve));
     log.debug("streamsFromQueries:resolve batch", {
       candidateCount: candidates.length,
       resolveCount: toResolve.length,
+      maxStreams,
       top: toResolve.slice(0, 5).map((x) => ({
         score: x.s,
         title: x.r.title,
@@ -511,7 +526,7 @@ export const StreamService = {
         if (byTitle !== 0) return byTitle;
         return String(a.sourceUrl || "").localeCompare(String(b.sourceUrl || ""));
       })
-      .slice(0, MAX_STREAMS);
+      .slice(0, maxStreams);
 
     const streams = rankedRows.map((row) => {
       const sizeText = formatBytes(row.parsedSizeBytes);
@@ -531,6 +546,7 @@ export const StreamService = {
       candidateCount: candidates.length,
       resolvedUnique: uniqueResolved.length,
       streams: streams.length,
+      maxStreams,
       withParsedSize: rankedRows.filter((r) => r.parsedSizeBytes > 0).length,
       ms: elapsedMs(startedAt),
     });

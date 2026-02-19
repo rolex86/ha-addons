@@ -2,7 +2,8 @@
 
 Addon je ted zamereny primarne jako `stream source` pro existujici Cinemeta/StreamCinema obsah.
 Nevystavuje vlastni katalog, ve Stremiu se zobrazuje jako dalsi zdroj streamu.
-Resolver vraci az 15 streamu serazenych podle detekovane velikosti (nejvetsi prvni) a zkousi vice variant nazvu (CZ/original/rok).
+Resolver vraci streamy serazene podle detekovane velikosti (nejvetsi prvni) a zkousi vice variant nazvu (CZ/original/rok).
+Pocet vracenych streamu je konfigurovatelny (`default_streams_limit`, vychozi 5).
 
 ## Home Assistant Add-on
 
@@ -13,6 +14,7 @@ Po instalaci nastav options v HA:
 - `tmdb_api_key` (volitelne, pro presnejsi mapovani IMDb -> TMDB)
 - `log_level` (`debug`, `info`, `warn`, `error`)
 - `config_secret` (pro sifrovani `cfg` tokenu)
+- `default_streams_limit` (kolik streamu max vracet, vychozi 5)
 
 Perzistentni data:
 - runtime cache + premium cookies: `/data/stremio-prehrajto/cache.json`
@@ -46,10 +48,11 @@ Konfigurace se předává v manifest URL přes token `cfg`:
 
 - email, password (pro premium download)
 - limit (search limit)
+- streamLimit (kolik streamu vratit)
 - premium=true/false
 
 Configure stránka pošle data na backend a vygeneruje URL s tokenem `cfg`, takže heslo není v URL v čistém textu.
-Legacy query parametry (`email`, `password`, `limit`, `premium`) zůstávají podporované jako fallback.
+Legacy query parametry (`email`, `password`, `limit`, `stream_limit`, `premium`) zůstávají podporované jako fallback.
 
 ## Debug logy
 

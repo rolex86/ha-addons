@@ -21,6 +21,7 @@ export function readConfig(req) {
     email: q.email,
     password: q.password,
     limit: q.limit,
+    streamLimit: q.stream_limit ?? q.streamLimit ?? q.max_streams ?? q.maxStreams,
     premium: q.premium,
   });
 }
@@ -68,12 +69,14 @@ function normalizeConfig(raw = {}) {
   const email = (raw.email || "").toString().trim();
   const password = (raw.password || "").toString();
   const limit = clampInt(raw.limit, ENV.DEFAULT_SEARCH_LIMIT, 5, 80);
+  const streamLimit = clampInt(raw.streamLimit, ENV.DEFAULT_STREAMS_LIMIT, 1, 15);
   const premium = parseBool(raw.premium, ENV.DEFAULT_PREMIUM);
 
   return {
     email,
     password,
     limit,
+    streamLimit,
     premium,
   };
 }

@@ -1,7 +1,7 @@
 name: "Stremio Prehraj.to Add-on"
 slug: "stremio_prehrajto"
 description: "Stremio stream source add-on s resolverem prehraj.to."
-version: "0.1.6"
+version: "0.1.7"
 url: "https://github.com/rolex86/ha-addons/tree/master/stremio-prehrajto-addon"
 
 arch:
@@ -33,6 +33,7 @@ options:
   prehrajto_base: "https://prehraj.to"
   prehrajto_user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122 Safari/537.36"
   default_search_limit: 20
+  default_streams_limit: 5
   default_premium: false
   cache_ttl_seconds: 900
   log_level: "debug"
@@ -45,6 +46,7 @@ schema:
   prehrajto_base: str
   prehrajto_user_agent: str
   default_search_limit: int(5,80)
+  default_streams_limit: int(1,15)
   default_premium: bool
   cache_ttl_seconds: int(30,86400)
   log_level: str

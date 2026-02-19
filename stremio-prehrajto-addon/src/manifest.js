@@ -1,17 +1,19 @@
-import { ENV } from "./env.js";
-import { CATALOGS } from "./catalogs.js";
-
 export function buildManifest() {
   return {
     id: "org.prehrajto.addon.node",
-    version: "0.1.1",
+    version: "0.1.2",
     name: "Prehraj.to (Node)",
-    description: "TMDB katalog + stream resolver přes prehraj.to (scrape).",
+    description: "Dodatečný stream source přes prehraj.to pro Cinemeta položky.",
     logo: "https://raw.githubusercontent.com/Stremio/stremio-addon-sdk/master/docs/logos/1.png",
 
-    resources: ["catalog", "meta", "stream"],
+    resources: [
+      {
+        name: "stream",
+        types: ["movie", "series"],
+        idPrefixes: ["tt", "pt:"],
+      },
+    ],
     types: ["movie", "series"],
-    catalogs: CATALOGS,
 
     behaviorHints: {
       configurable: true,

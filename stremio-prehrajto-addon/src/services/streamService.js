@@ -1,8 +1,9 @@
 import { PREHRAJTO } from "./prehrajto.js";
 import { TMDB } from "./tmdb.js";
+import { CINEMETA } from "./cinemeta.js";
 import { scoreCandidate } from "../utils/scoring.js";
 import { sxxexx } from "../utils/text.js";
-import { parseId, ID } from "../ids.js";
+import { parseId } from "../ids.js";
 
 function buildStreamEntry({ url, title, subtitles = [] }) {
   const st = {
@@ -21,7 +22,7 @@ function buildStreamEntry({ url, title, subtitles = [] }) {
 }
 
 export const StreamService = {
-  async streamsForId(stremioId, config) {
+  async streamsForId(type, stremioId, config) {
     const pid = parseId(stremioId);
 
     // Direct prehraj URL
@@ -44,24 +45,80 @@ export const StreamService = {
       return await this.streamsFromQuery(pid.value, config);
     }
 
-    // TMDB movie -> title year -> search -> resolve
-    if (pid.kind === "tmdb_movie") {
-      const movie = await TMDB.movie(pid.tmdbId);
-      const query =
-        `${movie.title} ${movie.release_date?.slice(0, 4) || ""}`.trim();
-      return await this.streamsFromQuery(query, config, {
-        wantedTitle: movie.title,
-        wantedYear: movie.release_date?.slice(0, 4),
-      });
+    // Cinemeta IMDB title id -> map to TMDB first
+    if (pid.kind === "imdb_title") {
+      if (type === "movie") {
+        try {
+          const found = await TMDB.findByImdb(pid.imdbId);
+          if (found.movie?.id) {
+            const movie = await TMDB.movie(found.movie.id);
+            const query =
+              `${movie.title} ${movie.release_date?.slice(0, 4) || ""}`.trim();
+            return await this.streamsFromQuery(query, config, {
+              wantedTitle: movie.title,
+              wantedYear: movie.release_date?.slice(0, 4),
+            });
+          }
+        } catch {
+          // fallback to Cinemeta below
+        }
+
+        const cmMovie = await CINEMETA.movieByImdb(pid.imdbId);
+        if (!cmMovie?.name) return { streams: [] };
+        const year = /\b(19|20)\d{2}\b/.exec(cmMovie.releaseInfo || "")?.[0];
+        const query = `${cmMovie.name} ${year || ""}`.trim();
+        return await this.streamsFromQuery(query, config, {
+          wantedTitle: cmMovie.name,
+          wantedYear: year,
+        });
+      }
+
+      if (type === "series") {
+        try {
+          const found = await TMDB.findByImdb(pid.imdbId);
+          if (found.series?.id) {
+            const series = await TMDB.series(found.series.id);
+            return await this.streamsFromQuery(series.name, config, {
+              wantedTitle: series.name,
+            });
+          }
+        } catch {
+          // fallback to Cinemeta below
+        }
+
+        const cmSeries = await CINEMETA.seriesByImdb(pid.imdbId);
+        if (!cmSeries?.name) return { streams: [] };
+        return await this.streamsFromQuery(cmSeries.name, config, {
+          wantedTitle: cmSeries.name,
+        });
+      }
+
+      return { streams: [] };
     }
 
-    // TMDB episode -> series name + SxxExx -> search -> resolve
-    if (pid.kind === "tmdb_episode") {
-      const series = await TMDB.series(pid.tmdbId);
+    // Cinemeta IMDB episode id: tt1234567:1:2
+    if (pid.kind === "imdb_episode") {
       const marker = sxxexx(pid.season, pid.episode);
-      const query = `${series.name} ${marker}`;
+
+      try {
+        const found = await TMDB.findByImdb(pid.imdbId);
+        if (found.series?.id) {
+          const series = await TMDB.series(found.series.id);
+          const query = `${series.name} ${marker}`;
+          return await this.streamsFromQuery(query, config, {
+            wantedTitle: series.name,
+            wantedSxxExx: marker,
+          });
+        }
+      } catch {
+        // fallback to Cinemeta below
+      }
+
+      const cmSeries = await CINEMETA.seriesByImdb(pid.imdbId);
+      if (!cmSeries?.name) return { streams: [] };
+      const query = `${cmSeries.name} ${marker}`;
       return await this.streamsFromQuery(query, config, {
-        wantedTitle: series.name,
+        wantedTitle: cmSeries.name,
         wantedSxxExx: marker,
       });
     }
@@ -71,7 +128,8 @@ export const StreamService = {
   },
 
   async streamsFromQuery(query, config, wanted = {}) {
-    const results = await PREHRAJTO.search(query, { limit: config.limit });
+    const searchLimit = Math.min(Math.max(config.limit || 10, 1), 10);
+    const results = await PREHRAJTO.search(query, { limit: searchLimit });
 
     if (!results.length) return { streams: [] };
 
@@ -91,7 +149,7 @@ export const StreamService = {
       .sort((a, b) => b.s - a.s);
 
     // try top N resolves
-    const top = scored.slice(0, 3);
+    const top = scored.slice(0, 2);
     const streams = [];
 
     for (const item of top) {
@@ -105,6 +163,8 @@ export const StreamService = {
           subtitles: resolved.subtitles,
         }),
       );
+
+      if (streams.length >= 2) break;
     }
 
     return { streams };

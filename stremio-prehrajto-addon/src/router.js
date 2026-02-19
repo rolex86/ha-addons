@@ -1,12 +1,8 @@
 import express from "express";
 import { buildManifest } from "./manifest.js";
 import { buildConfigToken, readConfig } from "./config.js";
-import { CatalogService } from "./services/catalogService.js";
-import { MetaService } from "./services/metaService.js";
 import { StreamService } from "./services/streamService.js";
 import { ENV } from "./env.js";
-
-const CONFIG_QUERY_KEYS = new Set(["email", "password", "limit", "premium", "cfg"]);
 
 export function buildRouter() {
   const r = express.Router();
@@ -42,66 +38,19 @@ export function buildRouter() {
     }
   });
 
-  const catalogHandler = async (req, res) => {
-    try {
-      const config = readConfig(req);
-      const { type, id } = req.params;
-      const extra = parseCatalogExtra(req);
-      const data = await CatalogService.catalog(id, type, extra, config);
-      res.json(data);
-    } catch (e) {
-      res.status(500).json({ metas: [], error: String(e?.message || e) });
-    }
-  };
-  r.get("/catalog/:type/:id.json", catalogHandler);
-  r.get("/catalog/:type/:id/:extra.json", catalogHandler);
-
-  r.get("/meta/:type/:id.json", async (req, res) => {
-    try {
-      const { type, id } = req.params;
-      const data = await MetaService.metaForId(type, id);
-      if (!data.meta) return res.json({ meta: null });
-      res.json(data);
-    } catch (e) {
-      res.status(500).json({ meta: null, error: String(e?.message || e) });
-    }
-  });
-
   r.get("/stream/:type/:id.json", async (req, res) => {
     try {
       const config = readConfig(req);
-      const { id } = req.params;
+      const { type, id } = req.params;
 
-      const data = await StreamService.streamsForId(id, config);
+      const data = await StreamService.streamsForId(type, id, config);
       res.json(data);
     } catch (e) {
-      res.status(500).json({ streams: [], error: String(e?.message || e) });
+      res.json({ streams: [], error: String(e?.message || e) });
     }
   });
 
   return r;
-}
-
-function parseCatalogExtra(req) {
-  const extra = {};
-
-  const rawPathExtra = req.params?.extra;
-  if (typeof rawPathExtra === "string" && rawPathExtra.length > 0) {
-    for (const [k, v] of new URLSearchParams(rawPathExtra)) {
-      extra[k] = v;
-    }
-  }
-
-  for (const [k, v] of Object.entries(req.query || {})) {
-    if (CONFIG_QUERY_KEYS.has(k)) continue;
-    if (Array.isArray(v)) {
-      if (v.length > 0) extra[k] = String(v[v.length - 1]);
-      continue;
-    }
-    if (v !== undefined && v !== null) extra[k] = String(v);
-  }
-
-  return extra;
 }
 
 function renderConfigureHtml() {

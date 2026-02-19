@@ -1,12 +1,15 @@
 # Stremio Prehraj.to Addon (Node.js / Home Assistant Add-on)
 
+Addon je ted zamereny primarne jako `stream source` pro existujici Cinemeta/StreamCinema obsah.
+Nevystavuje vlastni katalog, ve Stremiu se zobrazuje jako dalsi zdroj streamu.
+
 ## Home Assistant Add-on
 
 Tento adresar je pripraveny jako Home Assistant add-on (`config.yaml`, `build.yaml`, `Dockerfile`, `rootfs`).
 
 Po instalaci nastav options v HA:
 - `base_url` (URL add-onu viditelna pro Stremio klienta)
-- `tmdb_api_key`
+- `tmdb_api_key` (volitelne, pro presnejsi mapovani IMDb -> TMDB)
 - `config_secret` (pro sifrovani `cfg` tokenu)
 
 Perzistentni data:

@@ -8,8 +8,6 @@ export const ENV = {
 
   TMDB_API_KEY: process.env.TMDB_API_KEY || "",
   TMDB_LANGUAGE: process.env.TMDB_LANGUAGE || "cs-CZ",
-  TMDB_IMAGE_BASE:
-    process.env.TMDB_IMAGE_BASE || "https://image.tmdb.org/t/p/w500",
 
   PREHRAJTO_BASE: process.env.PREHRAJTO_BASE || "https://prehraj.to",
   PREHRAJTO_USER_AGENT:

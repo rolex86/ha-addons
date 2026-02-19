@@ -2,6 +2,11 @@ import { ENV } from "../env.js";
 import { cache } from "../utils/cache.js";
 import { httpGet, httpPost } from "../utils/http.js";
 
+const SUGGEST_UNAVAILABLE_COOLDOWN_MS = 30_000;
+const SUGGEST_ERROR_COOLDOWN_MS = 60_000;
+
+let searchUnavailableUntil = 0;
+
 // Very lightweight cookie jar for premium login
 function extractSetCookies(res) {
   const raw = res.headers.raw?.()["set-cookie"] || [];
@@ -37,59 +42,228 @@ async function premiumLogin(email, password) {
   return null;
 }
 
-function parseSearchResults(html) {
-  // This parser is intentionally tolerant. You will tune selectors as needed.
-  // We look for list items containing links to /video/ or similar.
-  const items = [];
-
-  // Example: <a href="/video/12345-nazev">Title</a>
-  const linkRe = /<a[^>]+href="([^"]+)"[^>]*>(.*?)<\/a>/gi;
-
-  let m;
-  while ((m = linkRe.exec(html))) {
-    const href = m[1];
-    if (!href) continue;
-
-    // heuristics: video pages usually contain "/video/" or "/v/"
-    if (!/\/video\/|\/v\//i.test(href)) continue;
-
-    const title = stripTags(m[2] || "").trim();
-    if (!title) continue;
-
-    // Try year extraction from title
-    const yearMatch = /\b(19|20)\d{2}\b/.exec(title);
-    const year = yearMatch ? parseInt(yearMatch[0], 10) : null;
-    const absUrl = absolutizeHttpUrl(href);
-    if (!absUrl) continue;
-
-    items.push({
-      title,
-      year,
-      url: absUrl,
-    });
-  }
-
-  // Deduplicate by url
-  const uniq = new Map();
-  for (const it of items) uniq.set(it.url, it);
-  return Array.from(uniq.values());
-}
-
-function hasMore(html) {
-  // Kodi addon uses "pagination-more" marker; keep similar heuristic
-  return (
-    /pagination-more/i.test(html) || (/next/i.test(html) && /page/i.test(html))
-  );
+function buildSuggestUrl(query) {
+  const base = ENV.PREHRAJTO_BASE.replace(/\/+$/g, "");
+  return `${base}/api/v1/public/suggest/${encodeURIComponent(query)}`;
 }
 
 function stripTags(s) {
   return s.replace(/<[^>]*>/g, "");
 }
 
+function parseYear(text) {
+  const yearMatch = /\b(19|20)\d{2}\b/.exec(String(text || ""));
+  if (!yearMatch) return null;
+  return parseInt(yearMatch[0], 10);
+}
+
+function pickFirstString(obj, keys) {
+  for (const key of keys) {
+    const value = obj?.[key];
+    if (typeof value !== "string" && typeof value !== "number") continue;
+    const trimmed = String(value).trim();
+    if (trimmed) return trimmed;
+  }
+  return "";
+}
+
+function inferTitleFromUrl(absUrl) {
+  try {
+    const segs = new URL(absUrl).pathname.split("/").filter(Boolean);
+    if (segs.length < 2) return "";
+    const slug = segs[segs.length - 2];
+    return slug.replace(/[-_]+/g, " ").replace(/\s+/g, " ").trim();
+  } catch {
+    return "";
+  }
+}
+
+function isLikelyVideoHref(href) {
+  const abs = absolutizeHttpUrl(href);
+  if (!abs) return false;
+
+  let path = "";
+  try {
+    path = new URL(abs).pathname || "";
+  } catch {
+    return false;
+  }
+  const p = path.toLowerCase();
+
+  if (/\/video\/|\/v\//i.test(p)) return true;
+
+  const segs = p.split("/").filter(Boolean);
+  if (segs.length >= 2) {
+    const last = segs[segs.length - 1];
+    // modern prehraj pages often end with a long id/hash segment
+    if (/^[a-z0-9]{8,}$/i.test(last)) return true;
+  }
+
+  return false;
+}
+
+function parseSuggestItem(raw) {
+  if (!raw || typeof raw !== "object") return null;
+
+  let href = pickFirstString(raw, [
+    "url",
+    "href",
+    "link",
+    "videoUrl",
+    "video_url",
+    "detailUrl",
+    "detail_url",
+    "path",
+    "route",
+    "uri",
+  ]);
+
+  if (!href) {
+    const slug = pickFirstString(raw, [
+      "slug",
+      "seo",
+      "name_slug",
+      "url_slug",
+      "slug_name",
+    ]);
+    const id = pickFirstString(raw, [
+      "id",
+      "uid",
+      "hash",
+      "videoId",
+      "video_id",
+      "hash_id",
+      "video_hash",
+    ]);
+    if (slug && id) href = `/${slug}/${id}`;
+  }
+
+  if (!href) {
+    for (const value of Object.values(raw)) {
+      if (typeof value !== "string") continue;
+      const candidate = value.trim();
+      if (candidate && isLikelyVideoHref(candidate)) {
+        href = candidate;
+        break;
+      }
+    }
+  }
+
+  const absUrl = absolutizeHttpUrl(href);
+  if (!absUrl || !isLikelyVideoHref(absUrl)) return null;
+
+  const rawTitle = pickFirstString(raw, [
+    "title",
+    "name",
+    "label",
+    "text",
+    "displayName",
+    "display_name",
+    "fullName",
+    "full_name",
+    "value",
+  ]);
+  const title = stripTags(rawTitle).replace(/\s+/g, " ").trim() || inferTitleFromUrl(absUrl);
+  if (!title) return null;
+
+  const rawYear = pickFirstString(raw, [
+    "year",
+    "releaseYear",
+    "release_year",
+    "createdYear",
+    "created_year",
+  ]);
+
+  return {
+    title,
+    year: parseYear(rawYear || title),
+    url: absUrl,
+  };
+}
+
+function parseSuggestResponse(text, limit) {
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    return [];
+  }
+
+  const found = [];
+  const queue = [];
+  const seenObjects = new Set();
+  const MAX_SCAN_NODES = 3000;
+  const MAX_DEPTH = 5;
+
+  if (data && typeof data === "object") {
+    queue.push({ node: data, depth: 0 });
+  }
+
+  if (data && typeof data === "object" && !Array.isArray(data)) {
+    for (const key of [
+      "data",
+      "results",
+      "result",
+      "items",
+      "suggestions",
+      "videos",
+      "records",
+      "hits",
+      "payload",
+    ]) {
+      const v = data[key];
+      if (v && typeof v === "object") {
+        queue.push({ node: v, depth: 1 });
+      }
+    }
+  }
+
+  let scanned = 0;
+  while (queue.length > 0 && scanned < MAX_SCAN_NODES && found.length < limit) {
+    const { node, depth } = queue.shift();
+    if (!node || typeof node !== "object") continue;
+    if (seenObjects.has(node)) continue;
+    seenObjects.add(node);
+    scanned += 1;
+
+    if (Array.isArray(node)) {
+      if (depth >= MAX_DEPTH) continue;
+      for (const item of node) {
+        if (item && typeof item === "object") {
+          queue.push({ node: item, depth: depth + 1 });
+        }
+      }
+      continue;
+    }
+
+    const parsed = parseSuggestItem(node);
+    if (parsed) found.push(parsed);
+
+    if (depth >= MAX_DEPTH) continue;
+    for (const value of Object.values(node)) {
+      if (value && typeof value === "object") {
+        queue.push({ node: value, depth: depth + 1 });
+      }
+    }
+  }
+
+  const uniq = new Map();
+  for (const item of found) {
+    if (!uniq.has(item.url)) uniq.set(item.url, item);
+    if (uniq.size >= limit) break;
+  }
+
+  return Array.from(uniq.values()).slice(0, limit);
+}
+
 function absolutizeHttpUrl(raw) {
   if (!raw || typeof raw !== "string") return null;
   try {
-    const u = new URL(raw, ENV.PREHRAJTO_BASE).toString();
+    const cleaned = raw
+      .replace(/\\u002F/gi, "/")
+      .replace(/\\\//g, "/")
+      .replace(/&amp;/gi, "&");
+    const u = new URL(cleaned, ENV.PREHRAJTO_BASE).toString();
     if (!/^https?:\/\//i.test(u)) return null;
     return u;
   } catch {
@@ -119,6 +293,18 @@ function parseVideoSources(html) {
   // sometimes <source src="...">
   const sourceTagRe = /<source[^>]+src="([^"]+)"/gi;
   while ((m = sourceTagRe.exec(html))) addUrl(m[1]);
+
+  // fallback: direct absolute media URLs embedded anywhere in scripts
+  const mediaRe = /(https?:\/\/[^"' ]+\.(?:mp4|m3u8)(?:\?[^"' ]*)?)/gi;
+  while ((m = mediaRe.exec(html))) addUrl(m[1]);
+
+  // escaped JS URLs: https:\/\/...\.mp4
+  const escapedMediaRe =
+    /(https?:\\\/\\\/[^"' ]+\.(?:mp4|m3u8)(?:\?[^"' ]*)?)/gi;
+  while ((m = escapedMediaRe.exec(html))) {
+    const unescaped = m[1].replace(/\\\//g, "/");
+    addUrl(unescaped);
+  }
 
   return Array.from(urls);
 }
@@ -173,60 +359,109 @@ async function premiumDownloadRedirect(videoPageUrl, cookie) {
 }
 
 export const PREHRAJTO = {
-  async search(query, { limit = 20, maxPages = 5 } = {}) {
-    const out = [];
-    let page = 1;
+  async search(query, { limit = 20 } = {}) {
+    const q = String(query || "").trim();
+    if (!q) return [];
+    if (Date.now() < searchUnavailableUntil) return [];
 
-    while (out.length < limit && page <= maxPages) {
-      const url = new URL(`${ENV.PREHRAJTO_BASE}/hledat`);
-      url.searchParams.set("q", query);
-      url.searchParams.set("vp-page", String(page));
+    const normalizedLimit = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 30);
+    const cacheKey = `pt:search:suggest:${q.toLowerCase()}:${normalizedLimit}`;
+    const cachedHit = cache.get(cacheKey);
+    if (cachedHit !== undefined) return cachedHit;
 
-      const { text } = await httpGet(url.toString());
-      const items = parseSearchResults(text);
-      for (const it of items) {
-        out.push(it);
-        if (out.length >= limit) break;
-      }
-
-      if (!hasMore(text)) break;
-      page++;
+    const suggestUrl = buildSuggestUrl(q);
+    let res;
+    let text;
+    try {
+      ({ res, text } = await httpGet(suggestUrl, {
+        throwOnHttpError: false,
+        timeoutMs: 7000,
+        headers: {
+          Accept: "application/json, text/plain, */*",
+          "Accept-Language": "cs-CZ,cs;q=0.9,en;q=0.8",
+          "Cache-Control": "no-cache",
+          Pragma: "no-cache",
+          Referer: `${ENV.PREHRAJTO_BASE.replace(/\/+$/g, "")}/`,
+        },
+      }));
+    } catch {
+      searchUnavailableUntil = Date.now() + SUGGEST_UNAVAILABLE_COOLDOWN_MS;
+      cache.set(cacheKey, []);
+      return [];
     }
 
-    return out.slice(0, limit);
+    if (!res.ok) {
+      searchUnavailableUntil = Date.now() + SUGGEST_ERROR_COOLDOWN_MS;
+      cache.set(cacheKey, []);
+      return [];
+    }
+
+    let out;
+    try {
+      out = parseSuggestResponse(text, normalizedLimit);
+    } catch {
+      searchUnavailableUntil = Date.now() + SUGGEST_UNAVAILABLE_COOLDOWN_MS;
+      cache.set(cacheKey, []);
+      return [];
+    }
+    cache.set(cacheKey, out);
+    return out;
   },
 
   async resolveStream(videoPageUrl, { email, password, premium } = {}) {
-    // Optionally premium redirect
-    let cookie = null;
-    if (premium) cookie = await premiumLogin(email, password);
+    try {
+      const resolveCacheKey = premium
+        ? `pt:resolve:premium:${videoPageUrl}:${email || ""}`
+        : `pt:resolve:free:${videoPageUrl}`;
+      const resolveCached = cache.get(resolveCacheKey);
+      if (resolveCached !== undefined) return resolveCached;
 
-    if (premium && cookie) {
-      const direct = await premiumDownloadRedirect(videoPageUrl, cookie);
-      if (direct) {
-        return {
-          url: direct,
-          subtitles: [], // premium direct may not expose subs; can still parse page if needed
-        };
+      // Optionally premium redirect
+      let cookie = null;
+      if (premium) cookie = await premiumLogin(email, password);
+
+      if (premium && cookie) {
+        const direct = await premiumDownloadRedirect(videoPageUrl, cookie);
+        if (direct) {
+          const result = {
+            url: direct,
+            subtitles: [], // premium direct may not expose subs; can still parse page if needed
+          };
+          cache.set(resolveCacheKey, result);
+          return result;
+        }
+        // fallback to normal parsing if no redirect
       }
-      // fallback to normal parsing if no redirect
+
+      const { text, res } = await httpGet(videoPageUrl, {
+        headers: cookie ? { Cookie: cookie } : {},
+        throwOnHttpError: false,
+        timeoutMs: 8000,
+      });
+      if (!res.ok) {
+        cache.set(resolveCacheKey, null);
+        return null;
+      }
+
+      const sources = parseVideoSources(text);
+      const subs = parseSubtitles(text);
+
+      // pick first plausible mp4/m3u8
+      const best =
+        sources.find((u) => /\.m3u8(\?|$)/i.test(u)) ||
+        sources.find((u) => /\.mp4(\?|$)/i.test(u)) ||
+        sources[0];
+
+      if (!best) {
+        cache.set(resolveCacheKey, null);
+        return null;
+      }
+
+      const result = { url: best, subtitles: subs };
+      cache.set(resolveCacheKey, result);
+      return result;
+    } catch {
+      return null;
     }
-
-    const { text } = await httpGet(videoPageUrl, {
-      headers: cookie ? { Cookie: cookie } : {},
-    });
-
-    const sources = parseVideoSources(text);
-    const subs = parseSubtitles(text);
-
-    // pick first plausible mp4/m3u8
-    const best =
-      sources.find((u) => /\.m3u8(\?|$)/i.test(u)) ||
-      sources.find((u) => /\.mp4(\?|$)/i.test(u)) ||
-      sources[0];
-
-    if (!best) return null;
-
-    return { url: best, subtitles: subs };
   },
 };

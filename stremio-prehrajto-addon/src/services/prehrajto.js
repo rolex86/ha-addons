@@ -3,10 +3,12 @@ import { cache } from "../utils/cache.js";
 import { httpGet, httpPost } from "../utils/http.js";
 import { elapsedMs, errorMeta, log, sanitizeUrl } from "../utils/log.js";
 
-const SUGGEST_UNAVAILABLE_COOLDOWN_MS = 30_000;
-const SUGGEST_ERROR_COOLDOWN_MS = 60_000;
+const SEARCH_UNAVAILABLE_COOLDOWN_MS = 30_000;
+const SEARCH_ERROR_COOLDOWN_MS = 60_000;
+const EMPTY_SEARCH_TTL_MS = 180_000;
 
 let searchUnavailableUntil = 0;
+const searchInFlight = new Map();
 
 // Very lightweight cookie jar for premium login
 function extractSetCookies(res) {
@@ -24,8 +26,6 @@ async function premiumLogin(email, password) {
     return cachedCookie;
   }
 
-  // NOTE: Login form fields can differ; this is common pattern.
-  // If prehraj.to uses different endpoint/fields, adjust here.
   const loginUrl = `${ENV.PREHRAJTO_BASE}/prihlaseni`;
   const body = new URLSearchParams({
     email,
@@ -44,7 +44,6 @@ async function premiumLogin(email, password) {
     ms: elapsedMs(startedAt),
   });
 
-  // naive success: got some cookie; if not, return null
   if (cookie && cookie.length > 0) {
     cache.set(cacheKey, cookie);
     return cookie;
@@ -52,29 +51,56 @@ async function premiumLogin(email, password) {
   return null;
 }
 
-function buildSuggestUrl(query) {
+function normalizeSpaces(s) {
+  return String(s || "").replace(/\s+/g, " ").trim();
+}
+
+function buildSearchUrl(query) {
   const base = ENV.PREHRAJTO_BASE.replace(/\/+$/g, "");
-  return `${base}/api/v1/public/suggest/${encodeURIComponent(query)}`;
+  return `${base}/hledej/${encodeURIComponent(query)}`;
+}
+
+function buildSearchVariants(query) {
+  const out = [];
+  const seen = new Set();
+  const add = (value) => {
+    const v = normalizeSpaces(value);
+    if (!v) return;
+    const key = v.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(v);
+  };
+
+  add(query);
+  add(query.replace(/\b(19|20)\d{2}\b/g, ""));
+  add(query.replace(/\bs\d{1,2}e\d{1,2}\b/gi, ""));
+  add(
+    query
+      .replace(/\b(19|20)\d{2}\b/g, "")
+      .replace(/\bs\d{1,2}e\d{1,2}\b/gi, ""),
+  );
+  return out;
 }
 
 function stripTags(s) {
-  return s.replace(/<[^>]*>/g, "");
+  return String(s || "").replace(/<[^>]*>/g, "");
+}
+
+function decodeHtmlEntities(s) {
+  return String(s || "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, "\"")
+    .replace(/&#39;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">");
 }
 
 function parseYear(text) {
   const yearMatch = /\b(19|20)\d{2}\b/.exec(String(text || ""));
   if (!yearMatch) return null;
   return parseInt(yearMatch[0], 10);
-}
-
-function pickFirstString(obj, keys) {
-  for (const key of keys) {
-    const value = obj?.[key];
-    if (typeof value !== "string" && typeof value !== "number") continue;
-    const trimmed = String(value).trim();
-    if (trimmed) return trimmed;
-  }
-  return "";
 }
 
 function inferTitleFromUrl(absUrl) {
@@ -85,6 +111,21 @@ function inferTitleFromUrl(absUrl) {
     return slug.replace(/[-_]+/g, " ").replace(/\s+/g, " ").trim();
   } catch {
     return "";
+  }
+}
+
+function absolutizeHttpUrl(raw) {
+  if (!raw || typeof raw !== "string") return null;
+  try {
+    const cleaned = raw
+      .replace(/\\u002F/gi, "/")
+      .replace(/\\\//g, "/")
+      .replace(/&amp;/gi, "&");
+    const u = new URL(cleaned, ENV.PREHRAJTO_BASE).toString();
+    if (!/^https?:\/\//i.test(u)) return null;
+    return u;
+  } catch {
+    return null;
   }
 }
 
@@ -105,204 +146,43 @@ function isLikelyVideoHref(href) {
   const segs = p.split("/").filter(Boolean);
   if (segs.length >= 2) {
     const last = segs[segs.length - 1];
-    // modern prehraj pages often end with a long id/hash segment
     if (/^[a-z0-9]{8,}$/i.test(last)) return true;
   }
 
   return false;
 }
 
-function parseSuggestItem(raw) {
-  if (!raw || typeof raw !== "object") return null;
+function parseSearchResultsHtml(html, limit) {
+  const out = [];
+  const seen = new Set();
+  const linkRe = /<a[^>]+href=(["'])(.*?)\1[^>]*>(.*?)<\/a>/gis;
 
-  let href = pickFirstString(raw, [
-    "url",
-    "href",
-    "link",
-    "videoUrl",
-    "video_url",
-    "detailUrl",
-    "detail_url",
-    "path",
-    "route",
-    "uri",
-  ]);
+  let m;
+  while ((m = linkRe.exec(html))) {
+    if (out.length >= limit) break;
 
-  if (!href) {
-    const slug = pickFirstString(raw, [
-      "slug",
-      "seo",
-      "name_slug",
-      "url_slug",
-      "slug_name",
-    ]);
-    const id = pickFirstString(raw, [
-      "id",
-      "uid",
-      "hash",
-      "videoId",
-      "video_id",
-      "hash_id",
-      "video_hash",
-    ]);
-    if (slug && id) href = `/${slug}/${id}`;
+    const href = m[2];
+    if (!href || !isLikelyVideoHref(href)) continue;
+
+    const url = absolutizeHttpUrl(href);
+    if (!url || seen.has(url)) continue;
+
+    const rawTitle = decodeHtmlEntities(stripTags(m[3] || ""));
+    const title = normalizeSpaces(rawTitle) || inferTitleFromUrl(url);
+    if (!title) continue;
+
+    seen.add(url);
+    out.push({
+      title,
+      year: parseYear(title),
+      url,
+    });
   }
 
-  if (!href) {
-    for (const value of Object.values(raw)) {
-      if (typeof value !== "string") continue;
-      const candidate = value.trim();
-      if (candidate && isLikelyVideoHref(candidate)) {
-        href = candidate;
-        break;
-      }
-    }
-  }
-
-  const absUrl = absolutizeHttpUrl(href);
-  if (!absUrl || !isLikelyVideoHref(absUrl)) return null;
-
-  const rawTitle = pickFirstString(raw, [
-    "title",
-    "name",
-    "label",
-    "text",
-    "displayName",
-    "display_name",
-    "fullName",
-    "full_name",
-    "value",
-  ]);
-  const title = stripTags(rawTitle).replace(/\s+/g, " ").trim() || inferTitleFromUrl(absUrl);
-  if (!title) return null;
-
-  const rawYear = pickFirstString(raw, [
-    "year",
-    "releaseYear",
-    "release_year",
-    "createdYear",
-    "created_year",
-  ]);
-
-  return {
-    title,
-    year: parseYear(rawYear || title),
-    url: absUrl,
-  };
-}
-
-function parseSuggestResponse(text, limit) {
-  let data;
-  try {
-    data = JSON.parse(text);
-  } catch {
-    return {
-      items: [],
-      scannedNodes: 0,
-      maxQueueSize: 0,
-      parseError: true,
-      hitScanLimit: false,
-    };
-  }
-
-  const found = [];
-  const queue = [];
-  const seenObjects = new Set();
-  const MAX_SCAN_NODES = 1000;
-  const MAX_DEPTH = 5;
-  let maxQueueSize = queue.length;
-
-  if (data && typeof data === "object") {
-    queue.push({ node: data, depth: 0 });
-  }
-
-  if (data && typeof data === "object" && !Array.isArray(data)) {
-    for (const key of [
-      "data",
-      "results",
-      "result",
-      "items",
-      "suggestions",
-      "videos",
-      "records",
-      "hits",
-      "payload",
-    ]) {
-      const v = data[key];
-      if (v && typeof v === "object") {
-        queue.push({ node: v, depth: 1 });
-      }
-    }
-  }
-
-  let scanned = 0;
-  let hitScanLimit = false;
-  while (queue.length > 0 && scanned < MAX_SCAN_NODES && found.length < limit) {
-    if (queue.length > maxQueueSize) maxQueueSize = queue.length;
-    const { node, depth } = queue.shift();
-    if (!node || typeof node !== "object") continue;
-    if (seenObjects.has(node)) continue;
-    seenObjects.add(node);
-    scanned += 1;
-
-    if (Array.isArray(node)) {
-      if (depth >= MAX_DEPTH) continue;
-      for (const item of node) {
-        if (item && typeof item === "object") {
-          queue.push({ node: item, depth: depth + 1 });
-        }
-      }
-      continue;
-    }
-
-    const parsed = parseSuggestItem(node);
-    if (parsed) found.push(parsed);
-
-    if (depth >= MAX_DEPTH) continue;
-    for (const value of Object.values(node)) {
-      if (value && typeof value === "object") {
-        queue.push({ node: value, depth: depth + 1 });
-      }
-    }
-  }
-  if (scanned >= MAX_SCAN_NODES && queue.length > 0) {
-    hitScanLimit = true;
-  }
-
-  const uniq = new Map();
-  for (const item of found) {
-    if (!uniq.has(item.url)) uniq.set(item.url, item);
-    if (uniq.size >= limit) break;
-  }
-
-  return {
-    items: Array.from(uniq.values()).slice(0, limit),
-    scannedNodes: scanned,
-    maxQueueSize,
-    parseError: false,
-    hitScanLimit,
-  };
-}
-
-function absolutizeHttpUrl(raw) {
-  if (!raw || typeof raw !== "string") return null;
-  try {
-    const cleaned = raw
-      .replace(/\\u002F/gi, "/")
-      .replace(/\\\//g, "/")
-      .replace(/&amp;/gi, "&");
-    const u = new URL(cleaned, ENV.PREHRAJTO_BASE).toString();
-    if (!/^https?:\/\//i.test(u)) return null;
-    return u;
-  } catch {
-    return null;
-  }
+  return out;
 }
 
 function parseVideoSources(html) {
-  // Robust-ish extraction:
-  // - file: "https://..."
-  // - src: "https://..."
   const urls = new Set();
   const addUrl = (u) => {
     const abs = absolutizeHttpUrl(u);
@@ -314,33 +194,25 @@ function parseVideoSources(html) {
 
   let m;
   while ((m = fileRe.exec(html))) addUrl(m[1]);
-  while ((m = srcRe.exec(html))) {
-    addUrl(m[1]);
-  }
+  while ((m = srcRe.exec(html))) addUrl(m[1]);
 
-  // sometimes <source src="...">
   const sourceTagRe = /<source[^>]+src="([^"]+)"/gi;
   while ((m = sourceTagRe.exec(html))) addUrl(m[1]);
 
-  // fallback: direct absolute media URLs embedded anywhere in scripts
   const mediaRe = /(https?:\/\/[^"' ]+\.(?:mp4|m3u8)(?:\?[^"' ]*)?)/gi;
   while ((m = mediaRe.exec(html))) addUrl(m[1]);
 
-  // escaped JS URLs: https:\/\/...\.mp4
   const escapedMediaRe =
     /(https?:\\\/\\\/[^"' ]+\.(?:mp4|m3u8)(?:\?[^"' ]*)?)/gi;
   while ((m = escapedMediaRe.exec(html))) {
-    const unescaped = m[1].replace(/\\\//g, "/");
-    addUrl(unescaped);
+    addUrl(m[1].replace(/\\\//g, "/"));
   }
 
   return Array.from(urls);
 }
 
 function parseSubtitles(html) {
-  // Try to find VTT/subtitle track
   const subs = [];
-  // <track kind="captions" src="..." srclang="cs">
   const trackRe = /<track[^>]+src="([^"]+)"[^>]*>/gi;
   let m;
   while ((m = trackRe.exec(html))) {
@@ -357,21 +229,18 @@ function parseSubtitles(html) {
     });
   }
 
-  // JS player tracks: { file: "...vtt", label: "CZ" }
   const vttRe = /(https?:\/\/[^"' ]+\.vtt)/gi;
   while ((m = vttRe.exec(html))) {
     const abs = absolutizeHttpUrl(m[1]);
     if (abs) subs.push({ url: abs, lang: "und" });
   }
 
-  // de-dupe
   const uniq = new Map();
   for (const s of subs) uniq.set(`${s.lang}:${s.url}`, s);
   return Array.from(uniq.values());
 }
 
 async function premiumDownloadRedirect(videoPageUrl, cookie) {
-  // Premium download: add ?do=download and read redirect Location
   const u = new URL(videoPageUrl);
   u.searchParams.set("do", "download");
 
@@ -396,7 +265,7 @@ async function premiumDownloadRedirect(videoPageUrl, cookie) {
 export const PREHRAJTO = {
   async search(query, { limit = 20 } = {}) {
     const startedAt = Date.now();
-    const q = String(query || "").trim();
+    const q = normalizeSpaces(query);
     if (!q) {
       log.debug("prehrajto:search skipped empty query");
       return [];
@@ -410,7 +279,7 @@ export const PREHRAJTO = {
     }
 
     const normalizedLimit = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 30);
-    const cacheKey = `pt:search:suggest:${q.toLowerCase()}:${normalizedLimit}`;
+    const cacheKey = `pt:search:hledej:${q.toLowerCase()}:${normalizedLimit}`;
     const cachedHit = cache.get(cacheKey);
     if (cachedHit !== undefined) {
       log.debug("prehrajto:search cache hit", {
@@ -421,74 +290,96 @@ export const PREHRAJTO = {
       return cachedHit;
     }
 
-    const suggestUrl = buildSuggestUrl(q);
-    let res;
-    let text;
-    try {
-      ({ res, text } = await httpGet(suggestUrl, {
-        throwOnHttpError: false,
-        timeoutMs: 7000,
-        headers: {
-          Accept: "application/json, text/plain, */*",
-          "Accept-Language": "cs-CZ,cs;q=0.9,en;q=0.8",
-          "Cache-Control": "no-cache",
-          Pragma: "no-cache",
-          Referer: `${ENV.PREHRAJTO_BASE.replace(/\/+$/g, "")}/`,
-        },
-      }));
-    } catch (e) {
-      log.warn("prehrajto:search request failed", {
-        query: q,
-        suggestUrl: sanitizeUrl(suggestUrl),
-        error: errorMeta(e),
-      });
-      searchUnavailableUntil = Date.now() + SUGGEST_UNAVAILABLE_COOLDOWN_MS;
-      cache.set(cacheKey, []);
-      return [];
-    }
-    log.debug("prehrajto:search suggest response", {
-      query: q,
-      status: res.status,
-      bodyLen: text.length,
-      ms: elapsedMs(startedAt),
-    });
-
-    if (!res.ok) {
-      log.warn("prehrajto:search non-200 suggest response", {
-        query: q,
-        status: res.status,
-        suggestUrl: sanitizeUrl(suggestUrl),
-      });
-      searchUnavailableUntil = Date.now() + SUGGEST_ERROR_COOLDOWN_MS;
-      cache.set(cacheKey, []);
-      return [];
+    const existing = searchInFlight.get(cacheKey);
+    if (existing) {
+      log.debug("prehrajto:search in-flight hit", { query: q });
+      return await existing;
     }
 
-    let parsed;
-    try {
-      parsed = parseSuggestResponse(text, normalizedLimit);
-    } catch (e) {
-      log.warn("prehrajto:search parse failed", {
+    const work = (async () => {
+      const variants = buildSearchVariants(q);
+      let hadHttpResponse = false;
+
+      for (const variant of variants) {
+        const searchUrl = buildSearchUrl(variant);
+        let res;
+        let text;
+
+        try {
+          ({ res, text } = await httpGet(searchUrl, {
+            throwOnHttpError: false,
+            timeoutMs: 8000,
+            headers: {
+              Accept:
+                "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+              "Accept-Language": "cs-CZ,cs;q=0.9,en;q=0.8",
+              "Cache-Control": "no-cache",
+              Pragma: "no-cache",
+              Referer: searchUrl,
+            },
+          }));
+        } catch (e) {
+          log.warn("prehrajto:search request failed", {
+            query: q,
+            variant,
+            searchUrl: sanitizeUrl(searchUrl),
+            error: errorMeta(e),
+          });
+          continue;
+        }
+
+        hadHttpResponse = true;
+        log.debug("prehrajto:search response", {
+          query: q,
+          variant,
+          status: res.status,
+          bodyLen: text.length,
+        });
+
+        if (!res.ok) {
+          log.warn("prehrajto:search non-200", {
+            query: q,
+            variant,
+            status: res.status,
+            searchUrl: sanitizeUrl(searchUrl),
+          });
+          continue;
+        }
+
+        const out = parseSearchResultsHtml(text, normalizedLimit);
+        log.info("prehrajto:search parsed", {
+          query: q,
+          variant,
+          limit: normalizedLimit,
+          results: out.length,
+          ms: elapsedMs(startedAt),
+        });
+
+        if (out.length > 0) {
+          cache.set(cacheKey, out);
+          return out;
+        }
+      }
+
+      searchUnavailableUntil = Date.now() + (
+        hadHttpResponse ? SEARCH_ERROR_COOLDOWN_MS : SEARCH_UNAVAILABLE_COOLDOWN_MS
+      );
+      cache.set(cacheKey, [], { ttl: EMPTY_SEARCH_TTL_MS });
+      log.info("prehrajto:search no results", {
         query: q,
-        error: errorMeta(e),
+        variants,
+        hadHttpResponse,
+        ms: elapsedMs(startedAt),
       });
-      searchUnavailableUntil = Date.now() + SUGGEST_UNAVAILABLE_COOLDOWN_MS;
-      cache.set(cacheKey, []);
       return [];
+    })();
+
+    searchInFlight.set(cacheKey, work);
+    try {
+      return await work;
+    } finally {
+      if (searchInFlight.get(cacheKey) === work) searchInFlight.delete(cacheKey);
     }
-    const out = parsed.items;
-    log.info("prehrajto:search parsed", {
-      query: q,
-      limit: normalizedLimit,
-      results: out.length,
-      scannedNodes: parsed.scannedNodes,
-      maxQueueSize: parsed.maxQueueSize,
-      hitScanLimit: parsed.hitScanLimit,
-      parseError: parsed.parseError,
-      ms: elapsedMs(startedAt),
-    });
-    cache.set(cacheKey, out);
-    return out;
   },
 
   async resolveStream(videoPageUrl, { email, password, premium } = {}) {
@@ -511,7 +402,6 @@ export const PREHRAJTO = {
         return resolveCached;
       }
 
-      // Optionally premium redirect
       let cookie = null;
       if (premium) cookie = await premiumLogin(email, password);
 
@@ -525,12 +415,11 @@ export const PREHRAJTO = {
           });
           const result = {
             url: direct,
-            subtitles: [], // premium direct may not expose subs; can still parse page if needed
+            subtitles: [],
           };
           cache.set(resolveCacheKey, result);
           return result;
         }
-        // fallback to normal parsing if no redirect
       }
 
       const { text, res } = await httpGet(videoPageUrl, {
@@ -560,7 +449,6 @@ export const PREHRAJTO = {
         subtitles: subs.length,
       });
 
-      // pick first plausible mp4/m3u8
       const best =
         sources.find((u) => /\.m3u8(\?|$)/i.test(u)) ||
         sources.find((u) => /\.mp4(\?|$)/i.test(u)) ||
@@ -594,3 +482,4 @@ export const PREHRAJTO = {
     }
   },
 };
+

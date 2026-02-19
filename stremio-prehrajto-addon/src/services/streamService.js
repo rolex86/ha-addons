@@ -4,7 +4,21 @@ import { CINEMETA } from "./cinemeta.js";
 import { scoreCandidate } from "../utils/scoring.js";
 import { sxxexx } from "../utils/text.js";
 import { parseId } from "../ids.js";
+import { cache } from "../utils/cache.js";
 import { elapsedMs, errorMeta, log, sanitizeUrl, summarizeId } from "../utils/log.js";
+
+const STREAM_INFLIGHT = new Map();
+const NO_STREAMS_TTL_MS = 180_000;
+
+function buildInflightKey(type, stremioId, config = {}) {
+  return [
+    String(type || ""),
+    String(stremioId || ""),
+    config.premium ? "1" : "0",
+    String(config.email || "").toLowerCase(),
+    String(config.limit || ""),
+  ].join("|");
+}
 
 function buildStreamEntry({ url, title, subtitles = [] }) {
   const st = {
@@ -23,7 +37,55 @@ function buildStreamEntry({ url, title, subtitles = [] }) {
 }
 
 export const StreamService = {
-  async streamsForId(type, stremioId, config) {
+  async streamsForId(type, stremioId, config = {}) {
+    const key = buildInflightKey(type, stremioId, config);
+    const noStreamsKey = `stream:no:${key}`;
+
+    if (cache.has(noStreamsKey)) {
+      log.debug("streamsForId:negative-cache hit", {
+        type,
+        id: summarizeId(stremioId),
+      });
+      return { streams: [] };
+    }
+
+    const existing = STREAM_INFLIGHT.get(key);
+    if (existing) {
+      log.debug("streamsForId:in-flight hit", {
+        type,
+        id: summarizeId(stremioId),
+      });
+      return await existing;
+    }
+
+    const work = this._streamsForIdImpl(type, stremioId, config);
+    STREAM_INFLIGHT.set(key, work);
+
+    try {
+      const out = await work;
+      const streams = Array.isArray(out?.streams) ? out.streams : [];
+
+      if (streams.length === 0) {
+        cache.set(noStreamsKey, true, { ttl: NO_STREAMS_TTL_MS });
+      } else {
+        cache.delete(noStreamsKey);
+      }
+
+      return { streams };
+    } catch (e) {
+      log.error("streamsForId:failed", {
+        type,
+        id: summarizeId(stremioId),
+        error: errorMeta(e),
+      });
+      cache.set(noStreamsKey, true, { ttl: 60_000 });
+      return { streams: [] };
+    } finally {
+      if (STREAM_INFLIGHT.get(key) === work) STREAM_INFLIGHT.delete(key);
+    }
+  },
+
+  async _streamsForIdImpl(type, stremioId, config) {
     const startedAt = Date.now();
     const pid = parseId(stremioId);
     log.debug("streamsForId:start", {
@@ -34,7 +96,6 @@ export const StreamService = {
       premium: config?.premium,
     });
 
-    // Direct prehraj URL
     if (pid.kind === "pt_url") {
       const resolved = await PREHRAJTO.resolveStream(pid.value, config);
       if (!resolved) return { streams: [] };
@@ -53,13 +114,11 @@ export const StreamService = {
       };
     }
 
-    // Query -> search -> best match -> resolve
     if (pid.kind === "pt_query") {
       log.debug("streamsForId:pt_query", { query: pid.value });
       return await this.streamsFromQuery(pid.value, config);
     }
 
-    // Cinemeta IMDB title id -> map to TMDB first
     if (pid.kind === "imdb_title") {
       if (type === "movie") {
         try {
@@ -136,7 +195,6 @@ export const StreamService = {
       return { streams: [] };
     }
 
-    // Cinemeta IMDB episode id: tt1234567:1:2
     if (pid.kind === "imdb_episode") {
       const marker = sxxexx(pid.season, pid.episode);
       log.debug("streamsForId:imdb_episode", {
@@ -180,7 +238,6 @@ export const StreamService = {
       });
     }
 
-    // For series main meta id -> no stream directly
     log.info("streamsForId:unsupported id", {
       type,
       id: summarizeId(stremioId),
@@ -214,7 +271,6 @@ export const StreamService = {
       count: results.length,
     });
 
-    // score candidates
     const scored = results
       .map((r) => ({
         r,
@@ -237,7 +293,6 @@ export const StreamService = {
       })),
     });
 
-    // try top N resolves
     const top = scored.slice(0, 2);
     const streams = [];
 
@@ -280,3 +335,4 @@ export const StreamService = {
     return { streams };
   },
 };
+

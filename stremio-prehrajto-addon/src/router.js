@@ -3,10 +3,31 @@ import { buildManifest } from "./manifest.js";
 import { buildConfigToken, readConfig } from "./config.js";
 import { StreamService } from "./services/streamService.js";
 import { ENV } from "./env.js";
+import { elapsedMs, errorMeta, log, summarizeId } from "./utils/log.js";
+
+let reqSeq = 0;
 
 export function buildRouter() {
   const r = express.Router();
   r.use(express.json());
+  r.use((req, res, next) => {
+    reqSeq += 1;
+    const reqId = reqSeq;
+    req._reqId = reqId;
+    req._startedAt = Date.now();
+
+    const q = { ...(req.query || {}) };
+    if (q.cfg) q.cfg = "***";
+    if (q.password) q.password = "***";
+
+    log.debug(`REQ#${reqId} -> ${req.method} ${req.path}`, { query: q });
+    res.on("finish", () => {
+      log.info(`REQ#${reqId} <- ${res.statusCode} ${req.method} ${req.path}`, {
+        ms: elapsedMs(req._startedAt),
+      });
+    });
+    next();
+  });
 
   r.get("/", (req, res) => {
     res
@@ -30,8 +51,10 @@ export function buildRouter() {
       const base = ENV.BASE_URL.replace(/\/+$/g, "");
       const token = buildConfigToken(req.body || {});
       const manifestUrl = `${base}/manifest.json?cfg=${encodeURIComponent(token)}`;
+      log.debug(`REQ#${req._reqId} configure manifest generated`);
       res.json({ manifestUrl });
     } catch (e) {
+      log.warn(`REQ#${req._reqId} configure manifest failed`, errorMeta(e));
       res
         .status(400)
         .json({ error: "Invalid configuration payload", detail: String(e) });
@@ -42,10 +65,21 @@ export function buildRouter() {
     try {
       const config = readConfig(req);
       const { type, id } = req.params;
+      log.debug(`REQ#${req._reqId} stream start`, {
+        type,
+        id: summarizeId(id),
+        limit: config.limit,
+        premium: config.premium,
+        hasEmail: Boolean(config.email),
+      });
 
       const data = await StreamService.streamsForId(type, id, config);
+      log.debug(`REQ#${req._reqId} stream result`, {
+        streams: Array.isArray(data?.streams) ? data.streams.length : 0,
+      });
       res.json(data);
     } catch (e) {
+      log.error(`REQ#${req._reqId} stream failed`, errorMeta(e));
       res.json({ streams: [], error: String(e?.message || e) });
     }
   });

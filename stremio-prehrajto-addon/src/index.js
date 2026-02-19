@@ -2,6 +2,7 @@ import express from "express";
 import compression from "compression";
 import { ENV } from "./env.js";
 import { buildRouter } from "./router.js";
+import { errorMeta, log } from "./utils/log.js";
 
 const app = express();
 app.use(compression());
@@ -18,8 +19,19 @@ app.use((req, res, next) => {
 app.use("/", buildRouter());
 
 app.listen(ENV.PORT, () => {
-  // eslint-disable-next-line no-console
-  console.log(`Addon running at ${ENV.BASE_URL} (port ${ENV.PORT})`);
-  console.log(`Manifest: ${ENV.BASE_URL.replace(/\/+$/g, "")}/manifest.json`);
-  console.log(`Configure: ${ENV.BASE_URL.replace(/\/+$/g, "")}/configure`);
+  log.info("Addon started", {
+    baseUrl: ENV.BASE_URL,
+    port: ENV.PORT,
+    manifest: `${ENV.BASE_URL.replace(/\/+$/g, "")}/manifest.json`,
+    configure: `${ENV.BASE_URL.replace(/\/+$/g, "")}/configure`,
+    logLevel: ENV.LOG_LEVEL,
+  });
+});
+
+process.on("unhandledRejection", (reason) => {
+  log.error("Unhandled promise rejection", errorMeta(reason));
+});
+
+process.on("uncaughtException", (err) => {
+  log.error("Uncaught exception", errorMeta(err));
 });

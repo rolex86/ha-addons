@@ -10,6 +10,7 @@ export PREHRAJTO_USER_AGENT="$(bashio::config 'prehrajto_user_agent')"
 export DEFAULT_SEARCH_LIMIT="$(bashio::config 'default_search_limit')"
 export DEFAULT_PREMIUM="$(bashio::config 'default_premium')"
 export CACHE_TTL_SECONDS="$(bashio::config 'cache_ttl_seconds')"
+export LOG_LEVEL="$(bashio::config 'log_level')"
 export CONFIG_SECRET="$(bashio::config 'config_secret')"
 export DATA_DIR="/data"
 

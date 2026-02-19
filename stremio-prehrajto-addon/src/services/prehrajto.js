@@ -1,6 +1,7 @@
 import { ENV } from "../env.js";
 import { cache } from "../utils/cache.js";
 import { httpGet, httpPost } from "../utils/http.js";
+import { elapsedMs, errorMeta, log, sanitizeUrl } from "../utils/log.js";
 
 const SUGGEST_UNAVAILABLE_COOLDOWN_MS = 30_000;
 const SUGGEST_ERROR_COOLDOWN_MS = 60_000;
@@ -18,7 +19,10 @@ async function premiumLogin(email, password) {
 
   const cacheKey = `pt:cookie:${email}`;
   const cachedCookie = cache.get(cacheKey);
-  if (cachedCookie) return cachedCookie;
+  if (cachedCookie) {
+    log.debug("prehrajto:premiumLogin cache hit", { hasEmail: Boolean(email) });
+    return cachedCookie;
+  }
 
   // NOTE: Login form fields can differ; this is common pattern.
   // If prehraj.to uses different endpoint/fields, adjust here.
@@ -28,11 +32,17 @@ async function premiumLogin(email, password) {
     password,
   }).toString();
 
+  const startedAt = Date.now();
   const { res } = await httpPost(loginUrl, body, {
     redirect: "manual",
     throwOnHttpError: false,
   });
   const cookie = extractSetCookies(res);
+  log.debug("prehrajto:premiumLogin result", {
+    status: res.status,
+    hasCookie: Boolean(cookie),
+    ms: elapsedMs(startedAt),
+  });
 
   // naive success: got some cookie; if not, return null
   if (cookie && cookie.length > 0) {
@@ -186,14 +196,21 @@ function parseSuggestResponse(text, limit) {
   try {
     data = JSON.parse(text);
   } catch {
-    return [];
+    return {
+      items: [],
+      scannedNodes: 0,
+      maxQueueSize: 0,
+      parseError: true,
+      hitScanLimit: false,
+    };
   }
 
   const found = [];
   const queue = [];
   const seenObjects = new Set();
-  const MAX_SCAN_NODES = 3000;
+  const MAX_SCAN_NODES = 1000;
   const MAX_DEPTH = 5;
+  let maxQueueSize = queue.length;
 
   if (data && typeof data === "object") {
     queue.push({ node: data, depth: 0 });
@@ -219,7 +236,9 @@ function parseSuggestResponse(text, limit) {
   }
 
   let scanned = 0;
+  let hitScanLimit = false;
   while (queue.length > 0 && scanned < MAX_SCAN_NODES && found.length < limit) {
+    if (queue.length > maxQueueSize) maxQueueSize = queue.length;
     const { node, depth } = queue.shift();
     if (!node || typeof node !== "object") continue;
     if (seenObjects.has(node)) continue;
@@ -246,6 +265,9 @@ function parseSuggestResponse(text, limit) {
       }
     }
   }
+  if (scanned >= MAX_SCAN_NODES && queue.length > 0) {
+    hitScanLimit = true;
+  }
 
   const uniq = new Map();
   for (const item of found) {
@@ -253,7 +275,13 @@ function parseSuggestResponse(text, limit) {
     if (uniq.size >= limit) break;
   }
 
-  return Array.from(uniq.values()).slice(0, limit);
+  return {
+    items: Array.from(uniq.values()).slice(0, limit),
+    scannedNodes: scanned,
+    maxQueueSize,
+    parseError: false,
+    hitScanLimit,
+  };
 }
 
 function absolutizeHttpUrl(raw) {
@@ -347,6 +375,7 @@ async function premiumDownloadRedirect(videoPageUrl, cookie) {
   const u = new URL(videoPageUrl);
   u.searchParams.set("do", "download");
 
+  const startedAt = Date.now();
   const { res } = await httpGet(u.toString(), {
     headers: cookie ? { Cookie: cookie } : {},
     redirect: "manual",
@@ -354,20 +383,43 @@ async function premiumDownloadRedirect(videoPageUrl, cookie) {
   });
 
   const loc = res.headers.get("location");
+  log.debug("prehrajto:premiumDownloadRedirect", {
+    pageUrl: sanitizeUrl(videoPageUrl),
+    status: res.status,
+    hasLocation: Boolean(loc),
+    ms: elapsedMs(startedAt),
+  });
   if (loc && /^https?:\/\//i.test(loc)) return loc;
   return null;
 }
 
 export const PREHRAJTO = {
   async search(query, { limit = 20 } = {}) {
+    const startedAt = Date.now();
     const q = String(query || "").trim();
-    if (!q) return [];
-    if (Date.now() < searchUnavailableUntil) return [];
+    if (!q) {
+      log.debug("prehrajto:search skipped empty query");
+      return [];
+    }
+    if (Date.now() < searchUnavailableUntil) {
+      log.debug("prehrajto:search in cooldown", {
+        query: q,
+        cooldownMs: searchUnavailableUntil - Date.now(),
+      });
+      return [];
+    }
 
     const normalizedLimit = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 30);
     const cacheKey = `pt:search:suggest:${q.toLowerCase()}:${normalizedLimit}`;
     const cachedHit = cache.get(cacheKey);
-    if (cachedHit !== undefined) return cachedHit;
+    if (cachedHit !== undefined) {
+      log.debug("prehrajto:search cache hit", {
+        query: q,
+        limit: normalizedLimit,
+        count: Array.isArray(cachedHit) ? cachedHit.length : -1,
+      });
+      return cachedHit;
+    }
 
     const suggestUrl = buildSuggestUrl(q);
     let res;
@@ -384,37 +436,80 @@ export const PREHRAJTO = {
           Referer: `${ENV.PREHRAJTO_BASE.replace(/\/+$/g, "")}/`,
         },
       }));
-    } catch {
+    } catch (e) {
+      log.warn("prehrajto:search request failed", {
+        query: q,
+        suggestUrl: sanitizeUrl(suggestUrl),
+        error: errorMeta(e),
+      });
       searchUnavailableUntil = Date.now() + SUGGEST_UNAVAILABLE_COOLDOWN_MS;
       cache.set(cacheKey, []);
       return [];
     }
+    log.debug("prehrajto:search suggest response", {
+      query: q,
+      status: res.status,
+      bodyLen: text.length,
+      ms: elapsedMs(startedAt),
+    });
 
     if (!res.ok) {
+      log.warn("prehrajto:search non-200 suggest response", {
+        query: q,
+        status: res.status,
+        suggestUrl: sanitizeUrl(suggestUrl),
+      });
       searchUnavailableUntil = Date.now() + SUGGEST_ERROR_COOLDOWN_MS;
       cache.set(cacheKey, []);
       return [];
     }
 
-    let out;
+    let parsed;
     try {
-      out = parseSuggestResponse(text, normalizedLimit);
-    } catch {
+      parsed = parseSuggestResponse(text, normalizedLimit);
+    } catch (e) {
+      log.warn("prehrajto:search parse failed", {
+        query: q,
+        error: errorMeta(e),
+      });
       searchUnavailableUntil = Date.now() + SUGGEST_UNAVAILABLE_COOLDOWN_MS;
       cache.set(cacheKey, []);
       return [];
     }
+    const out = parsed.items;
+    log.info("prehrajto:search parsed", {
+      query: q,
+      limit: normalizedLimit,
+      results: out.length,
+      scannedNodes: parsed.scannedNodes,
+      maxQueueSize: parsed.maxQueueSize,
+      hitScanLimit: parsed.hitScanLimit,
+      parseError: parsed.parseError,
+      ms: elapsedMs(startedAt),
+    });
     cache.set(cacheKey, out);
     return out;
   },
 
   async resolveStream(videoPageUrl, { email, password, premium } = {}) {
+    const startedAt = Date.now();
     try {
+      log.debug("prehrajto:resolve start", {
+        pageUrl: sanitizeUrl(videoPageUrl),
+        premium: Boolean(premium),
+        hasEmail: Boolean(email),
+      });
       const resolveCacheKey = premium
         ? `pt:resolve:premium:${videoPageUrl}:${email || ""}`
         : `pt:resolve:free:${videoPageUrl}`;
       const resolveCached = cache.get(resolveCacheKey);
-      if (resolveCached !== undefined) return resolveCached;
+      if (resolveCached !== undefined) {
+        log.debug("prehrajto:resolve cache hit", {
+          pageUrl: sanitizeUrl(videoPageUrl),
+          hitIsNull: resolveCached === null,
+        });
+        return resolveCached;
+      }
 
       // Optionally premium redirect
       let cookie = null;
@@ -423,6 +518,11 @@ export const PREHRAJTO = {
       if (premium && cookie) {
         const direct = await premiumDownloadRedirect(videoPageUrl, cookie);
         if (direct) {
+          log.info("prehrajto:resolve premium redirect", {
+            pageUrl: sanitizeUrl(videoPageUrl),
+            streamUrl: sanitizeUrl(direct),
+            ms: elapsedMs(startedAt),
+          });
           const result = {
             url: direct,
             subtitles: [], // premium direct may not expose subs; can still parse page if needed
@@ -438,13 +538,27 @@ export const PREHRAJTO = {
         throwOnHttpError: false,
         timeoutMs: 8000,
       });
+      log.debug("prehrajto:resolve page response", {
+        pageUrl: sanitizeUrl(videoPageUrl),
+        status: res.status,
+        bodyLen: text.length,
+      });
       if (!res.ok) {
+        log.warn("prehrajto:resolve page non-200", {
+          pageUrl: sanitizeUrl(videoPageUrl),
+          status: res.status,
+        });
         cache.set(resolveCacheKey, null);
         return null;
       }
 
       const sources = parseVideoSources(text);
       const subs = parseSubtitles(text);
+      log.debug("prehrajto:resolve extracted", {
+        pageUrl: sanitizeUrl(videoPageUrl),
+        sources: sources.length,
+        subtitles: subs.length,
+      });
 
       // pick first plausible mp4/m3u8
       const best =
@@ -453,14 +567,29 @@ export const PREHRAJTO = {
         sources[0];
 
       if (!best) {
+        log.info("prehrajto:resolve no playable source", {
+          pageUrl: sanitizeUrl(videoPageUrl),
+          ms: elapsedMs(startedAt),
+        });
         cache.set(resolveCacheKey, null);
         return null;
       }
 
       const result = { url: best, subtitles: subs };
       cache.set(resolveCacheKey, result);
+      log.info("prehrajto:resolve success", {
+        pageUrl: sanitizeUrl(videoPageUrl),
+        streamUrl: sanitizeUrl(best),
+        subtitles: subs.length,
+        ms: elapsedMs(startedAt),
+      });
       return result;
-    } catch {
+    } catch (e) {
+      log.warn("prehrajto:resolve failed", {
+        pageUrl: sanitizeUrl(videoPageUrl),
+        error: errorMeta(e),
+        ms: elapsedMs(startedAt),
+      });
       return null;
     }
   },

@@ -1,9 +1,10 @@
 export function buildManifest() {
   return {
     id: "org.prehrajto.addon.node",
-    version: "0.1.2",
-    name: "Prehraj.to (Node)",
-    description: "Dodatečný stream source přes prehraj.to pro Cinemeta položky.",
+    version: "0.1.3",
+    name: "Prehraj.to",
+    description:
+      "Dodatečný stream source přes prehraj.to pro Cinemeta položky.",
     logo: "https://raw.githubusercontent.com/Stremio/stremio-addon-sdk/master/docs/logos/1.png",
 
     resources: [

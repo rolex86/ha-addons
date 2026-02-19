@@ -19,4 +19,5 @@ export const ENV = {
     (process.env.DEFAULT_PREMIUM || "false").toLowerCase() === "true",
 
   CACHE_TTL_SECONDS: parseInt(process.env.CACHE_TTL_SECONDS || "900", 10),
+  LOG_LEVEL: process.env.LOG_LEVEL || "debug",
 };

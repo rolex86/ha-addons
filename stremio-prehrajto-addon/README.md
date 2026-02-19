@@ -10,6 +10,7 @@ Tento adresar je pripraveny jako Home Assistant add-on (`config.yaml`, `build.ya
 Po instalaci nastav options v HA:
 - `base_url` (URL add-onu viditelna pro Stremio klienta)
 - `tmdb_api_key` (volitelne, pro presnejsi mapovani IMDb -> TMDB)
+- `log_level` (`debug`, `info`, `warn`, `error`)
 - `config_secret` (pro sifrovani `cfg` tokenu)
 
 Perzistentni data:
@@ -48,3 +49,8 @@ Konfigurace se předává v manifest URL přes token `cfg`:
 
 Configure stránka pošle data na backend a vygeneruje URL s tokenem `cfg`, takže heslo není v URL v čistém textu.
 Legacy query parametry (`email`, `password`, `limit`, `premium`) zůstávají podporované jako fallback.
+
+## Debug logy
+
+Addon zapisuje detailni runtime logy do standardniho logu addonu (HA UI -> Add-on -> Log).
+Pro detailni diagnostiku nastav `log_level: "debug"`.

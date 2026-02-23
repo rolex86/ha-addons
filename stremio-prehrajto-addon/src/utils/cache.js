@@ -7,7 +7,10 @@ const ttlMs = ENV.CACHE_TTL_SECONDS * 1000;
 const DATA_DIR = process.env.DATA_DIR || path.join(process.cwd(), ".data");
 const CACHE_DIR = path.join(DATA_DIR, "stremio-prehrajto");
 const CACHE_FILE = path.join(CACHE_DIR, "cache.json");
-const PERSIST_DEBOUNCE_MS = 1500;
+const PERSIST_ON_CHANGE = false;
+const PERSIST_DEBOUNCE_MS = 30_000;
+const PERSIST_MIN_INTERVAL_MS = 120_000;
+const SHUTDOWN_PERSIST_TIMEOUT_MS = 4_000;
 
 const memoryCache = new LRUCache({
   max: 500,
@@ -15,6 +18,12 @@ const memoryCache = new LRUCache({
 });
 
 let persistTimer = null;
+let persistInFlight = null;
+let pendingPersist = false;
+let lastPersistAt = 0;
+let persistGeneration = 0;
+let persistedGeneration = 0;
+let shuttingDown = false;
 
 function safeJsonClone(value) {
   try {
@@ -24,11 +33,36 @@ function safeJsonClone(value) {
   }
 }
 
-function persistNow() {
-  try {
-    fs.mkdirSync(CACHE_DIR, { recursive: true });
+function isDirty() {
+  return persistGeneration > persistedGeneration;
+}
 
-    const now = Date.now();
+function markDirty() {
+  persistGeneration += 1;
+}
+
+async function persistNowAsync({ force = false } = {}) {
+  if (!force && !isDirty()) return;
+
+  const now = Date.now();
+  if (!force && now - lastPersistAt < PERSIST_MIN_INTERVAL_MS) {
+    pendingPersist = true;
+    schedulePersist(PERSIST_MIN_INTERVAL_MS - (now - lastPersistAt));
+    return;
+  }
+
+  if (persistInFlight) {
+    pendingPersist = true;
+    await persistInFlight;
+    if (force && isDirty()) {
+      await persistNowAsync({ force: true });
+    }
+    return;
+  }
+
+  const targetGeneration = persistGeneration;
+  const run = (async () => {
+    const snapNow = Date.now();
     const items = [];
 
     for (const key of memoryCache.keys()) {
@@ -44,11 +78,12 @@ function persistNow() {
       items.push({
         key,
         value: cloned,
-        expiresAt: now + ttl,
+        expiresAt: snapNow + ttl,
       });
     }
 
-    fs.writeFileSync(
+    await fs.promises.mkdir(CACHE_DIR, { recursive: true });
+    await fs.promises.writeFile(
       CACHE_FILE,
       JSON.stringify(
         {
@@ -61,18 +96,33 @@ function persistNow() {
       ),
       "utf8",
     );
+
+    lastPersistAt = Date.now();
+    persistedGeneration = Math.max(persistedGeneration, targetGeneration);
+  })();
+
+  persistInFlight = run;
+  try {
+    await run;
   } catch (e) {
     // eslint-disable-next-line no-console
     console.warn(`Cache persistence failed: ${String(e?.message || e)}`);
+  } finally {
+    persistInFlight = null;
+    if (pendingPersist && PERSIST_ON_CHANGE && !shuttingDown) {
+      pendingPersist = false;
+      schedulePersist();
+    }
   }
 }
 
-function schedulePersist() {
+function schedulePersist(delayMs = PERSIST_DEBOUNCE_MS) {
+  if (!PERSIST_ON_CHANGE || shuttingDown) return;
   if (persistTimer) return;
   persistTimer = setTimeout(() => {
     persistTimer = null;
-    persistNow();
-  }, PERSIST_DEBOUNCE_MS);
+    void persistNowAsync();
+  }, Math.max(250, delayMs));
   persistTimer.unref?.();
 }
 
@@ -102,13 +152,19 @@ function loadPersistedCache() {
   }
 }
 
-function flushAndExit(code = 0) {
+async function flushAndExit(code = 0) {
+  if (shuttingDown) return;
+  shuttingDown = true;
   try {
     if (persistTimer) {
       clearTimeout(persistTimer);
       persistTimer = null;
     }
-    persistNow();
+
+    const timeout = new Promise((resolve) =>
+      setTimeout(resolve, SHUTDOWN_PERSIST_TIMEOUT_MS),
+    );
+    await Promise.race([persistNowAsync({ force: true }), timeout]);
   } finally {
     process.exit(code);
   }
@@ -121,10 +177,14 @@ process.on("beforeExit", () => {
     clearTimeout(persistTimer);
     persistTimer = null;
   }
-  persistNow();
+  if (isDirty()) void persistNowAsync({ force: true });
 });
-process.on("SIGINT", () => flushAndExit(0));
-process.on("SIGTERM", () => flushAndExit(0));
+process.on("SIGINT", () => {
+  void flushAndExit(0);
+});
+process.on("SIGTERM", () => {
+  void flushAndExit(0);
+});
 
 export const cache = {
   get(key) {
@@ -133,18 +193,23 @@ export const cache = {
 
   set(key, value, options) {
     const out = memoryCache.set(key, value, options);
+    markDirty();
     schedulePersist();
     return out;
   },
 
   delete(key) {
     const out = memoryCache.delete(key);
-    if (out) schedulePersist();
+    if (out) {
+      markDirty();
+      schedulePersist();
+    }
     return out;
   },
 
   clear() {
     memoryCache.clear();
+    markDirty();
     schedulePersist();
   },
 

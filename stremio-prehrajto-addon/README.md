@@ -19,6 +19,7 @@ Po instalaci nastav options v HA:
 
 Perzistentni data:
 - runtime cache + premium cookies: `/data/stremio-prehrajto/cache.json`
+- kvuli vykonu se cache persistuje asynchronne pri ukonceni addonu (ne pri kazde zmene)
 
 ## Setup
 

@@ -1,11 +1,13 @@
-import { normalizeTitle } from "./text.js";
+import { matchSeasonEpisode, normalizeTitle, parseSxxExx } from "./text.js";
 
 // Basic scoring: title match + year + SxxExx
 export function scoreCandidate(
-  { wantedTitle, wantedYear, wantedSxxExx },
+  { wantedTitle, wantedYear, wantedSxxExx, wantedSeason, wantedEpisode },
   candidate,
 ) {
   const candTitle = candidate.title || "";
+  const candUrl = candidate.url || "";
+  const episodeCtx = `${candTitle} ${candUrl}`;
   const candNorm = normalizeTitle(candTitle);
   const wantNorm = normalizeTitle(wantedTitle);
 
@@ -30,7 +32,21 @@ export function scoreCandidate(
   }
 
   // episode marker
-  if (wantedSxxExx) {
+  const parsedFromMarker =
+    !wantedSeason && !wantedEpisode ? parseSxxExx(wantedSxxExx) : null;
+  const season = wantedSeason ?? parsedFromMarker?.season;
+  const episode = wantedEpisode ?? parsedFromMarker?.episode;
+  if (Number.isFinite(season) && Number.isFinite(episode)) {
+    const ep = matchSeasonEpisode(episodeCtx, season, episode);
+    if (ep.hasEpisodeMarkers) {
+      if (ep.isMatch) score += 45;
+      else score -= 60;
+    } else if (wantedSxxExx) {
+      const upper = candTitle.toUpperCase();
+      if (upper.includes(String(wantedSxxExx).toUpperCase())) score += 20;
+      else score -= 12;
+    }
+  } else if (wantedSxxExx) {
     const upper = candTitle.toUpperCase();
     if (upper.includes(wantedSxxExx.toUpperCase())) score += 35;
     else score -= 10;

@@ -49,5 +49,5 @@ schema:
   default_streams_limit: int(1,15)
   default_premium: bool
   cache_ttl_seconds: int(30,86400)
-  log_level: str
+  log_level: list(debug|info|warn|error|warning)
   config_secret: password

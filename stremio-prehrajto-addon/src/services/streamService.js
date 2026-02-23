@@ -2,7 +2,12 @@ import { PREHRAJTO } from "./prehrajto.js";
 import { TMDB } from "./tmdb.js";
 import { CINEMETA } from "./cinemeta.js";
 import { scoreCandidate } from "../utils/scoring.js";
-import { sxxexx } from "../utils/text.js";
+import {
+  episodeQueryMarkers,
+  matchSeasonEpisode,
+  parseSxxExx,
+  sxxexx,
+} from "../utils/text.js";
 import { parseId } from "../ids.js";
 import { cache } from "../utils/cache.js";
 import { elapsedMs, errorMeta, log, sanitizeUrl, summarizeId } from "../utils/log.js";
@@ -63,6 +68,30 @@ function uniqueNonEmpty(values) {
     out.push(v);
   }
   return out;
+}
+
+function parseWantedEpisode(wanted = {}) {
+  const season = parseInt(wanted?.wantedSeason, 10);
+  const episode = parseInt(wanted?.wantedEpisode, 10);
+  if (Number.isFinite(season) && Number.isFinite(episode)) {
+    return { season, episode };
+  }
+  return parseSxxExx(wanted?.wantedSxxExx || "");
+}
+
+function episodeMatchForCandidate(candidate, wantedEpisode) {
+  if (!wantedEpisode) {
+    return {
+      isMatch: false,
+      hasEpisodeMarkers: false,
+      pairs: [],
+    };
+  }
+  return matchSeasonEpisode(
+    `${candidate?.title || ""} ${candidate?.url || ""}`,
+    wantedEpisode.season,
+    wantedEpisode.episode,
+  );
 }
 
 async function buildSearchQueryPlan(queries, wanted = {}) {
@@ -194,6 +223,8 @@ function scoreWithWanted(candidate, wanted) {
         wantedTitle: t,
         wantedYear: wanted?.wantedYear,
         wantedSxxExx: wanted?.wantedSxxExx,
+        wantedSeason: wanted?.wantedSeason,
+        wantedEpisode: wanted?.wantedEpisode,
       },
       candidate,
     );
@@ -402,9 +433,17 @@ export const StreamService = {
 
     if (pid.kind === "imdb_episode") {
       const marker = sxxexx(pid.season, pid.episode);
+      const markers = episodeQueryMarkers(pid.season, pid.episode).slice(0, 4);
       const querySet = new Set();
       let tmdbSeries = null;
       let cmSeries = null;
+      const addEpisodeQueries = (name) => {
+        const cleanName = normalizeSpaces(name);
+        if (!cleanName) return;
+        for (const m of markers) {
+          addQuery(querySet, `${cleanName} ${m}`);
+        }
+      };
 
       try {
         const found = await TMDB.findByImdb(pid.imdbId);
@@ -414,8 +453,8 @@ export const StreamService = {
             tmdbSeriesId: found.series.id,
           });
           tmdbSeries = await TMDB.series(found.series.id);
-          addQuery(querySet, `${tmdbSeries?.name || ""} ${marker}`);
-          addQuery(querySet, `${tmdbSeries?.original_name || ""} ${marker}`);
+          addEpisodeQueries(tmdbSeries?.name);
+          addEpisodeQueries(tmdbSeries?.original_name);
         }
       } catch {
         log.warn("streamsForId:imdb_episode tmdb mapping failed", {
@@ -425,7 +464,7 @@ export const StreamService = {
 
       try {
         cmSeries = await CINEMETA.seriesByImdb(pid.imdbId);
-        if (cmSeries?.name) addQuery(querySet, `${cmSeries.name} ${marker}`);
+        addEpisodeQueries(cmSeries?.name);
       } catch {
         log.warn("streamsForId:imdb_episode cinemeta mapping failed", {
           imdbId: pid.imdbId,
@@ -438,6 +477,8 @@ export const StreamService = {
         wantedTitle: tmdbSeries?.name || cmSeries?.name || queries[0],
         altWantedTitles: [tmdbSeries?.original_name, cmSeries?.name],
         wantedSxxExx: marker,
+        wantedSeason: pid.season,
+        wantedEpisode: pid.episode,
       });
     }
 
@@ -458,6 +499,7 @@ export const StreamService = {
     const startedAt = Date.now();
     const plannedQueries = await buildSearchQueryPlan(queries, wanted);
     if (plannedQueries.length === 0) return { streams: [] };
+    const wantedEpisode = parseWantedEpisode(wanted);
 
     const maxStreams = clampStreamLimit(config?.streamLimit);
     const configuredSearchLimit = parseInt(config?.limit, 10);
@@ -491,6 +533,8 @@ export const StreamService = {
       wantedTitle: wanted.wantedTitle || "",
       wantedYear: wanted.wantedYear || "",
       wantedSxxExx: wanted.wantedSxxExx || "",
+      wantedSeason: wantedEpisode?.season,
+      wantedEpisode: wantedEpisode?.episode,
     });
 
     const byUrl = new Map();
@@ -536,17 +580,40 @@ export const StreamService = {
         .map((r) => ({
           r,
           s: scoreWithWanted(r, wanted),
+          episode: episodeMatchForCandidate(r, wantedEpisode),
         }))
+        .map((row) => {
+          if (!wantedEpisode) return row;
+          if (row.episode.hasEpisodeMarkers) {
+            row.s += row.episode.isMatch ? 90 : -300;
+          } else {
+            row.s -= 25;
+          }
+          return row;
+        })
         .sort((a, b) => b.s - a.s);
+
+      let selectable = scored.filter((x) => x?.r?.url && !attemptedPageUrls.has(x.r.url));
+      if (wantedEpisode) {
+        const episodeMatches = selectable.filter((x) => x.episode?.isMatch);
+        if (episodeMatches.length === 0) {
+          log.debug("streamsFromQueries:episode no matching candidates in batch", {
+            query: q,
+            wantedSeason: wantedEpisode.season,
+            wantedEpisode: wantedEpisode.episode,
+            candidateCount: selectable.length,
+          });
+          continue;
+        }
+        selectable = episodeMatches;
+      }
 
       const batchSize = Math.min(
         RESOLVE_BATCH_SIZE,
         remainingResolveSlots,
         Math.max(needStreams * RESOLVE_FACTOR, needStreams),
       );
-      const toResolve = scored
-        .filter((x) => x?.r?.url && !attemptedPageUrls.has(x.r.url))
-        .slice(0, batchSize);
+      const toResolve = selectable.slice(0, batchSize);
 
       log.debug("streamsFromQueries:resolve batch", {
         query: q,
@@ -619,7 +686,28 @@ export const StreamService = {
       return { streams: [] };
     }
 
-    const rankedRows = uniqueResolved
+    let resolvedForRanking = uniqueResolved;
+    if (wantedEpisode) {
+      resolvedForRanking = uniqueResolved.filter((row) => {
+        const match = episodeMatchForCandidate(
+          { title: row.sourceTitle, url: row.sourceUrl },
+          wantedEpisode,
+        );
+        return match.isMatch;
+      });
+      if (resolvedForRanking.length === 0) {
+        log.info("streamsFromQueries:no episode-matching resolved streams", {
+          wantedSeason: wantedEpisode.season,
+          wantedEpisode: wantedEpisode.episode,
+          resolvedUnique: uniqueResolved.length,
+          attemptedResolve: attemptedPageUrls.size,
+          ms: elapsedMs(startedAt),
+        });
+        return { streams: [] };
+      }
+    }
+
+    const rankedRows = resolvedForRanking
       .map((row) => ({
         ...row,
         parsedSizeBytes: parseSizeFromTitleBytes(row.sourceTitle),
@@ -657,6 +745,7 @@ export const StreamService = {
       attemptedResolve: attemptedPageUrls.size,
       maxResolve,
       resolvedUnique: uniqueResolved.length,
+      resolvedAfterEpisodeFilter: resolvedForRanking.length,
       streams: streams.length,
       maxStreams,
       withParsedSize: rankedRows.filter((r) => r.parsedSizeBytes > 0).length,

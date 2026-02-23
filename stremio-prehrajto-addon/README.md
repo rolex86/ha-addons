@@ -13,7 +13,7 @@ Tento adresar je pripraveny jako Home Assistant add-on (`config.yaml`, `build.ya
 Po instalaci nastav options v HA:
 - `base_url` (URL add-onu viditelna pro Stremio klienta)
 - `tmdb_api_key` (volitelne, pro presnejsi mapovani IMDb -> TMDB)
-- `log_level` (`debug`, `info`, `warn`, `error`)
+- `log_level` (`debug`, `info`, `warn`/`warning`, `error`)
 - `config_secret` (pro sifrovani `cfg` tokenu)
 - `default_streams_limit` (kolik streamu max vracet, vychozi 5)
 

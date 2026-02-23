@@ -6,9 +6,12 @@ import { elapsedMs, errorMeta, log, sanitizeUrl } from "../utils/log.js";
 const SEARCH_UNAVAILABLE_COOLDOWN_MS = 30_000;
 const SEARCH_ERROR_COOLDOWN_MS = 60_000;
 const EMPTY_SEARCH_TTL_MS = 180_000;
+const SUGGEST_TTL_MS = 300_000;
+const SUGGEST_MAX_ITEMS = 8;
 
 let searchUnavailableUntil = 0;
 const searchInFlight = new Map();
+const suggestInFlight = new Map();
 
 // Very lightweight cookie jar for premium login
 function extractSetCookies(res) {
@@ -58,6 +61,11 @@ function normalizeSpaces(s) {
 function buildSearchUrl(query) {
   const base = ENV.PREHRAJTO_BASE.replace(/\/+$/g, "");
   return `${base}/hledej/${encodeURIComponent(query)}`;
+}
+
+function buildSuggestUrl(query) {
+  const base = ENV.PREHRAJTO_BASE.replace(/\/+$/g, "");
+  return `${base}/api/v1/public/suggest/${encodeURIComponent(query)}`;
 }
 
 function buildSearchVariants(query) {
@@ -240,6 +248,34 @@ function parseSubtitles(html) {
   return Array.from(uniq.values());
 }
 
+function parseSuggestItems(text, query, limit) {
+  const out = [];
+  const seen = new Set();
+  const add = (value) => {
+    const v = normalizeSpaces(value);
+    if (!v) return;
+    const key = v.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(v);
+  };
+
+  add(query);
+
+  try {
+    const data = JSON.parse(String(text || "{}"));
+    const items = Array.isArray(data?.items) ? data.items : [];
+    for (const item of items) {
+      add(item?.name || "");
+      if (out.length >= limit) break;
+    }
+  } catch {
+    // ignore JSON parse failure
+  }
+
+  return out.slice(0, limit);
+}
+
 async function premiumDownloadRedirect(videoPageUrl, cookie) {
   const u = new URL(videoPageUrl);
   u.searchParams.set("do", "download");
@@ -263,6 +299,89 @@ async function premiumDownloadRedirect(videoPageUrl, cookie) {
 }
 
 export const PREHRAJTO = {
+  async suggest(query, { limit = 4 } = {}) {
+    const startedAt = Date.now();
+    const q = normalizeSpaces(query);
+    if (!q) return [];
+
+    const normalizedLimit = Math.min(
+      Math.max(parseInt(limit, 10) || 4, 1),
+      SUGGEST_MAX_ITEMS,
+    );
+    const cacheKey = `pt:suggest:${q.toLowerCase()}:${normalizedLimit}`;
+    const cachedHit = cache.get(cacheKey);
+    if (cachedHit !== undefined) {
+      log.debug("prehrajto:suggest cache hit", {
+        query: q,
+        limit: normalizedLimit,
+        count: Array.isArray(cachedHit) ? cachedHit.length : -1,
+      });
+      return cachedHit;
+    }
+
+    const existing = suggestInFlight.get(cacheKey);
+    if (existing) {
+      log.debug("prehrajto:suggest in-flight hit", { query: q });
+      return await existing;
+    }
+
+    const work = (async () => {
+      const suggestUrl = buildSuggestUrl(q);
+      try {
+        const { res, text } = await httpGet(suggestUrl, {
+          throwOnHttpError: false,
+          timeoutMs: 2000,
+          headers: {
+            Accept: "application/json, text/plain, */*",
+            "Accept-Language": "cs-CZ,cs;q=0.9,en;q=0.8",
+            "Cache-Control": "no-cache",
+            Pragma: "no-cache",
+            Referer: buildSearchUrl(q),
+          },
+        });
+
+        if (!res.ok) {
+          log.debug("prehrajto:suggest non-200", {
+            query: q,
+            status: res.status,
+            suggestUrl: sanitizeUrl(suggestUrl),
+            ms: elapsedMs(startedAt),
+          });
+          const fallback = [q];
+          cache.set(cacheKey, fallback, { ttl: SUGGEST_TTL_MS });
+          return fallback;
+        }
+
+        const out = parseSuggestItems(text, q, normalizedLimit);
+        cache.set(cacheKey, out, { ttl: SUGGEST_TTL_MS });
+        log.debug("prehrajto:suggest ok", {
+          query: q,
+          limit: normalizedLimit,
+          count: out.length,
+          ms: elapsedMs(startedAt),
+        });
+        return out;
+      } catch (e) {
+        log.debug("prehrajto:suggest request failed", {
+          query: q,
+          suggestUrl: sanitizeUrl(suggestUrl),
+          error: errorMeta(e),
+          ms: elapsedMs(startedAt),
+        });
+        const fallback = [q];
+        cache.set(cacheKey, fallback, { ttl: SUGGEST_TTL_MS });
+        return fallback;
+      }
+    })();
+
+    suggestInFlight.set(cacheKey, work);
+    try {
+      return await work;
+    } finally {
+      if (suggestInFlight.get(cacheKey) === work) suggestInFlight.delete(cacheKey);
+    }
+  },
+
   async search(query, { limit = 20 } = {}) {
     const startedAt = Date.now();
     const q = normalizeSpaces(query);
@@ -308,7 +427,7 @@ export const PREHRAJTO = {
         try {
           ({ res, text } = await httpGet(searchUrl, {
             throwOnHttpError: false,
-            timeoutMs: 8000,
+            timeoutMs: 5000,
             headers: {
               Accept:
                 "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -425,7 +544,7 @@ export const PREHRAJTO = {
       const { text, res } = await httpGet(videoPageUrl, {
         headers: cookie ? { Cookie: cookie } : {},
         throwOnHttpError: false,
-        timeoutMs: 8000,
+        timeoutMs: 5000,
       });
       log.debug("prehrajto:resolve page response", {
         pageUrl: sanitizeUrl(videoPageUrl),
@@ -482,4 +601,3 @@ export const PREHRAJTO = {
     }
   },
 };
-

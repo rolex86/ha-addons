@@ -4,6 +4,7 @@ Addon je ted zamereny primarne jako `stream source` pro existujici Cinemeta/Stre
 Nevystavuje vlastni katalog, ve Stremiu se zobrazuje jako dalsi zdroj streamu.
 Resolver vraci streamy serazene podle detekovane velikosti (nejvetsi prvni) a zkousi vice variant nazvu (CZ/original/rok).
 Pocet vracenych streamu je konfigurovatelny (`default_streams_limit`, vychozi 5).
+Pro omezeni zateze nejdriv pouziva naseptavac `api/v1/public/suggest` a teprve pak vola `hledej`.
 
 ## Home Assistant Add-on
 

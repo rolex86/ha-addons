@@ -10,12 +10,15 @@ import { elapsedMs, errorMeta, log, sanitizeUrl, summarizeId } from "../utils/lo
 const STREAM_INFLIGHT = new Map();
 const NO_STREAMS_TTL_MS = 180_000;
 const MAX_STREAMS = 15;
-const MAX_QUERY_VARIANTS = 8;
-const MAX_CANDIDATES_TO_RESOLVE = 40;
-const RESOLVE_FACTOR = 3;
-const RESOLVE_CONCURRENCY = 4;
-const SEARCH_PER_QUERY_MIN = 20;
-const SEARCH_PER_QUERY_MAX = 60;
+const MAX_QUERY_VARIANTS = 6;
+const MAX_CANDIDATES_TO_RESOLVE = 24;
+const RESOLVE_FACTOR = 2;
+const RESOLVE_CONCURRENCY = 2;
+const RESOLVE_BATCH_SIZE = 4;
+const SEARCH_PER_QUERY_MIN = 6;
+const SEARCH_PER_QUERY_MAX = 30;
+const SEARCH_PER_STREAM_FACTOR = 3;
+const STREAM_REQUEST_BUDGET_MS = 12_000;
 
 function normalizeSpaces(s) {
   return String(s || "").replace(/\s+/g, " ").trim();
@@ -60,6 +63,48 @@ function uniqueNonEmpty(values) {
     out.push(v);
   }
   return out;
+}
+
+async function buildSearchQueryPlan(queries, wanted = {}) {
+  const baseQueries = uniqueNonEmpty(queries).slice(0, MAX_QUERY_VARIANTS);
+  if (baseQueries.length === 0) return [];
+
+  const out = [];
+  const seen = new Set();
+  const add = (value) => {
+    const v = normalizeSpaces(value);
+    if (!v) return;
+    const key = v.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(v);
+  };
+
+  // Use only one primary seed to avoid adding latency before real search.
+  const seed = uniqueNonEmpty([wanted?.wantedTitle, baseQueries[0]])[0];
+  if (seed) {
+    add(seed);
+    if (out.length < MAX_QUERY_VARIANTS) {
+      try {
+        const suggested = await PREHRAJTO.suggest(seed, { limit: 4 });
+        for (const s of suggested) {
+          add(s);
+          if (out.length >= MAX_QUERY_VARIANTS) break;
+        }
+      } catch {
+        // ignore suggest failures, base queries are sufficient fallback
+      }
+    }
+
+    if (out.length >= MAX_QUERY_VARIANTS) return out.slice(0, MAX_QUERY_VARIANTS);
+  }
+
+  for (const q of baseQueries) {
+    add(q);
+    if (out.length >= MAX_QUERY_VARIANTS) break;
+  }
+
+  return out.slice(0, MAX_QUERY_VARIANTS);
 }
 
 function formatBytes(bytes) {
@@ -411,20 +456,37 @@ export const StreamService = {
 
   async streamsFromQueries(queries, config, wanted = {}) {
     const startedAt = Date.now();
-    const normalizedQueries = uniqueNonEmpty(queries).slice(0, MAX_QUERY_VARIANTS);
-    if (normalizedQueries.length === 0) return { streams: [] };
+    const plannedQueries = await buildSearchQueryPlan(queries, wanted);
+    if (plannedQueries.length === 0) return { streams: [] };
 
+    const maxStreams = clampStreamLimit(config?.streamLimit);
+    const configuredSearchLimit = parseInt(config?.limit, 10);
+    const searchByStreams = Math.max(
+      SEARCH_PER_QUERY_MIN,
+      maxStreams * SEARCH_PER_STREAM_FACTOR,
+    );
     const searchPerQuery = Math.min(
       SEARCH_PER_QUERY_MAX,
       Math.max(
         SEARCH_PER_QUERY_MIN,
-        parseInt(config?.limit, 10) || SEARCH_PER_QUERY_MIN,
+        Math.min(
+          Number.isFinite(configuredSearchLimit)
+            ? configuredSearchLimit
+            : SEARCH_PER_QUERY_MAX,
+          searchByStreams,
+        ),
       ),
+    );
+    const maxResolve = Math.min(
+      MAX_CANDIDATES_TO_RESOLVE,
+      Math.max(maxStreams * RESOLVE_FACTOR, maxStreams),
     );
 
     log.debug("streamsFromQueries:start", {
-      queries: normalizedQueries,
+      queries: plannedQueries,
       searchPerQuery,
+      maxResolve,
+      budgetMs: STREAM_REQUEST_BUDGET_MS,
       streamLimit: config?.streamLimit,
       wantedTitle: wanted.wantedTitle || "",
       wantedYear: wanted.wantedYear || "",
@@ -432,7 +494,21 @@ export const StreamService = {
     });
 
     const byUrl = new Map();
-    for (const q of normalizedQueries) {
+    const attemptedPageUrls = new Set();
+    const dedupByStreamUrl = new Map();
+    let queriesTried = 0;
+
+    for (const q of plannedQueries) {
+      queriesTried += 1;
+      if (elapsedMs(startedAt) >= STREAM_REQUEST_BUDGET_MS) {
+        log.warn("streamsFromQueries:time budget reached before search", {
+          query: q,
+          ms: elapsedMs(startedAt),
+          queriesTried,
+        });
+        break;
+      }
+
       const results = await PREHRAJTO.search(q, { limit: searchPerQuery });
       log.debug("streamsFromQueries:search result", { query: q, count: results.length });
 
@@ -441,69 +517,103 @@ export const StreamService = {
         if (!byUrl.has(r.url)) byUrl.set(r.url, r);
       }
 
-      if (byUrl.size >= MAX_CANDIDATES_TO_RESOLVE * 2) break;
+      const needStreams = Math.max(0, maxStreams - dedupByStreamUrl.size);
+      if (needStreams <= 0) break;
+
+      const remainingResolveSlots = Math.max(0, maxResolve - attemptedPageUrls.size);
+      if (remainingResolveSlots <= 0) {
+        log.debug("streamsFromQueries:resolve budget exhausted", {
+          query: q,
+          maxResolve,
+          attempted: attemptedPageUrls.size,
+          resolvedUnique: dedupByStreamUrl.size,
+        });
+        break;
+      }
+
+      const candidates = Array.from(byUrl.values());
+      const scored = candidates
+        .map((r) => ({
+          r,
+          s: scoreWithWanted(r, wanted),
+        }))
+        .sort((a, b) => b.s - a.s);
+
+      const batchSize = Math.min(
+        RESOLVE_BATCH_SIZE,
+        remainingResolveSlots,
+        Math.max(needStreams * RESOLVE_FACTOR, needStreams),
+      );
+      const toResolve = scored
+        .filter((x) => x?.r?.url && !attemptedPageUrls.has(x.r.url))
+        .slice(0, batchSize);
+
+      log.debug("streamsFromQueries:resolve batch", {
+        query: q,
+        candidateCount: candidates.length,
+        resolveCount: toResolve.length,
+        remainingResolveSlots,
+        maxStreams,
+        resolvedAlready: dedupByStreamUrl.size,
+        top: toResolve.slice(0, 5).map((x) => ({
+          score: x.s,
+          title: x.r.title,
+          url: sanitizeUrl(x.r.url),
+        })),
+      });
+
+      if (toResolve.length === 0) continue;
+      for (const item of toResolve) attemptedPageUrls.add(item.r.url);
+
+      const resolvedRows = await mapConcurrent(
+        toResolve,
+        RESOLVE_CONCURRENCY,
+        async (item) => {
+          const resolved = await PREHRAJTO.resolveStream(item.r.url, config);
+          if (!resolved?.url) return null;
+          return {
+            streamUrl: resolved.url,
+            subtitles: resolved.subtitles || [],
+            sourceTitle: item.r.title,
+            sourceUrl: item.r.url,
+            score: item.s,
+          };
+        },
+      );
+
+      for (const row of resolvedRows) {
+        if (!row?.streamUrl) continue;
+        const prev = dedupByStreamUrl.get(row.streamUrl);
+        if (!prev || row.score > prev.score) dedupByStreamUrl.set(row.streamUrl, row);
+      }
+
+      if (dedupByStreamUrl.size >= maxStreams) break;
+      if (elapsedMs(startedAt) >= STREAM_REQUEST_BUDGET_MS) {
+        log.warn("streamsFromQueries:time budget reached after resolve batch", {
+          query: q,
+          ms: elapsedMs(startedAt),
+          attempted: attemptedPageUrls.size,
+          resolvedUnique: dedupByStreamUrl.size,
+        });
+        break;
+      }
+      if (attemptedPageUrls.size >= maxResolve) break;
     }
 
     const candidates = Array.from(byUrl.values());
     if (candidates.length === 0) {
       log.info("streamsFromQueries:no search results", {
-        queries: normalizedQueries,
+        queries: plannedQueries,
         ms: elapsedMs(startedAt),
       });
       return { streams: [] };
     }
 
-    const scored = candidates
-      .map((r) => ({
-        r,
-        s: scoreWithWanted(r, wanted),
-      }))
-      .sort((a, b) => b.s - a.s);
-
-    const maxStreams = clampStreamLimit(config?.streamLimit);
-    const maxResolve = Math.min(
-      MAX_CANDIDATES_TO_RESOLVE,
-      Math.max(maxStreams * RESOLVE_FACTOR, maxStreams),
-    );
-    const toResolve = scored.slice(0, Math.min(scored.length, maxResolve));
-    log.debug("streamsFromQueries:resolve batch", {
-      candidateCount: candidates.length,
-      resolveCount: toResolve.length,
-      maxStreams,
-      top: toResolve.slice(0, 5).map((x) => ({
-        score: x.s,
-        title: x.r.title,
-        url: sanitizeUrl(x.r.url),
-      })),
-    });
-
-    const resolvedRows = await mapConcurrent(
-      toResolve,
-      RESOLVE_CONCURRENCY,
-      async (item) => {
-        const resolved = await PREHRAJTO.resolveStream(item.r.url, config);
-        if (!resolved?.url) return null;
-        return {
-          streamUrl: resolved.url,
-          subtitles: resolved.subtitles || [],
-          sourceTitle: item.r.title,
-          sourceUrl: item.r.url,
-          score: item.s,
-        };
-      },
-    );
-
-    const dedupByStreamUrl = new Map();
-    for (const row of resolvedRows) {
-      if (!row?.streamUrl) continue;
-      const prev = dedupByStreamUrl.get(row.streamUrl);
-      if (!prev || row.score > prev.score) dedupByStreamUrl.set(row.streamUrl, row);
-    }
-
     const uniqueResolved = Array.from(dedupByStreamUrl.values());
     if (uniqueResolved.length === 0) {
       log.info("streamsFromQueries:no resolvable streams", {
-        queries: normalizedQueries,
+        queries: plannedQueries,
+        attemptedResolve: attemptedPageUrls.size,
         ms: elapsedMs(startedAt),
       });
       return { streams: [] };
@@ -542,8 +652,10 @@ export const StreamService = {
     });
 
     log.info("streamsFromQueries:done", {
-      queriesTried: normalizedQueries.length,
+      queriesTried,
       candidateCount: candidates.length,
+      attemptedResolve: attemptedPageUrls.size,
+      maxResolve,
       resolvedUnique: uniqueResolved.length,
       streams: streams.length,
       maxStreams,

@@ -5,7 +5,7 @@ declare(strict_types=1);
 
 // ---------- CONFIG ----------
 const ADDON_ID = "org.stremio.hellspy";
-const ADDON_VERSION = "0.0.1";
+const ADDON_VERSION = "0.1.7";
 const ADDON_NAME = "Hellspy";
 const ADDON_DESCRIPTION = "Hellspy.to addon for Stremio";
 
@@ -384,6 +384,14 @@ function handle_stream_request(array $body): array {
 
     // Prepare stream URLs
     $streams = [];
+    $sort_by_size_desc = function (array $items): array {
+        usort($items, function ($a, $b) {
+            $sizeA = (isset($a['size']) && is_numeric($a['size'])) ? (float)$a['size'] : -1.0;
+            $sizeB = (isset($b['size']) && is_numeric($b['size'])) ? (float)$b['size'] : -1.0;
+            return $sizeB <=> $sizeA;
+        });
+        return $items;
+    };
     if ($type === 'series' && $season !== null && $episodeNumber !== null) {
         $seasonStr = str_pad((string)$season, 2, '0', STR_PAD_LEFT);
         $epStr = str_pad((string)$episodeNumber, 2, '0', STR_PAD_LEFT);
@@ -399,11 +407,14 @@ function handle_stream_request(array $body): array {
             return false;
         }));
         if (!empty($preferred)) {
+            $preferred = $sort_by_size_desc($preferred);
             $limited = array_slice($preferred, 0, 2);
         } else {
+            $results = $sort_by_size_desc($results);
             $limited = array_slice($results, 0, 5);
         }
     } else {
+        $results = $sort_by_size_desc($results);
         $limited = array_slice($results, 0, 5);
     }
     foreach ($limited as $res) {

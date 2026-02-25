@@ -5,7 +5,7 @@ declare(strict_types=1);
 
 // ---------- CONFIG ----------
 const ADDON_ID = "org.stremio.hellspy";
-const ADDON_VERSION = "0.1.7";
+const ADDON_VERSION = "0.1.8";
 const ADDON_NAME = "Hellspy";
 const ADDON_DESCRIPTION = "Hellspy.to addon for Stremio";
 
@@ -427,10 +427,19 @@ function handle_stream_request(array $body): array {
             if (is_array($sinfo) && count($sinfo) > 0) {
                 $sizeGB = isset($res['size']) ? round($res['size'] / 1024 / 1024 / 1024, 2) . ' GB' : 'Unknown size';
                 foreach ($sinfo as $s) {
+                    $releaseTitle = trim((string)($res['title'] ?? ''));
+                    if ($releaseTitle === '') {
+                        $releaseTitle = 'Hellspy stream';
+                    }
+                    $quality = trim((string)($s['quality'] ?? ''));
+                    if ($quality === '') {
+                        $quality = 'unknown';
+                    }
+                    $streamTitle = $releaseTitle . "\n" . "Kvalita: " . $quality . "\n" . "Velikost: " . $sizeGB;
                     $streams[] = [
                         'url' => $s['url'],
                         'quality' => $s['quality'],
-                        'title' => ($res['title'] ?? '') . "\n" . ($s['quality'] ?? '') . " | " . $sizeGB,
+                        'title' => $streamTitle,
                         'name' => "Hellspy - " . ($s['quality'] ?? '')
                     ];
                 }

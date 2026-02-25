@@ -1,7 +1,7 @@
 name: "Stremio Hellspy (private) — Filip"
 slug: "stremio_hellspy"
 description: "Privátní Stremio addon (Hellspy.to) běžící v Home Assistant OS"
-version: "0.1.7"
+version: "0.1.8"
 url: "https://github.com/<your-user>/<your-repo>"
 arch:
   - amd64

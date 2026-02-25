@@ -152,8 +152,71 @@ function formatBytes(bytes) {
   return `${value.toFixed(precision)} ${units[idx]}`;
 }
 
-function hasSizeToken(text) {
-  return /\b\d+(?:[.,]\d+)?\s*(?:tb|gb|mb|kb|b)\b/i.test(String(text || ""));
+function parseQualityFromTitle(title) {
+  const text = String(title || "");
+  if (!text) return "";
+
+  let resolution = "";
+  if (/\b(?:2160p|4k|uhd)\b/i.test(text)) resolution = "2160p";
+  else if (/\b1440p\b/i.test(text)) resolution = "1440p";
+  else if (/\b1080p\b/i.test(text)) resolution = "1080p";
+  else if (/\b720p\b/i.test(text)) resolution = "720p";
+  else if (/\b576p\b/i.test(text)) resolution = "576p";
+  else if (/\b480p\b/i.test(text)) resolution = "480p";
+  else if (/\b360p\b/i.test(text)) resolution = "360p";
+
+  let source = "";
+  if (/\bweb[ .-]?dl\b/i.test(text)) source = "WEB-DL";
+  else if (/\bweb[ .-]?rip\b/i.test(text)) source = "WEBRip";
+  else if (/\bblu[ .-]?ray\b/i.test(text)) source = "BluRay";
+  else if (/\bbrrip\b/i.test(text)) source = "BRRip";
+  else if (/\bhd[ .-]?tv\b/i.test(text)) source = "HDTV";
+  else if (/\bdvd[ .-]?rip\b/i.test(text)) source = "DVDRip";
+  else if (/\bhdrip\b/i.test(text)) source = "HDRip";
+
+  let codec = "";
+  if (/\b(?:x265|h[ .-]?265|hevc)\b/i.test(text)) codec = "H.265";
+  else if (/\b(?:x264|h[ .-]?264|avc)\b/i.test(text)) codec = "H.264";
+
+  let hdr = "";
+  if (/\bdolby[ .-]?vision\b/i.test(text)) hdr = "Dolby Vision";
+  else if (/\bhdr10\+\b/i.test(text)) hdr = "HDR10+";
+  else if (/\bhdr10\b/i.test(text)) hdr = "HDR10";
+  else if (/\bhdr\b/i.test(text)) hdr = "HDR";
+
+  return [resolution, source, codec, hdr].filter(Boolean).join(" • ");
+}
+
+function parseDisplayNameFromTitle(sourceTitle, fallbackTitle = "") {
+  const raw = normalizeSpaces(sourceTitle);
+  const fallback = normalizeSpaces(fallbackTitle);
+  if (!raw) return fallback;
+
+  const cleaned = normalizeSpaces(
+    raw
+      .replace(/\b\d+(?:[.,]\d+)?\s*(?:tb|gb|mb|kb|b)\b/gi, " ")
+      .replace(
+        /\b(?:2160p|1440p|1080p|720p|576p|480p|360p|4k|uhd|web[ .-]?dl|web[ .-]?rip|bluray|blu[ .-]?ray|brrip|hdtv|dvdrip|hdrip|x264|x265|h[ .-]?264|h[ .-]?265|hevc|avc|hdr10\+?|hdr|dolby[ .-]?vision|dv)\b/gi,
+        " ",
+      )
+      .replace(/[._]+/g, " ")
+      .replace(/\s{2,}/g, " "),
+  );
+
+  if (cleaned.length >= 3) return cleaned;
+  return raw || fallback;
+}
+
+function buildDisplayTitle({ sourceTitle, parsedSizeBytes, fallbackTitle = "" }) {
+  const name = parseDisplayNameFromTitle(sourceTitle, fallbackTitle);
+  const quality = parseQualityFromTitle(sourceTitle);
+  const sizeText = formatBytes(parsedSizeBytes);
+  const lines = [name || normalizeSpaces(sourceTitle) || "Prehraj.to"];
+
+  if (quality) lines.push(`Kvalita: ${quality}`);
+  if (sizeText) lines.push(`Velikost: ${sizeText}`);
+
+  return lines.join("\n");
 }
 
 function parseSizeFromTitleBytes(title) {
@@ -727,10 +790,11 @@ export const StreamService = {
       .slice(0, maxStreams);
 
     const streams = rankedRows.map((row) => {
-      const sizeText = formatBytes(row.parsedSizeBytes);
-      const title = sizeText && !hasSizeToken(row.sourceTitle)
-        ? `Prehraj.to • ${row.sourceTitle} • ${sizeText}`
-        : `Prehraj.to • ${row.sourceTitle}`;
+      const title = buildDisplayTitle({
+        sourceTitle: row.sourceTitle,
+        parsedSizeBytes: row.parsedSizeBytes,
+        fallbackTitle: wanted?.wantedTitle || "",
+      });
 
       return buildStreamEntry({
         url: row.streamUrl,

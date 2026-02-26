@@ -5,7 +5,7 @@ declare(strict_types=1);
 
 // ---------- CONFIG ----------
 const ADDON_ID = "org.stremio.hellspy";
-const ADDON_VERSION = "0.1.8";
+const ADDON_VERSION = "0.1.9";
 const ADDON_NAME = "Hellspy";
 const ADDON_DESCRIPTION = "Hellspy.to addon for Stremio";
 
@@ -83,6 +83,85 @@ function cache_set(string $key, $value, ?int $ttl = null): void {
         @unlink($path);
         @rename($tmp, $path);
     }
+}
+
+function detect_resolution_label(string $text): ?string {
+    if ($text === '') return null;
+    $patterns = [
+        '4320p' => '/\b(?:4320p?|8k)\b/i',
+        '2160p' => '/\b(?:2160p?|4k|uhd)\b/i',
+        '1440p' => '/\b(?:1440p?|2k|qhd)\b/i',
+        '1080p' => '/\b(?:1080p?|full[\s._-]?hd|fhd)\b/i',
+        '720p' => '/\b(?:720p?|hd)\b/i',
+        '576p' => '/\b576p?\b/i',
+        '480p' => '/\b(?:480p?|sd)\b/i',
+        '360p' => '/\b360p?\b/i',
+        '240p' => '/\b240p?\b/i'
+    ];
+    foreach ($patterns as $label => $pattern) {
+        if (preg_match($pattern, $text)) return $label;
+    }
+    if (preg_match('/\b(\d{3,4})(?:p|i)\b/i', $text, $m)) {
+        return $m[1] . 'p';
+    }
+    return null;
+}
+
+function detect_hdr_label(string $text): ?string {
+    if ($text === '') return null;
+    $hasDv = preg_match('/\b(?:dolby[\s._-]*vision|dovi|dv)\b/i', $text) === 1;
+    $hasHdr10Plus = preg_match('/\b(?:hdr10\+|hdr10plus)\b/i', $text) === 1;
+    $hasHdr10 = preg_match('/\bhdr10\b/i', $text) === 1;
+    $hasHdr = preg_match('/\bhdr\b/i', $text) === 1;
+    $hasHlg = preg_match('/\bhlg\b/i', $text) === 1;
+
+    if ($hasDv && $hasHdr10Plus) return 'DV HDR10+';
+    if ($hasDv && ($hasHdr10 || $hasHdr)) return 'DV HDR';
+    if ($hasDv) return 'DV';
+    if ($hasHdr10Plus) return 'HDR10+';
+    if ($hasHdr10) return 'HDR10';
+    if ($hasHdr) return 'HDR';
+    if ($hasHlg) return 'HLG';
+    return null;
+}
+
+function normalize_quality_fallback(?string $quality): ?string {
+    if ($quality === null) return null;
+    $quality = trim($quality);
+    if ($quality === '') return null;
+
+    $resolution = detect_resolution_label($quality);
+    $hdr = detect_hdr_label($quality);
+    if ($resolution !== null && $hdr !== null) return $resolution . ' ' . $hdr;
+    if ($resolution !== null) return $resolution;
+    if ($hdr !== null) return $hdr;
+
+    if (preg_match('/^\d+$/', $quality)) return $quality . 'p';
+    if (strcasecmp($quality, 'original') === 0) return 'Original';
+    return strtoupper($quality);
+}
+
+function build_display_quality(string $releaseTitle, ?string $apiQuality): string {
+    $releaseTitle = trim($releaseTitle);
+    $apiQuality = trim((string)$apiQuality);
+
+    $resolution = detect_resolution_label($releaseTitle);
+    $hdr = detect_hdr_label($releaseTitle);
+
+    if ($resolution === null && $apiQuality !== '') {
+        $resolution = detect_resolution_label($apiQuality);
+    }
+    if ($hdr === null && $apiQuality !== '') {
+        $hdr = detect_hdr_label($apiQuality);
+    }
+
+    $parts = [];
+    if ($resolution !== null) $parts[] = $resolution;
+    if ($hdr !== null) $parts[] = $hdr;
+    if (!empty($parts)) return implode(' ', $parts);
+
+    $fallback = normalize_quality_fallback($apiQuality);
+    return $fallback ?? 'unknown';
 }
 
 // ---------- HTTP Requests ----------
@@ -427,20 +506,22 @@ function handle_stream_request(array $body): array {
             if (is_array($sinfo) && count($sinfo) > 0) {
                 $sizeGB = isset($res['size']) ? round($res['size'] / 1024 / 1024 / 1024, 2) . ' GB' : 'Unknown size';
                 foreach ($sinfo as $s) {
-                    $releaseTitle = trim((string)($res['title'] ?? ''));
+                    $releaseTitle = trim((string)($res['title'] ?? ($s['title'] ?? '')));
                     if ($releaseTitle === '') {
                         $releaseTitle = 'Hellspy stream';
                     }
-                    $quality = trim((string)($s['quality'] ?? ''));
-                    if ($quality === '') {
-                        $quality = 'unknown';
+                    $qualitySourceTitle = $releaseTitle;
+                    $streamMetaTitle = trim((string)($s['title'] ?? ''));
+                    if ($streamMetaTitle !== '') {
+                        $qualitySourceTitle .= ' ' . $streamMetaTitle;
                     }
-                    $streamTitle = $releaseTitle . "\n" . "Kvalita: " . $quality . "\n" . "Velikost: " . $sizeGB;
+                    $displayQuality = build_display_quality($qualitySourceTitle, (string)($s['quality'] ?? ''));
+                    $streamTitle = $releaseTitle . "\n" . "Kvalita: " . $displayQuality . "\n" . "Velikost: " . $sizeGB;
                     $streams[] = [
                         'url' => $s['url'],
-                        'quality' => $s['quality'],
+                        'quality' => $displayQuality,
                         'title' => $streamTitle,
-                        'name' => "Hellspy - " . ($s['quality'] ?? '')
+                        'name' => "Hellspy - " . $displayQuality
                     ];
                 }
             }

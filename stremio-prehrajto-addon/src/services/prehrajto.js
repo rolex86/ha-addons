@@ -111,6 +111,32 @@ function parseYear(text) {
   return parseInt(yearMatch[0], 10);
 }
 
+function parseSizeFromTextBytes(text) {
+  const m = /(\d+(?:[.,]\d+)?)\s*(tb|gb|mb|kb|b)\b/i.exec(String(text || ""));
+  if (!m) return -1;
+
+  const value = parseFloat(m[1].replace(",", "."));
+  if (!Number.isFinite(value) || value <= 0) return -1;
+
+  const unit = m[2].toUpperCase();
+  let mult = 1;
+  if (unit === "KB") mult = 1024;
+  if (unit === "MB") mult = 1024 ** 2;
+  if (unit === "GB") mult = 1024 ** 3;
+  if (unit === "TB") mult = 1024 ** 4;
+
+  return Math.round(value * mult);
+}
+
+function parseSizeTagText(anchorInnerHtml) {
+  const m = /<[^>]+class=(["'])[^"']*\bvideo__tag--size\b[^"']*\1[^>]*>(.*?)<\/[^>]+>/is.exec(
+    String(anchorInnerHtml || ""),
+  );
+  if (!m) return "";
+
+  return normalizeSpaces(decodeHtmlEntities(stripTags(m[2] || "")));
+}
+
 function inferTitleFromUrl(absUrl) {
   try {
     const segs = new URL(absUrl).pathname.split("/").filter(Boolean);
@@ -175,15 +201,20 @@ function parseSearchResultsHtml(html, limit) {
     const url = absolutizeHttpUrl(href);
     if (!url || seen.has(url)) continue;
 
-    const rawTitle = decodeHtmlEntities(stripTags(m[3] || ""));
+    const anchorInnerHtml = m[3] || "";
+    const rawTitle = decodeHtmlEntities(stripTags(anchorInnerHtml));
     const title = normalizeSpaces(rawTitle) || inferTitleFromUrl(url);
     if (!title) continue;
+    const sizeText = parseSizeTagText(anchorInnerHtml);
+    const sizeBytes = parseSizeFromTextBytes(sizeText);
 
     seen.add(url);
     out.push({
       title,
       year: parseYear(title),
       url,
+      sizeText,
+      sizeBytes,
     });
   }
 

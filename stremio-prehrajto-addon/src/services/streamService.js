@@ -207,10 +207,15 @@ function parseDisplayNameFromTitle(sourceTitle, fallbackTitle = "") {
   return raw || fallback;
 }
 
-function buildDisplayTitle({ sourceTitle, parsedSizeBytes, fallbackTitle = "" }) {
+function buildDisplayTitle({
+  sourceTitle,
+  sourceSizeText = "",
+  parsedSizeBytes,
+  fallbackTitle = "",
+}) {
   const name = parseDisplayNameFromTitle(sourceTitle, fallbackTitle);
   const quality = parseQualityFromTitle(sourceTitle);
-  const sizeText = formatBytes(parsedSizeBytes);
+  const sizeText = normalizeSpaces(sourceSizeText) || formatBytes(parsedSizeBytes);
   const lines = [name || normalizeSpaces(sourceTitle) || "Prehraj.to"];
 
   if (quality) lines.push(`Kvalita: ${quality}`);
@@ -706,6 +711,8 @@ export const StreamService = {
             subtitles: resolved.subtitles || [],
             sourceTitle: item.r.title,
             sourceUrl: item.r.url,
+            sourceSizeText: item.r.sizeText || "",
+            sourceSizeBytes: item.r.sizeBytes,
             score: item.s,
           };
         },
@@ -771,10 +778,16 @@ export const StreamService = {
     }
 
     const rankedRows = resolvedForRanking
-      .map((row) => ({
-        ...row,
-        parsedSizeBytes: parseSizeFromTitleBytes(row.sourceTitle),
-      }))
+      .map((row) => {
+        const sizeFromTag = Number(row.sourceSizeBytes);
+        const parsedSizeBytes = Number.isFinite(sizeFromTag) && sizeFromTag > 0
+          ? sizeFromTag
+          : parseSizeFromTitleBytes(row.sourceTitle);
+        return {
+          ...row,
+          parsedSizeBytes,
+        };
+      })
       .sort((a, b) => {
         const sa = Number.isFinite(a.parsedSizeBytes) ? a.parsedSizeBytes : -1;
         const sb = Number.isFinite(b.parsedSizeBytes) ? b.parsedSizeBytes : -1;
@@ -792,6 +805,7 @@ export const StreamService = {
     const streams = rankedRows.map((row) => {
       const title = buildDisplayTitle({
         sourceTitle: row.sourceTitle,
+        sourceSizeText: row.sourceSizeText,
         parsedSizeBytes: row.parsedSizeBytes,
         fallbackTitle: wanted?.wantedTitle || "",
       });

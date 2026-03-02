@@ -1,0 +1,60 @@
+configuration:
+  request_delay_hellspy:
+    name: Hellspy delay (s)
+    description: Minimum delay between requests to api.hellspy.to. Reduce gradually (for example 0.5 -> 0.25) and monitor 429 errors.
+
+  request_delay_wikidata:
+    name: Wikidata delay (s)
+    description: Minimum delay between requests to query.wikidata.org.
+
+  request_delay_other:
+    name: Other hosts delay (s)
+    description: Delay for any other external endpoints.
+
+  max_retries:
+    name: Max retries
+    description: Number of retry attempts for network failures or HTTP 429 responses.
+
+  retry_delay_base:
+    name: Retry base delay (s)
+    description: Base value for exponential backoff between retry attempts.
+
+  max_retry_backoff:
+    name: Max retry backoff (s)
+    description: Upper cap for retry backoff delay.
+
+  request_timeout:
+    name: HTTP timeout (s)
+    description: Maximum duration of a single HTTP request.
+
+  search_time_budget_ms:
+    name: Search budget (ms)
+    description: Maximum time budget for trying search query variants.
+
+  max_search_queries:
+    name: Max search queries
+    description: Maximum number of distinct search queries per stream request.
+
+  stream_resolve_concurrency:
+    name: Resolve concurrency
+    description: Parallel stream resolve workers (hard cap 2).
+
+  stream_request_cache_ttl:
+    name: Stream request cache TTL (s)
+    description: How long to keep short-lived cache for identical stream requests.
+
+  stream_request_inflight_wait_ms:
+    name: In-flight wait (ms)
+    description: How long to wait for an already running identical request to finish.
+
+  stream_request_inflight_poll_ms:
+    name: In-flight poll interval (ms)
+    description: How often to check cache for result of an in-flight identical request.
+
+  log_level:
+    name: Log level
+    description: Add-on logging level (debug/info/warn/error).
+
+  log_http_response_body:
+    name: Log response body
+    description: Enable truncated HTTP response body logging (higher verbosity and I/O).

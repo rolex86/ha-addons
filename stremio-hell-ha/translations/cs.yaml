@@ -1,0 +1,60 @@
+configuration:
+  request_delay_hellspy:
+    name: Delay Hellspy (s)
+    description: Minimální pauza mezi požadavky na api.hellspy.to. Snižuj postupně (např. 0.5 -> 0.25) a sleduj chyby 429.
+
+  request_delay_wikidata:
+    name: Delay Wikidata (s)
+    description: Minimální pauza mezi požadavky na query.wikidata.org.
+
+  request_delay_other:
+    name: Delay ostatní hosty (s)
+    description: Pauza pro případné další externí endpointy.
+
+  max_retries:
+    name: Max počet retry
+    description: Kolikrát opakovat požadavek při síťové chybě nebo HTTP 429.
+
+  retry_delay_base:
+    name: Retry base delay (s)
+    description: Základ pro exponenciální backoff mezi retry pokusy.
+
+  max_retry_backoff:
+    name: Max retry backoff (s)
+    description: Horní limit čekání mezi retry pokusy.
+
+  request_timeout:
+    name: HTTP timeout (s)
+    description: Maximální doba trvání jednoho HTTP požadavku.
+
+  search_time_budget_ms:
+    name: Search budget (ms)
+    description: Maximální časový rozpočet pro zkoušení variant vyhledávání.
+
+  max_search_queries:
+    name: Max search queries
+    description: Maximální počet různých search dotazů na jeden stream request.
+
+  stream_resolve_concurrency:
+    name: Resolve concurrency
+    description: Paralelní resolve streamů (hard cap 2).
+
+  stream_request_cache_ttl:
+    name: Stream request cache TTL (s)
+    description: Jak dlouho držet krátkou cache výsledku identického stream requestu.
+
+  stream_request_inflight_wait_ms:
+    name: In-flight wait (ms)
+    description: Jak dlouho čekat na výsledek už probíhajícího identického requestu.
+
+  stream_request_inflight_poll_ms:
+    name: In-flight poll interval (ms)
+    description: Jak často kontrolovat, jestli už je výsledek probíhajícího requestu v cache.
+
+  log_level:
+    name: Log level
+    description: Úroveň logování addonu (debug/info/warn/error).
+
+  log_http_response_body:
+    name: Logovat response body
+    description: Zapne logování zkráceného HTTP response body (vyšší verbosity a I/O).

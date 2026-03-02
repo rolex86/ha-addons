@@ -24,6 +24,9 @@ const MAX_RETRY_BACKOFF = 8.0;
 const REQUEST_TIMEOUT = 10;
 const SEARCH_TIME_BUDGET_MS = 7000;
 const MAX_SEARCH_QUERIES = 8;
+const STREAM_REQUEST_CACHE_TTL = 120;
+const STREAM_REQUEST_INFLIGHT_WAIT_MS = 8000;
+const STREAM_REQUEST_INFLIGHT_POLL_MS = 100;
 
 $__addonUrl = getenv('ADDON_URL') ?: 'https://example.invalid';
 $__addonContact = getenv('ADDON_CONTACT') ?: 'mailto:admin@example.invalid';
@@ -38,6 +41,7 @@ define('CACHE_DIR', $__DATA_BASE . '/cache_hellspy_php');
 define('LOG_FILE',  $__DATA_BASE . '/addon.log');
 define('RATE_LIMIT_FILE', $__DATA_BASE . '/ratelimit.lock');
 define('RATE_LIMIT_DIR', $__DATA_BASE . '/ratelimit');
+define('INFLIGHT_DIR', $__DATA_BASE . '/inflight');
 
 // ensure cache dir
 if (!is_dir(CACHE_DIR)) {
@@ -45,6 +49,9 @@ if (!is_dir(CACHE_DIR)) {
 }
 if (!is_dir(RATE_LIMIT_DIR)) {
     mkdir(RATE_LIMIT_DIR, 0755, true);
+}
+if (!is_dir(INFLIGHT_DIR)) {
+    mkdir(INFLIGHT_DIR, 0755, true);
 }
 
 function env_float(string $name, float $default, float $min, float $max): float {
@@ -84,6 +91,9 @@ define('RETRY_DELAY_BASE_RUNTIME', env_float('RETRY_DELAY_BASE', RETRY_DELAY_BAS
 define('MAX_RETRY_BACKOFF_RUNTIME', env_float('MAX_RETRY_BACKOFF', MAX_RETRY_BACKOFF, 0.1, 60.0));
 define('SEARCH_TIME_BUDGET_MS_RUNTIME', env_int('SEARCH_TIME_BUDGET_MS', SEARCH_TIME_BUDGET_MS, 500, 30000));
 define('MAX_SEARCH_QUERIES_RUNTIME', env_int('MAX_SEARCH_QUERIES', MAX_SEARCH_QUERIES, 1, 20));
+define('STREAM_REQUEST_CACHE_TTL_RUNTIME', env_int('STREAM_REQUEST_CACHE_TTL', STREAM_REQUEST_CACHE_TTL, 5, 900));
+define('STREAM_REQUEST_INFLIGHT_WAIT_MS_RUNTIME', env_int('STREAM_REQUEST_INFLIGHT_WAIT_MS', STREAM_REQUEST_INFLIGHT_WAIT_MS, 200, 20000));
+define('STREAM_REQUEST_INFLIGHT_POLL_MS_RUNTIME', env_int('STREAM_REQUEST_INFLIGHT_POLL_MS', STREAM_REQUEST_INFLIGHT_POLL_MS, 20, 1000));
 
 // ---------- Logging ----------
 function log_msg(string $level, string $msg) {
@@ -441,8 +451,61 @@ function get_stream_url(string $id,string $fileHash) {
     }
 }
 
+function build_stream_request_cache_key(array $body): string {
+    $normalized = [
+        'type' => (string)($body['type'] ?? ''),
+        'id' => (string)($body['id'] ?? ''),
+        'name' => (string)($body['name'] ?? ''),
+        'year' => (string)($body['year'] ?? ''),
+        'episode' => $body['episode'] ?? null
+    ];
+    $json = json_encode($normalized, JSON_UNESCAPED_SLASHES);
+    if ($json === false) {
+        $json = serialize($normalized);
+    }
+    return md5((string)$json);
+}
+
+function wait_for_cached_value(string $cacheKey, int $waitMs, int $pollMs) {
+    $deadline = now_float() + ($waitMs / 1000.0);
+    while (now_float() < $deadline) {
+        $cached = cache_get($cacheKey);
+        if ($cached !== null) return $cached;
+        usleep($pollMs * 1000);
+    }
+    return null;
+}
+
+function with_singleflight_cache(string $lockKey, string $cacheKey, int $cacheTtl, callable $producer) {
+    $cached = cache_get($cacheKey);
+    if ($cached !== null) return $cached;
+
+    $lockPath = INFLIGHT_DIR . '/' . md5($lockKey) . '.lock';
+    $fp = @fopen($lockPath, 'c+');
+    if ($fp && @flock($fp, LOCK_EX | LOCK_NB)) {
+        try {
+            $cached = cache_get($cacheKey);
+            if ($cached !== null) return $cached;
+            $value = $producer();
+            cache_set($cacheKey, $value, $cacheTtl);
+            return $value;
+        } finally {
+            flock($fp, LOCK_UN);
+            fclose($fp);
+        }
+    }
+    if ($fp) fclose($fp);
+
+    $waited = wait_for_cached_value($cacheKey, STREAM_REQUEST_INFLIGHT_WAIT_MS_RUNTIME, STREAM_REQUEST_INFLIGHT_POLL_MS_RUNTIME);
+    if ($waited !== null) return $waited;
+
+    $value = $producer();
+    cache_set($cacheKey, $value, $cacheTtl);
+    return $value;
+}
+
 // ---------- Main Stream Logic ----------
-function handle_stream_request(array $body): array {
+function handle_stream_request_impl(array $body): array {
     $type = $body['type'] ?? null;
     $id = $body['id'] ?? null;
     $name = $body['name'] ?? null;
@@ -659,6 +722,19 @@ function handle_stream_request(array $body): array {
 
     log_info("Returning " . count($streams) . " streams");
     return ['streams' => $streams];
+}
+
+function handle_stream_request(array $body): array {
+    $requestHash = build_stream_request_cache_key($body);
+    $cacheKey = 'streamreq:' . $requestHash;
+    $lockKey = 'streamreq-lock:' . $requestHash;
+    $result = with_singleflight_cache($lockKey, $cacheKey, STREAM_REQUEST_CACHE_TTL_RUNTIME, function () use ($body) {
+        return handle_stream_request_impl($body);
+    });
+    if (!is_array($result) || !isset($result['streams']) || !is_array($result['streams'])) {
+        return ['streams' => []];
+    }
+    return $result;
 }
 
 // ---------- HTTP Routing ----------

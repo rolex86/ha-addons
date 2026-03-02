@@ -90,11 +90,27 @@ For production deployment, we recommend using **[endora.cz](https://www.endora.c
 
 ## Configuration
 
-Key configuration constants in `addon.php`:
-- `CACHE_TTL`: Cache time-to-live (default: 3600 seconds)
-- `REQUEST_DELAY`: Rate limiting delay (default: 1.0 seconds)
-- `MAX_RETRIES`: Maximum retry attempts (default: 3)
-- `REQUEST_TIMEOUT`: HTTP request timeout (default: 10 seconds)
+Runtime tuning is configurable via environment variables:
+
+- `REQUEST_DELAY_HELLSPY` (default `0.5`) - rate limit delay for `api.hellspy.to`
+- `REQUEST_DELAY_WIKIDATA` (default `1.0`) - rate limit delay for `query.wikidata.org`
+- `REQUEST_DELAY_OTHER` (default `0.25`) - delay for other hosts
+- `MAX_RETRIES` (default `3`) - retries for network errors and HTTP `429`
+- `RETRY_DELAY_BASE` (default `2.0`) - exponential backoff base
+- `MAX_RETRY_BACKOFF` (default `8.0`) - max backoff seconds
+- `REQUEST_TIMEOUT` (default `10`) - HTTP timeout in seconds
+- `SEARCH_TIME_BUDGET_MS` (default `7000`) - max time budget for search-variant tries
+- `MAX_SEARCH_QUERIES` (default `8`) - max number of search queries per request
+- `STREAM_RESOLVE_CONCURRENCY` (default `2`, hard cap `2`) - parallel resolve workers
+- `STREAM_REQUEST_CACHE_TTL` (default `120`) - short cache for deduplicated stream requests
+- `LOG_LEVEL` (`debug|info|warn|error`) - production default is `warn`
+- `LOG_HTTP_RESPONSE_BODY` (default `false`) - include truncated response body logging
+
+Suggested safe rollout for Hellspy delay:
+
+1. Start with `REQUEST_DELAY_HELLSPY=0.5`.
+2. Monitor `429` and resolve failures in logs.
+3. Lower to `0.25` only if error rate stays stable.
 
 ## API Endpoints
 

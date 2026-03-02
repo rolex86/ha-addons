@@ -29,6 +29,9 @@ const STREAM_REQUEST_INFLIGHT_WAIT_MS = 8000;
 const STREAM_REQUEST_INFLIGHT_POLL_MS = 100;
 const STREAM_RESOLVE_CONCURRENCY = 2;
 const STREAM_RESOLVE_CONCURRENCY_HARD_CAP = 2;
+const LOG_LEVEL_DEFAULT = 'info';
+const LOG_LEVEL_DEFAULT_PRODUCTION = 'warn';
+const LOG_HTTP_RESPONSE_BODY = false;
 
 $__addonUrl = getenv('ADDON_URL') ?: 'https://example.invalid';
 $__addonContact = getenv('ADDON_CONTACT') ?: 'mailto:admin@example.invalid';
@@ -75,6 +78,15 @@ function env_int(string $name, int $default, int $min, int $max): int {
     return $val;
 }
 
+function env_bool(string $name, bool $default): bool {
+    $raw = getenv($name);
+    if ($raw === false) return $default;
+    $v = strtolower(trim((string)$raw));
+    if (in_array($v, ['1', 'true', 'yes', 'on'], true)) return true;
+    if (in_array($v, ['0', 'false', 'no', 'off'], true)) return false;
+    return $default;
+}
+
 $__hasLegacyDelay = getenv('REQUEST_DELAY') !== false;
 $__legacyDelay = env_float('REQUEST_DELAY', REQUEST_DELAY, 0.0, 10.0);
 $__defaultHellspyDelay = $__hasLegacyDelay ? $__legacyDelay : REQUEST_DELAY_HELLSPY_DEFAULT;
@@ -101,11 +113,34 @@ define(
     env_int('STREAM_RESOLVE_CONCURRENCY', STREAM_RESOLVE_CONCURRENCY, 1, STREAM_RESOLVE_CONCURRENCY_HARD_CAP)
 );
 
+$__appEnv = strtolower(trim((string)(getenv('APP_ENV') ?: getenv('ENV') ?: '')));
+$__defaultLogLevel = $__appEnv === 'production' ? LOG_LEVEL_DEFAULT_PRODUCTION : LOG_LEVEL_DEFAULT;
+$__rawLogLevel = strtolower(trim((string)(getenv('LOG_LEVEL') ?: $__defaultLogLevel)));
+if (!in_array($__rawLogLevel, ['debug', 'info', 'warn', 'error'], true)) {
+    $__rawLogLevel = $__defaultLogLevel;
+}
+define('LOG_LEVEL_RUNTIME', $__rawLogLevel);
+define('LOG_HTTP_RESPONSE_BODY_RUNTIME', env_bool('LOG_HTTP_RESPONSE_BODY', LOG_HTTP_RESPONSE_BODY));
+
 // ---------- Logging ----------
+function log_level_priority(string $level): int {
+    $lvl = strtoupper(trim($level));
+    if ($lvl === 'DEBUG') return 10;
+    if ($lvl === 'INFO') return 20;
+    if ($lvl === 'WARN') return 30;
+    return 40; // ERROR and fallback
+}
+
+function should_log(string $level): bool {
+    return log_level_priority($level) >= log_level_priority(LOG_LEVEL_RUNTIME);
+}
+
 function log_msg(string $level, string $msg) {
+    if (!should_log($level)) return;
     $entry = "[" . date('Y-m-d H:i:s') . "][$level] $msg\n";
     file_put_contents(LOG_FILE, $entry, FILE_APPEND | LOCK_EX);
 }
+function log_debug(string $msg) { log_msg('DEBUG', $msg); }
 function log_info(string $msg) { log_msg('INFO', $msg); }
 function log_warn(string $msg) { log_msg('WARN', $msg); }
 function log_err(string $msg)  { log_msg('ERROR', $msg); }
@@ -325,7 +360,9 @@ function make_rate_limited_request(string $url, array $opts = [], int $retries =
     }
     if ($httpCode>=200 && $httpCode<300) {
         $decoded = json_decode($result,true);
-        log_info("HTTP response (truncated): " . substr($result,0,500));
+        if (LOG_HTTP_RESPONSE_BODY_RUNTIME) {
+            log_debug("HTTP response (truncated): " . substr($result,0,500));
+        }
         return $decoded ?? $result;
     }
     $msg = "HTTP $httpCode for $url"; log_err($msg);

@@ -14,9 +14,13 @@ const CACHE_TTL_WIKIDATA = 604800; // 7 days
 const CACHE_TTL_SEARCH = 3600; // 1 hour
 const CACHE_TTL_STREAM = 900; // 15 minutes
 const CACHE_TTL_STREAM_NEGATIVE = 300; // 5 minutes
-const REQUEST_DELAY = 1.0; // seconds
+const REQUEST_DELAY = 1.0; // legacy fallback seconds
+const REQUEST_DELAY_HELLSPY_DEFAULT = 0.5; // step-down default, can be reduced to 0.25 after monitoring
+const REQUEST_DELAY_WIKIDATA_DEFAULT = 1.0;
+const REQUEST_DELAY_OTHER_DEFAULT = 0.25;
 const MAX_RETRIES = 3;
 const RETRY_DELAY_BASE = 2.0;
+const MAX_RETRY_BACKOFF = 8.0;
 const REQUEST_TIMEOUT = 10;
 
 $__addonUrl = getenv('ADDON_URL') ?: 'https://example.invalid';
@@ -31,11 +35,51 @@ if (!is_dir($__DATA_BASE)) { @mkdir($__DATA_BASE, 0755, true); }
 define('CACHE_DIR', $__DATA_BASE . '/cache_hellspy_php');
 define('LOG_FILE',  $__DATA_BASE . '/addon.log');
 define('RATE_LIMIT_FILE', $__DATA_BASE . '/ratelimit.lock');
+define('RATE_LIMIT_DIR', $__DATA_BASE . '/ratelimit');
 
 // ensure cache dir
 if (!is_dir(CACHE_DIR)) {
     mkdir(CACHE_DIR, 0755, true);
 }
+if (!is_dir(RATE_LIMIT_DIR)) {
+    mkdir(RATE_LIMIT_DIR, 0755, true);
+}
+
+function env_float(string $name, float $default, float $min, float $max): float {
+    $raw = getenv($name);
+    if ($raw === false) return $default;
+    $val = (float)$raw;
+    if (!is_finite($val)) return $default;
+    if ($val < $min) return $min;
+    if ($val > $max) return $max;
+    return $val;
+}
+
+function env_int(string $name, int $default, int $min, int $max): int {
+    $raw = getenv($name);
+    if ($raw === false) return $default;
+    $val = (int)$raw;
+    if ($val < $min) return $min;
+    if ($val > $max) return $max;
+    return $val;
+}
+
+$__hasLegacyDelay = getenv('REQUEST_DELAY') !== false;
+$__legacyDelay = env_float('REQUEST_DELAY', REQUEST_DELAY, 0.0, 10.0);
+$__defaultHellspyDelay = $__hasLegacyDelay ? $__legacyDelay : REQUEST_DELAY_HELLSPY_DEFAULT;
+$__defaultWikidataDelay = $__hasLegacyDelay ? $__legacyDelay : REQUEST_DELAY_WIKIDATA_DEFAULT;
+$__defaultOtherDelay = $__hasLegacyDelay ? min($__legacyDelay, REQUEST_DELAY_OTHER_DEFAULT) : REQUEST_DELAY_OTHER_DEFAULT;
+
+define(
+    'REQUEST_DELAY_HELLSPY',
+    env_float('REQUEST_DELAY_HELLSPY', env_float('HELLSPY_REQUEST_DELAY', $__defaultHellspyDelay, 0.0, 10.0), 0.0, 10.0)
+);
+define('REQUEST_DELAY_WIKIDATA', env_float('REQUEST_DELAY_WIKIDATA', $__defaultWikidataDelay, 0.0, 10.0));
+define('REQUEST_DELAY_OTHER', env_float('REQUEST_DELAY_OTHER', $__defaultOtherDelay, 0.0, 10.0));
+define('MAX_RETRIES_RUNTIME', env_int('MAX_RETRIES', MAX_RETRIES, 0, 8));
+define('REQUEST_TIMEOUT_RUNTIME', env_int('REQUEST_TIMEOUT', REQUEST_TIMEOUT, 2, 60));
+define('RETRY_DELAY_BASE_RUNTIME', env_float('RETRY_DELAY_BASE', RETRY_DELAY_BASE, 0.1, 30.0));
+define('MAX_RETRY_BACKOFF_RUNTIME', env_float('MAX_RETRY_BACKOFF', MAX_RETRY_BACKOFF, 0.1, 60.0));
 
 // ---------- Logging ----------
 function log_msg(string $level, string $msg) {
@@ -165,8 +209,30 @@ function build_display_quality(string $releaseTitle, ?string $apiQuality): strin
 }
 
 // ---------- HTTP Requests ----------
-function enforce_rate_limit(): void {
-    $fp = @fopen(RATE_LIMIT_FILE, 'c+');
+function host_from_url(string $url): string {
+    $host = parse_url($url, PHP_URL_HOST);
+    if (!is_string($host) || $host === '') return 'unknown';
+    return strtolower($host);
+}
+
+function request_delay_for_host(string $host): float {
+    if ($host === 'api.hellspy.to') return REQUEST_DELAY_HELLSPY;
+    if ($host === 'query.wikidata.org') return REQUEST_DELAY_WIKIDATA;
+    return REQUEST_DELAY_OTHER;
+}
+
+function rate_limit_file_for_host(string $host): string {
+    $safeHost = preg_replace('/[^a-z0-9._-]+/i', '_', $host);
+    if (!is_string($safeHost) || $safeHost === '') {
+        $safeHost = 'unknown';
+    }
+    return RATE_LIMIT_DIR . '/ratelimit_' . $safeHost . '.lock';
+}
+
+function enforce_rate_limit_for_host(string $host, float $delaySeconds): void {
+    if ($delaySeconds <= 0.0) return;
+
+    $fp = @fopen(rate_limit_file_for_host($host), 'c+');
     if (!$fp) return;
     if (!@flock($fp, LOCK_EX)) {
         fclose($fp);
@@ -179,8 +245,8 @@ function enforce_rate_limit(): void {
     }
     $now = now_float();
     $elapsed = $now - $last;
-    if ($elapsed < REQUEST_DELAY) {
-        usleep((int)((REQUEST_DELAY - $elapsed) * 1e6));
+    if ($elapsed < $delaySeconds) {
+        usleep((int)(($delaySeconds - $elapsed) * 1e6));
         $now = now_float();
     }
     ftruncate($fp, 0);
@@ -191,19 +257,29 @@ function enforce_rate_limit(): void {
     fclose($fp);
 }
 
-function make_rate_limited_request(string $url, array $opts = [], int $retries = 0) {
-    enforce_rate_limit();
+function retry_sleep_seconds(int $retry): float {
+    $base = RETRY_DELAY_BASE_RUNTIME * pow(2, $retry);
+    $capped = min($base, MAX_RETRY_BACKOFF_RUNTIME);
+    $jitter = mt_rand(0, 250) / 1000.0;
+    return $capped + $jitter;
+}
 
-    $ch = curl_init();
+function make_rate_limited_request(string $url, array $opts = [], int $retries = 0) {
     $headers = $opts['headers'] ?? [];
     $params = $opts['params'] ?? null;
     if ($params && is_array($params)) {
         $url .= (strpos($url,'?')===false?'?':'&') . http_build_query($params);
     }
+
+    $host = host_from_url($url);
+    $requestDelay = request_delay_for_host($host);
+    enforce_rate_limit_for_host($host, $requestDelay);
+
+    $ch = curl_init();
     curl_setopt_array($ch, [
         CURLOPT_URL => $url,
         CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT => REQUEST_TIMEOUT,
+        CURLOPT_TIMEOUT => REQUEST_TIMEOUT_RUNTIME,
         CURLOPT_FOLLOWLOCATION => true,
         CURLOPT_HTTPHEADER => $headers
     ]);
@@ -217,14 +293,14 @@ function make_rate_limited_request(string $url, array $opts = [], int $retries =
     if ($result === false) {
         $err = $curlErr ?: 'Unknown cURL error';
         log_err("HTTP request error for $url: $err");
-        if ($retries < MAX_RETRIES) {
-            sleep((int)(RETRY_DELAY_BASE*pow(2,$retries)));
+        if ($retries < MAX_RETRIES_RUNTIME) {
+            usleep((int)(retry_sleep_seconds($retries) * 1e6));
             return make_rate_limited_request($url,$opts,$retries+1);
         }
         throw new RuntimeException("HTTP request failed: $err");
     }
-    if ($httpCode===429 && $retries<MAX_RETRIES) {
-        sleep((int)(RETRY_DELAY_BASE*pow(2,$retries)));
+    if ($httpCode===429 && $retries<MAX_RETRIES_RUNTIME) {
+        usleep((int)(retry_sleep_seconds($retries) * 1e6));
         return make_rate_limited_request($url,$opts,$retries+1);
     }
     if ($httpCode>=200 && $httpCode<300) {

@@ -22,6 +22,8 @@ const MAX_RETRIES = 3;
 const RETRY_DELAY_BASE = 2.0;
 const MAX_RETRY_BACKOFF = 8.0;
 const REQUEST_TIMEOUT = 10;
+const SEARCH_TIME_BUDGET_MS = 7000;
+const MAX_SEARCH_QUERIES = 8;
 
 $__addonUrl = getenv('ADDON_URL') ?: 'https://example.invalid';
 $__addonContact = getenv('ADDON_CONTACT') ?: 'mailto:admin@example.invalid';
@@ -80,6 +82,8 @@ define('MAX_RETRIES_RUNTIME', env_int('MAX_RETRIES', MAX_RETRIES, 0, 8));
 define('REQUEST_TIMEOUT_RUNTIME', env_int('REQUEST_TIMEOUT', REQUEST_TIMEOUT, 2, 60));
 define('RETRY_DELAY_BASE_RUNTIME', env_float('RETRY_DELAY_BASE', RETRY_DELAY_BASE, 0.1, 30.0));
 define('MAX_RETRY_BACKOFF_RUNTIME', env_float('MAX_RETRY_BACKOFF', MAX_RETRY_BACKOFF, 0.1, 60.0));
+define('SEARCH_TIME_BUDGET_MS_RUNTIME', env_int('SEARCH_TIME_BUDGET_MS', SEARCH_TIME_BUDGET_MS, 500, 30000));
+define('MAX_SEARCH_QUERIES_RUNTIME', env_int('MAX_SEARCH_QUERIES', MAX_SEARCH_QUERIES, 1, 20));
 
 // ---------- Logging ----------
 function log_msg(string $level, string $msg) {
@@ -498,8 +502,30 @@ function handle_stream_request(array $body): array {
     // Remove duplicates
     $searchQueries = array_unique(array_filter($searchQueries));
 
+    $searchStartedAt = now_float();
+    $searchDeadline = $searchStartedAt + (SEARCH_TIME_BUDGET_MS_RUNTIME / 1000.0);
+    $searchAttempts = 0;
+    $searchedKeys = [];
+    $searchStopped = false;
+
     $results = [];
     foreach ($searchQueries as $query) {
+        $query = trim((string)$query);
+        $queryKey = strtolower($query);
+        if ($queryKey === '' || isset($searchedKeys[$queryKey])) continue;
+        if ($searchAttempts >= MAX_SEARCH_QUERIES_RUNTIME) {
+            log_warn("Search query cap reached (max=" . MAX_SEARCH_QUERIES_RUNTIME . ")");
+            $searchStopped = true;
+            break;
+        }
+        if (now_float() >= $searchDeadline) {
+            log_warn("Search time budget reached (" . SEARCH_TIME_BUDGET_MS_RUNTIME . " ms)");
+            $searchStopped = true;
+            break;
+        }
+        $searchedKeys[$queryKey] = true;
+        $searchAttempts++;
+
         $res = search_hellspy($query);
         if (!empty($res)) {
             $results = $res;
@@ -508,7 +534,16 @@ function handle_stream_request(array $body): array {
     }
 
     // If still no results and type=series, try alternate title from Wikidata
-    if (empty($results) && $type === 'series' && $season !== null && $episodeNumber !== null && $wikidata && !empty($wikidata['enTitle']) && $wikidata['enTitle'] !== $name) {
+    if (
+        empty($results)
+        && !$searchStopped
+        && $type === 'series'
+        && $season !== null
+        && $episodeNumber !== null
+        && $wikidata
+        && !empty($wikidata['enTitle'])
+        && $wikidata['enTitle'] !== $name
+    ) {
         $altName = $wikidata['enTitle'];
         $altSimplified = explode(':', $altName)[0] ?? $altName;
         $seasonStr = str_pad((string)$season, 2, '0', STR_PAD_LEFT);
@@ -524,6 +559,22 @@ function handle_stream_request(array $body): array {
         ];
 
         foreach ($altQueries as $query) {
+            $query = trim((string)$query);
+            $queryKey = strtolower($query);
+            if ($queryKey === '' || isset($searchedKeys[$queryKey])) continue;
+            if ($searchAttempts >= MAX_SEARCH_QUERIES_RUNTIME) {
+                log_warn("Search query cap reached (max=" . MAX_SEARCH_QUERIES_RUNTIME . ")");
+                $searchStopped = true;
+                break;
+            }
+            if (now_float() >= $searchDeadline) {
+                log_warn("Search time budget reached (" . SEARCH_TIME_BUDGET_MS_RUNTIME . " ms)");
+                $searchStopped = true;
+                break;
+            }
+            $searchedKeys[$queryKey] = true;
+            $searchAttempts++;
+
             $res = search_hellspy($query);
             if (!empty($res)) {
                 $results = $res;

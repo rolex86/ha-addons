@@ -5,7 +5,7 @@ declare(strict_types=1);
 
 // ---------- CONFIG ----------
 const ADDON_ID = "org.stremio.hellspy";
-const ADDON_VERSION = "0.1.10";
+const ADDON_VERSION = "0.1.11";
 const ADDON_NAME = "Hellspy";
 const ADDON_DESCRIPTION = "Hellspy.to addon for Stremio";
 

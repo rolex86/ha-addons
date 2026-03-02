@@ -1,4 +1,30 @@
-#!/usr/bin/with-contenv bash
+#!/usr/bin/with-contenv bashio
 set -euo pipefail
+
+export REQUEST_DELAY_HELLSPY="$(bashio::config 'request_delay_hellspy')"
+export REQUEST_DELAY_WIKIDATA="$(bashio::config 'request_delay_wikidata')"
+export REQUEST_DELAY_OTHER="$(bashio::config 'request_delay_other')"
+export MAX_RETRIES="$(bashio::config 'max_retries')"
+export RETRY_DELAY_BASE="$(bashio::config 'retry_delay_base')"
+export MAX_RETRY_BACKOFF="$(bashio::config 'max_retry_backoff')"
+export REQUEST_TIMEOUT="$(bashio::config 'request_timeout')"
+export SEARCH_TIME_BUDGET_MS="$(bashio::config 'search_time_budget_ms')"
+export MAX_SEARCH_QUERIES="$(bashio::config 'max_search_queries')"
+export STREAM_RESOLVE_CONCURRENCY="$(bashio::config 'stream_resolve_concurrency')"
+export STREAM_REQUEST_CACHE_TTL="$(bashio::config 'stream_request_cache_ttl')"
+export STREAM_REQUEST_INFLIGHT_WAIT_MS="$(bashio::config 'stream_request_inflight_wait_ms')"
+export STREAM_REQUEST_INFLIGHT_POLL_MS="$(bashio::config 'stream_request_inflight_poll_ms')"
+
+LOG_LEVEL_RAW="$(bashio::config 'log_level')"
+if [[ "${LOG_LEVEL_RAW}" == "warning" ]]; then
+  LOG_LEVEL_RAW="warn"
+fi
+export LOG_LEVEL="${LOG_LEVEL_RAW}"
+export LOG_HTTP_RESPONSE_BODY="$(bashio::config 'log_http_response_body')"
+export APP_ENV="production"
+
+bashio::log.info "Hellspy delays: hellspy=${REQUEST_DELAY_HELLSPY}s wikidata=${REQUEST_DELAY_WIKIDATA}s other=${REQUEST_DELAY_OTHER}s"
+bashio::log.info "Search budget: ${SEARCH_TIME_BUDGET_MS}ms, max queries: ${MAX_SEARCH_QUERIES}, resolve concurrency: ${STREAM_RESOLVE_CONCURRENCY}"
+bashio::log.info "Retries: ${MAX_RETRIES}, timeout: ${REQUEST_TIMEOUT}s, log level: ${LOG_LEVEL}"
 
 exec php-fpm82 -F

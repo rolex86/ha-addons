@@ -1,7 +1,7 @@
 name: "Stremio Hellspy (private) — Filip"
 slug: "stremio_hellspy"
 description: "Privátní Stremio addon (Hellspy.to) běžící v Home Assistant OS"
-version: "0.1.10"
+version: "0.1.11"
 url: "https://github.com/<your-user>/<your-repo>"
 arch:
   - amd64
@@ -19,3 +19,37 @@ ports_description:
   80/tcp: "HTTP (manifest.json)"
 
 webui: "http://[HOST]:[PORT:18099]/manifest.json"
+
+options:
+  request_delay_hellspy: "0.5"
+  request_delay_wikidata: "1.0"
+  request_delay_other: "0.25"
+  max_retries: 3
+  retry_delay_base: "2.0"
+  max_retry_backoff: "8.0"
+  request_timeout: 10
+  search_time_budget_ms: 7000
+  max_search_queries: 8
+  stream_resolve_concurrency: 2
+  stream_request_cache_ttl: 120
+  stream_request_inflight_wait_ms: 8000
+  stream_request_inflight_poll_ms: 100
+  log_level: "warn"
+  log_http_response_body: false
+
+schema:
+  request_delay_hellspy: str
+  request_delay_wikidata: str
+  request_delay_other: str
+  max_retries: int(0,8)
+  retry_delay_base: str
+  max_retry_backoff: str
+  request_timeout: int(2,60)
+  search_time_budget_ms: int(500,30000)
+  max_search_queries: int(1,20)
+  stream_resolve_concurrency: int(1,2)
+  stream_request_cache_ttl: int(5,900)
+  stream_request_inflight_wait_ms: int(200,20000)
+  stream_request_inflight_poll_ms: int(20,1000)
+  log_level: list(debug|info|warn|error|warning)
+  log_http_response_body: bool

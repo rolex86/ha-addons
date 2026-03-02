@@ -27,6 +27,8 @@ const MAX_SEARCH_QUERIES = 8;
 const STREAM_REQUEST_CACHE_TTL = 120;
 const STREAM_REQUEST_INFLIGHT_WAIT_MS = 8000;
 const STREAM_REQUEST_INFLIGHT_POLL_MS = 100;
+const STREAM_RESOLVE_CONCURRENCY = 2;
+const STREAM_RESOLVE_CONCURRENCY_HARD_CAP = 2;
 
 $__addonUrl = getenv('ADDON_URL') ?: 'https://example.invalid';
 $__addonContact = getenv('ADDON_CONTACT') ?: 'mailto:admin@example.invalid';
@@ -94,6 +96,10 @@ define('MAX_SEARCH_QUERIES_RUNTIME', env_int('MAX_SEARCH_QUERIES', MAX_SEARCH_QU
 define('STREAM_REQUEST_CACHE_TTL_RUNTIME', env_int('STREAM_REQUEST_CACHE_TTL', STREAM_REQUEST_CACHE_TTL, 5, 900));
 define('STREAM_REQUEST_INFLIGHT_WAIT_MS_RUNTIME', env_int('STREAM_REQUEST_INFLIGHT_WAIT_MS', STREAM_REQUEST_INFLIGHT_WAIT_MS, 200, 20000));
 define('STREAM_REQUEST_INFLIGHT_POLL_MS_RUNTIME', env_int('STREAM_REQUEST_INFLIGHT_POLL_MS', STREAM_REQUEST_INFLIGHT_POLL_MS, 20, 1000));
+define(
+    'STREAM_RESOLVE_CONCURRENCY_RUNTIME',
+    env_int('STREAM_RESOLVE_CONCURRENCY', STREAM_RESOLVE_CONCURRENCY, 1, STREAM_RESOLVE_CONCURRENCY_HARD_CAP)
+);
 
 // ---------- Logging ----------
 function log_msg(string $level, string $msg) {
@@ -413,6 +419,27 @@ function search_hellspy(string $query) {
     }
 }
 
+function parse_streams_from_video_response(string $id, array $resp): array {
+    $title = (string)($resp['title'] ?? '');
+    $duration = (int)($resp['duration'] ?? 0);
+    log_info("Video: \"$title\" duration $duration s");
+
+    $conversions = $resp['conversions'] ?? [];
+    if (empty($conversions) && !empty($resp['download'])) {
+        return [['url' => $resp['download'], 'quality' => 'original', 'title' => $title]];
+    }
+    if (empty($conversions) && empty($resp['download'])) {
+        return [];
+    }
+
+    $streams = [];
+    foreach ($conversions as $q => $u) {
+        $quality = is_numeric($q) ? ($q . 'p') : (string)$q;
+        $streams[] = ['url' => $u, 'quality' => $quality, 'title' => $title];
+    }
+    return $streams;
+}
+
 function get_stream_url(string $id,string $fileHash) {
     $cacheKey="stream:$id:$fileHash"; $cached=cache_get($cacheKey);
     if($cached!==null) return $cached;
@@ -424,24 +451,8 @@ function get_stream_url(string $id,string $fileHash) {
             cache_set($cacheKey, [], CACHE_TTL_STREAM_NEGATIVE);
             return [];
         }
-        $title=$resp['title']??''; $duration=$resp['duration']??0;
-        log_info("Video: \"$title\" duration $duration s");
-        $conversions=$resp['conversions']??[];
-        if(empty($conversions)&&!empty($resp['download'])) {
-            $streams=[['url'=>$resp['download'],'quality'=>'original','title'=>$title]];
-            cache_set($cacheKey,$streams, CACHE_TTL_STREAM);
-            return $streams;
-        }
-        if (empty($conversions) && empty($resp['download'])) {
-            cache_set($cacheKey, [], CACHE_TTL_STREAM_NEGATIVE);
-            return [];
-        }
-        $streams=[];
-        foreach($conversions as $q=>$u) {
-            $quality = is_numeric($q) ? ($q . 'p') : (string)$q;
-            $streams[]=['url'=>$u,'quality'=>$quality,'title'=>$title];
-        }
-        cache_set($cacheKey,$streams, CACHE_TTL_STREAM);
+        $streams = parse_streams_from_video_response($id, $resp);
+        cache_set($cacheKey, $streams, empty($streams) ? CACHE_TTL_STREAM_NEGATIVE : CACHE_TTL_STREAM);
         log_info("Found ".count($streams)." qualities for $id");
         return $streams;
     } catch(Throwable $e){
@@ -449,6 +460,131 @@ function get_stream_url(string $id,string $fileHash) {
         cache_set($cacheKey, [], CACHE_TTL_STREAM_NEGATIVE);
         return [];
     }
+}
+
+function get_stream_urls_batch(array $items, int $concurrency): array {
+    $out = [];
+    $pending = [];
+
+    foreach ($items as $item) {
+        $id = trim((string)($item['id'] ?? ''));
+        $fileHash = trim((string)($item['fileHash'] ?? ''));
+        if ($id === '' || $fileHash === '') continue;
+
+        $pairKey = $id . ':' . $fileHash;
+        if (isset($out[$pairKey]) || isset($pending[$pairKey])) continue;
+
+        $cacheKey = "stream:$id:$fileHash";
+        $cached = cache_get($cacheKey);
+        if ($cached !== null) {
+            $out[$pairKey] = is_array($cached) ? $cached : [];
+            continue;
+        }
+        $pending[$pairKey] = ['id' => $id, 'fileHash' => $fileHash];
+    }
+
+    if (empty($pending)) return $out;
+
+    $concurrency = max(1, min($concurrency, STREAM_RESOLVE_CONCURRENCY_HARD_CAP));
+    if ($concurrency <= 1 || count($pending) === 1) {
+        foreach ($pending as $pairKey => $meta) {
+            $out[$pairKey] = get_stream_url($meta['id'], $meta['fileHash']);
+        }
+        return $out;
+    }
+
+    $queue = array_values($pending);
+    $mh = curl_multi_init();
+    $active = [];
+    $failed = [];
+    $nextIndex = 0;
+    $running = 0;
+
+    $addHandle = function (array $meta) use ($mh, &$active): void {
+        $id = $meta['id'];
+        $fileHash = $meta['fileHash'];
+        $url = "https://api.hellspy.to/gw/video/$id/$fileHash";
+        $host = host_from_url($url);
+        enforce_rate_limit_for_host($host, request_delay_for_host($host));
+
+        $ch = curl_init();
+        curl_setopt_array($ch, [
+            CURLOPT_URL => $url,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => REQUEST_TIMEOUT_RUNTIME,
+            CURLOPT_FOLLOWLOCATION => true
+        ]);
+        curl_multi_add_handle($mh, $ch);
+        $active[(int)$ch] = ['ch' => $ch, 'id' => $id, 'fileHash' => $fileHash, 'url' => $url];
+    };
+
+    while ($nextIndex < count($queue) && count($active) < $concurrency) {
+        $addHandle($queue[$nextIndex]);
+        $nextIndex++;
+    }
+
+    do {
+        do {
+            $status = curl_multi_exec($mh, $running);
+        } while ($status === CURLM_CALL_MULTI_PERFORM);
+
+        while ($info = curl_multi_info_read($mh)) {
+            $ch = $info['handle'];
+            $meta = $active[(int)$ch] ?? null;
+            $content = curl_multi_getcontent($ch);
+            $curlErrNo = curl_errno($ch);
+            $curlErr = curl_error($ch);
+            $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+
+            if ($meta) {
+                $id = $meta['id'];
+                $fileHash = $meta['fileHash'];
+                $pairKey = $id . ':' . $fileHash;
+                $cacheKey = "stream:$id:$fileHash";
+
+                if ($curlErrNo === 0 && $httpCode >= 200 && $httpCode < 300) {
+                    $decoded = json_decode((string)$content, true);
+                    if (is_array($decoded)) {
+                        $streams = parse_streams_from_video_response($id, $decoded);
+                        cache_set($cacheKey, $streams, empty($streams) ? CACHE_TTL_STREAM_NEGATIVE : CACHE_TTL_STREAM);
+                        $out[$pairKey] = $streams;
+                    } else {
+                        $failed[$pairKey] = ['id' => $id, 'fileHash' => $fileHash, 'why' => 'non-json'];
+                    }
+                } else {
+                    $failed[$pairKey] = ['id' => $id, 'fileHash' => $fileHash, 'why' => "http=$httpCode curl=$curlErrNo $curlErr"];
+                }
+            }
+
+            curl_multi_remove_handle($mh, $ch);
+            curl_close($ch);
+            if ($meta) unset($active[(int)$ch]);
+
+            if ($nextIndex < count($queue)) {
+                $addHandle($queue[$nextIndex]);
+                $nextIndex++;
+            }
+        }
+
+        if ($running > 0) {
+            curl_multi_select($mh, 1.0);
+        }
+    } while ($running > 0 || !empty($active));
+
+    curl_multi_close($mh);
+
+    foreach ($failed as $pairKey => $meta) {
+        log_warn("Batch resolve fallback for {$meta['id']} ({$meta['why']})");
+        $out[$pairKey] = get_stream_url($meta['id'], $meta['fileHash']);
+    }
+
+    foreach ($pending as $pairKey => $meta) {
+        if (!isset($out[$pairKey])) {
+            $out[$pairKey] = get_stream_url($meta['id'], $meta['fileHash']);
+        }
+    }
+
+    return $out;
 }
 
 function build_stream_request_cache_key(array $body): string {
@@ -686,13 +822,24 @@ function handle_stream_request_impl(array $body): array {
         $results = $sort_by_size_desc($results);
         $limited = array_slice($results, 0, 5);
     }
+
+    $resolveItems = [];
     foreach ($limited as $res) {
         if (empty($res['id']) || empty($res['fileHash'])) {
             log_warn("Skipping result missing id/fileHash");
             continue;
         }
+        $resolveItems[] = ['id' => (string)$res['id'], 'fileHash' => (string)$res['fileHash']];
+    }
+    $resolvedMap = get_stream_urls_batch($resolveItems, STREAM_RESOLVE_CONCURRENCY_RUNTIME);
+
+    foreach ($limited as $res) {
+        if (empty($res['id']) || empty($res['fileHash'])) {
+            continue;
+        }
+        $resolveKey = (string)$res['id'] . ':' . (string)$res['fileHash'];
         try {
-            $sinfo = get_stream_url((string)$res['id'], (string)$res['fileHash']);
+            $sinfo = $resolvedMap[$resolveKey] ?? [];
             if (is_array($sinfo) && count($sinfo) > 0) {
                 $sizeGB = isset($res['size']) ? round($res['size'] / 1024 / 1024 / 1024, 2) . ' GB' : 'Unknown size';
                 foreach ($sinfo as $s) {

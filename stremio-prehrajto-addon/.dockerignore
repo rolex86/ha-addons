@@ -1,8 +1,9 @@
+.git
+.codex
 node_modules
 .env
 .env.local
-.DS_Store
+.data
+data
 npm-debug.log*
 yarn-error.log*
-.data/
-data/

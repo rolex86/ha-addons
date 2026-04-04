@@ -1,0 +1,7 @@
+.git
+.codex
+.env
+data
+app/vendor
+app/addon.log
+app/cache_hellspy_php

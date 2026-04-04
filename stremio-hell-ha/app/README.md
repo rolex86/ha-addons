@@ -1,5 +1,7 @@
 # Hellspy Stremio Addon
 
+For the official Home Assistant wrapper and the new standalone Docker/Portainer deployment, use the repository-level README in `../README.md`.
+
 A Stremio addon that provides access to content from Hellspy.to with Czech and English title resolution via Wikidata.
 
 ## ⚠️ Important Requirements

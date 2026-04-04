@@ -15,6 +15,8 @@ export function buildManifest() {
       },
     ],
     types: ["movie", "series"],
+    idPrefixes: ["tt", "pt:"],
+    catalogs: [],
 
     behaviorHints: {
       configurable: true,

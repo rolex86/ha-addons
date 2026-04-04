@@ -3,8 +3,7 @@ dotenv.config();
 
 export const ENV = {
   PORT: parseInt(process.env.PORT || "7654", 10),
-  BASE_URL:
-    process.env.BASE_URL || `http://localhost:${process.env.PORT || 7654}`,
+  BASE_URL: (process.env.BASE_URL || "").trim(),
 
   TMDB_API_KEY: process.env.TMDB_API_KEY || "",
   TMDB_LANGUAGE: process.env.TMDB_LANGUAGE || "cs-CZ",

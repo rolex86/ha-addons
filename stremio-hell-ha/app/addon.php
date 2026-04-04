@@ -59,6 +59,14 @@ if (!is_dir(INFLIGHT_DIR)) {
     mkdir(INFLIGHT_DIR, 0755, true);
 }
 
+function send_cors_headers(): void {
+    header('Access-Control-Allow-Origin: *');
+    header('Access-Control-Allow-Methods: GET, HEAD, OPTIONS');
+    header('Access-Control-Allow-Headers: Content-Type, Authorization');
+}
+
+send_cors_headers();
+
 function env_float(string $name, float $default, float $min, float $max): float {
     $raw = getenv($name);
     if ($raw === false) return $default;

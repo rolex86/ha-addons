@@ -43,12 +43,12 @@ export function buildRouter() {
 
   // Simple configuration UI: generate manifest URL with encrypted cfg token.
   r.get("/configure", (req, res) => {
-    res.type("html").send(renderConfigureHtml());
+    res.type("html").send(renderConfigureHtml(req));
   });
 
   r.post("/configure/manifest-url", (req, res) => {
     try {
-      const base = ENV.BASE_URL.replace(/\/+$/g, "");
+      const base = getBaseUrl(req);
       const token = buildConfigToken(req.body || {});
       const manifestUrl = `${base}/manifest.json?cfg=${encodeURIComponent(token)}`;
       log.debug(`REQ#${req._reqId} configure manifest generated`);
@@ -88,8 +88,21 @@ export function buildRouter() {
   return r;
 }
 
-function renderConfigureHtml() {
-  const base = ENV.BASE_URL.replace(/\/+$/g, "");
+function getBaseUrl(req) {
+  if (ENV.BASE_URL) return ENV.BASE_URL.replace(/\/+$/g, "");
+
+  const forwardedProto = req.get("x-forwarded-proto");
+  const proto = (forwardedProto || req.protocol || "http")
+    .split(",")[0]
+    .trim();
+  const host = (req.get("x-forwarded-host") || req.get("host") || "").trim();
+
+  if (host) return `${proto}://${host}`.replace(/\/+$/g, "");
+  return `http://localhost:${ENV.PORT}`;
+}
+
+function renderConfigureHtml(req) {
+  const base = getBaseUrl(req);
   const manifest = `${base}/manifest.json`;
 
   return `<!doctype html>

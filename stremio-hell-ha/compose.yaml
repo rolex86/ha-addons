@@ -1,0 +1,32 @@
+services:
+  stremio-hell-ha:
+    build:
+      context: .
+      dockerfile: Dockerfile.standalone
+    image: stremio-hell-ha:standalone
+    container_name: stremio-hell-ha
+    ports:
+      - "${HOST_PORT:-8080}:8080"
+    environment:
+      PORT: "8080"
+      APP_ENV: "${APP_ENV:-production}"
+      ADDON_URL: "${ADDON_URL:-http://raspberrypi.local:8080/manifest.json}"
+      ADDON_CONTACT: "${ADDON_CONTACT:-mailto:admin@example.invalid}"
+      REQUEST_DELAY_HELLSPY: "${REQUEST_DELAY_HELLSPY:-0.5}"
+      REQUEST_DELAY_WIKIDATA: "${REQUEST_DELAY_WIKIDATA:-1.0}"
+      REQUEST_DELAY_OTHER: "${REQUEST_DELAY_OTHER:-0.25}"
+      MAX_RETRIES: "${MAX_RETRIES:-3}"
+      RETRY_DELAY_BASE: "${RETRY_DELAY_BASE:-2.0}"
+      MAX_RETRY_BACKOFF: "${MAX_RETRY_BACKOFF:-8.0}"
+      REQUEST_TIMEOUT: "${REQUEST_TIMEOUT:-10}"
+      SEARCH_TIME_BUDGET_MS: "${SEARCH_TIME_BUDGET_MS:-7000}"
+      MAX_SEARCH_QUERIES: "${MAX_SEARCH_QUERIES:-8}"
+      STREAM_RESOLVE_CONCURRENCY: "${STREAM_RESOLVE_CONCURRENCY:-2}"
+      STREAM_REQUEST_CACHE_TTL: "${STREAM_REQUEST_CACHE_TTL:-120}"
+      STREAM_REQUEST_INFLIGHT_WAIT_MS: "${STREAM_REQUEST_INFLIGHT_WAIT_MS:-8000}"
+      STREAM_REQUEST_INFLIGHT_POLL_MS: "${STREAM_REQUEST_INFLIGHT_POLL_MS:-100}"
+      LOG_LEVEL: "${LOG_LEVEL:-warn}"
+      LOG_HTTP_RESPONSE_BODY: "${LOG_HTTP_RESPONSE_BODY:-false}"
+    volumes:
+      - ./data:/data
+    restart: unless-stopped

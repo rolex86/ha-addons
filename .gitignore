@@ -3,6 +3,7 @@
 **/secrets.*.json
 **/.env
 **/.env.*
+!**/.env.example
 
 # Node / runtime
 **/node_modules/

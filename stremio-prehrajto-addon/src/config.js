@@ -5,7 +5,7 @@ const TOKEN_PREFIX = "v1";
 const CIPHER = "aes-256-gcm";
 const SECRET_KEY = crypto
   .createHash("sha256")
-  .update(process.env.CONFIG_SECRET || `${ENV.BASE_URL}:${process.pid}`)
+  .update(process.env.CONFIG_SECRET || ENV.BASE_URL || "stremio-prehrajto")
   .digest();
 
 export function readConfig(req) {

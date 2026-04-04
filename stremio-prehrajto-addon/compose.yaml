@@ -1,0 +1,26 @@
+services:
+  stremio-prehrajto-addon:
+    build:
+      context: .
+      dockerfile: Dockerfile.standalone
+    image: stremio-prehrajto-addon:standalone
+    container_name: stremio-prehrajto-addon
+    ports:
+      - "${HOST_PORT:-7654}:7654"
+    environment:
+      PORT: "7654"
+      BASE_URL: "${BASE_URL-}"
+      TMDB_API_KEY: "${TMDB_API_KEY:-}"
+      TMDB_LANGUAGE: "${TMDB_LANGUAGE:-cs-CZ}"
+      PREHRAJTO_BASE: "${PREHRAJTO_BASE:-https://prehraj.to}"
+      PREHRAJTO_USER_AGENT: "${PREHRAJTO_USER_AGENT:-Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122 Safari/537.36}"
+      DEFAULT_SEARCH_LIMIT: "${DEFAULT_SEARCH_LIMIT:-20}"
+      DEFAULT_STREAMS_LIMIT: "${DEFAULT_STREAMS_LIMIT:-5}"
+      DEFAULT_PREMIUM: "${DEFAULT_PREMIUM:-false}"
+      CACHE_TTL_SECONDS: "${CACHE_TTL_SECONDS:-900}"
+      LOG_LEVEL: "${LOG_LEVEL:-info}"
+      CONFIG_SECRET: "${CONFIG_SECRET:-change-me-please}"
+      DATA_DIR: /data
+    volumes:
+      - ./data:/data
+    restart: unless-stopped

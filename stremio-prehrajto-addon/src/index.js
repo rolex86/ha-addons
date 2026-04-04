@@ -20,10 +20,14 @@ app.use("/", buildRouter());
 
 app.listen(ENV.PORT, () => {
   log.info("Addon started", {
-    baseUrl: ENV.BASE_URL,
+    baseUrl: ENV.BASE_URL || "(dynamic from request host)",
     port: ENV.PORT,
-    manifest: `${ENV.BASE_URL.replace(/\/+$/g, "")}/manifest.json`,
-    configure: `${ENV.BASE_URL.replace(/\/+$/g, "")}/configure`,
+    manifest: ENV.BASE_URL
+      ? `${ENV.BASE_URL.replace(/\/+$/g, "")}/manifest.json`
+      : "(dynamic from request host)/manifest.json",
+    configure: ENV.BASE_URL
+      ? `${ENV.BASE_URL.replace(/\/+$/g, "")}/configure`
+      : "(dynamic from request host)/configure",
     logLevel: ENV.LOG_LEVEL,
   });
 });

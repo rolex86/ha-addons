@@ -71,6 +71,10 @@ export function buildRouter() {
         limit: config.limit,
         streamLimit: config.streamLimit,
         premium: config.premium,
+        sortBy: config.sortBy,
+        maxSizeGb: config.maxSizeGb,
+        audioPreference: config.audioPreference,
+        qualityPreference: config.qualityPreference,
         hasEmail: Boolean(config.email),
       });
 
@@ -102,7 +106,7 @@ function renderConfigureHtml() {
     body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; padding: 24px; max-width: 860px; margin: 0 auto; }
     .card { border: 1px solid #e6e6e6; border-radius: 12px; padding: 16px; margin: 12px 0; }
     label { display:block; margin: 10px 0 6px; font-weight: 600; }
-    input { width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 10px; }
+    input, select { width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 10px; }
     .row { display:flex; gap: 12px; }
     .row > div { flex: 1; }
     button { padding: 10px 14px; border-radius: 10px; border: 0; background: #2f8dfc; color: #fff; font-weight: 700; cursor:pointer; }
@@ -146,6 +150,44 @@ function renderConfigureHtml() {
         <label>Premium režim</label>
         <input id="premium" type="checkbox" ${ENV.DEFAULT_PREMIUM ? "checked" : ""} />
       </div>
+      <div>
+        <label>Řazení výsledků</label>
+        <select id="sort_by">
+          <option value="size_desc" ${ENV.DEFAULT_SORT_BY === "size_desc" ? "selected" : ""}>Největší první</option>
+          <option value="size_asc" ${ENV.DEFAULT_SORT_BY === "size_asc" ? "selected" : ""}>Nejmenší první</option>
+          <option value="relevance_desc" ${ENV.DEFAULT_SORT_BY === "relevance_desc" ? "selected" : ""}>Nejlepší match první</option>
+          <option value="balanced" ${ENV.DEFAULT_SORT_BY === "balanced" ? "selected" : ""}>Balanced</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="row">
+      <div>
+        <label>Maximální velikost souboru (GB)</label>
+        <input id="max_size_gb" value="${ENV.DEFAULT_MAX_SIZE_GB > 0 ? ENV.DEFAULT_MAX_SIZE_GB : ""}" placeholder="např. 15" />
+      </div>
+      <div>
+        <label>Preference audia</label>
+        <select id="audio_preference">
+          <option value="any" ${ENV.DEFAULT_AUDIO_PREFERENCE === "any" ? "selected" : ""}>Bez preference</option>
+          <option value="prefer_cz_dub" ${ENV.DEFAULT_AUDIO_PREFERENCE === "prefer_cz_dub" ? "selected" : ""}>Preferovat CZ dabing</option>
+          <option value="prefer_cz_sk" ${ENV.DEFAULT_AUDIO_PREFERENCE === "prefer_cz_sk" ? "selected" : ""}>Preferovat CZ/SK</option>
+          <option value="prefer_original" ${ENV.DEFAULT_AUDIO_PREFERENCE === "prefer_original" ? "selected" : ""}>Preferovat originál</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="row">
+      <div>
+        <label>Preference kvality</label>
+        <select id="quality_preference">
+          <option value="any" ${ENV.DEFAULT_QUALITY_PREFERENCE === "any" ? "selected" : ""}>Bez preference</option>
+          <option value="prefer_4k" ${ENV.DEFAULT_QUALITY_PREFERENCE === "prefer_4k" ? "selected" : ""}>Preferovat 4K</option>
+          <option value="prefer_1080p" ${ENV.DEFAULT_QUALITY_PREFERENCE === "prefer_1080p" ? "selected" : ""}>Preferovat 1080p</option>
+          <option value="prefer_720p" ${ENV.DEFAULT_QUALITY_PREFERENCE === "prefer_720p" ? "selected" : ""}>Preferovat 720p</option>
+          <option value="avoid_4k" ${ENV.DEFAULT_QUALITY_PREFERENCE === "avoid_4k" ? "selected" : ""}>Upřednostnit ne-4K</option>
+        </select>
+      </div>
     </div>
 
     <div style="margin-top:14px;">
@@ -169,7 +211,11 @@ function renderConfigureHtml() {
       password: document.getElementById("password").value,
       limit: document.getElementById("limit").value.trim(),
       streamLimit: document.getElementById("stream_limit").value.trim(),
-      premium: document.getElementById("premium").checked
+      premium: document.getElementById("premium").checked,
+      sortBy: document.getElementById("sort_by").value,
+      maxSizeGb: document.getElementById("max_size_gb").value.trim(),
+      audioPreference: document.getElementById("audio_preference").value,
+      qualityPreference: document.getElementById("quality_preference").value
     };
 
     try {

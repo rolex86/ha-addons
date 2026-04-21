@@ -18,6 +18,10 @@ export const ENV = {
   DEFAULT_STREAMS_LIMIT: parseInt(process.env.DEFAULT_STREAMS_LIMIT || "5", 10),
   DEFAULT_PREMIUM:
     (process.env.DEFAULT_PREMIUM || "false").toLowerCase() === "true",
+  DEFAULT_SORT_BY: process.env.DEFAULT_SORT_BY || "size_desc",
+  DEFAULT_MAX_SIZE_GB: parseFloat(process.env.DEFAULT_MAX_SIZE_GB || "0"),
+  DEFAULT_AUDIO_PREFERENCE: process.env.DEFAULT_AUDIO_PREFERENCE || "any",
+  DEFAULT_QUALITY_PREFERENCE: process.env.DEFAULT_QUALITY_PREFERENCE || "any",
 
   CACHE_TTL_SECONDS: parseInt(process.env.CACHE_TTL_SECONDS || "900", 10),
   LOG_LEVEL: process.env.LOG_LEVEL || "debug",

@@ -23,6 +23,10 @@ export function readConfig(req) {
     limit: q.limit,
     streamLimit: q.stream_limit ?? q.streamLimit ?? q.max_streams ?? q.maxStreams,
     premium: q.premium,
+    sortBy: q.sort_by ?? q.sortBy,
+    maxSizeGb: q.max_size_gb ?? q.maxSizeGb,
+    audioPreference: q.audio_preference ?? q.audioPreference,
+    qualityPreference: q.quality_preference ?? q.qualityPreference,
   });
 }
 
@@ -71,6 +75,22 @@ function normalizeConfig(raw = {}) {
   const limit = clampInt(raw.limit, ENV.DEFAULT_SEARCH_LIMIT, 5, 80);
   const streamLimit = clampInt(raw.streamLimit, ENV.DEFAULT_STREAMS_LIMIT, 1, 15);
   const premium = parseBool(raw.premium, ENV.DEFAULT_PREMIUM);
+  const sortBy = normalizeEnum(
+    raw.sortBy,
+    ["size_desc", "size_asc", "relevance_desc", "balanced"],
+    ENV.DEFAULT_SORT_BY,
+  );
+  const maxSizeGb = clampFloat(raw.maxSizeGb, ENV.DEFAULT_MAX_SIZE_GB, 0, 500);
+  const audioPreference = normalizeEnum(
+    raw.audioPreference,
+    ["any", "prefer_cz_dub", "prefer_cz_sk", "prefer_original"],
+    ENV.DEFAULT_AUDIO_PREFERENCE,
+  );
+  const qualityPreference = normalizeEnum(
+    raw.qualityPreference,
+    ["any", "prefer_4k", "prefer_1080p", "prefer_720p", "avoid_4k"],
+    ENV.DEFAULT_QUALITY_PREFERENCE,
+  );
 
   return {
     email,
@@ -78,6 +98,10 @@ function normalizeConfig(raw = {}) {
     limit,
     streamLimit,
     premium,
+    sortBy,
+    maxSizeGb,
+    audioPreference,
+    qualityPreference,
   };
 }
 
@@ -85,6 +109,18 @@ function clampInt(v, def, min, max) {
   const n = parseInt(v, 10);
   if (Number.isNaN(n)) return def;
   return Math.max(min, Math.min(max, n));
+}
+
+function clampFloat(v, def, min, max) {
+  const n = parseFloat(v);
+  if (!Number.isFinite(n)) return def;
+  return Math.max(min, Math.min(max, n));
+}
+
+function normalizeEnum(v, allowed, def) {
+  const value = String(v ?? "").trim().toLowerCase();
+  if (!value) return def;
+  return allowed.includes(value) ? value : def;
 }
 
 function parseBool(v, def) {

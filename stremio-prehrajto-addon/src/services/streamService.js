@@ -24,6 +24,7 @@ const SEARCH_PER_QUERY_MIN = 6;
 const SEARCH_PER_QUERY_MAX = 30;
 const SEARCH_PER_STREAM_FACTOR = 3;
 const STREAM_REQUEST_BUDGET_MS = 12_000;
+const GB = 1024 ** 3;
 
 function normalizeSpaces(s) {
   return String(s || "").replace(/\s+/g, " ").trim();
@@ -248,6 +249,150 @@ function clampStreamLimit(v) {
   return Math.max(1, Math.min(MAX_STREAMS, n));
 }
 
+function resolutionRankFromTitle(title) {
+  const text = String(title || "");
+  if (/\b(?:2160p|4k|uhd)\b/i.test(text)) return 2160;
+  if (/\b1440p\b/i.test(text)) return 1440;
+  if (/\b1080p\b/i.test(text)) return 1080;
+  if (/\b720p\b/i.test(text)) return 720;
+  if (/\b576p\b/i.test(text)) return 576;
+  if (/\b480p\b/i.test(text)) return 480;
+  if (/\b360p\b/i.test(text)) return 360;
+  return 0;
+}
+
+function hasAnyPattern(text, patterns) {
+  return patterns.some((pattern) => pattern.test(text));
+}
+
+function audioPreferenceBonus(preference, title) {
+  const text = String(title || "").toLowerCase();
+  if (!text || preference === "any") return 0;
+
+  const hasCzDub = hasAnyPattern(text, [
+    /\bcz\s*dab(?:ing)?\b/i,
+    /\bcesk(?:y|e)\s*dab(?:ing)?\b/i,
+    /\bdab(?:ing)?\b/i,
+  ]);
+  const hasCz = hasAnyPattern(text, [/\bcz\b/i, /\bcze\b/i, /\bcesk(?:y|e)\b/i]);
+  const hasSk = hasAnyPattern(text, [/\bsk\b/i, /\bsvk\b/i, /\bslovensk(?:y|e)\b/i]);
+  const hasDual = hasAnyPattern(text, [/\bdual\b/i, /\bdual[ ._-]?audio\b/i]);
+  const hasSubs = hasAnyPattern(text, [/\bsub\b/i, /\btitulky\b/i, /\bsubs?\b/i]);
+
+  if (preference === "prefer_cz_dub") {
+    if (hasCzDub) return 20;
+    if (hasCz && hasDual) return 14;
+    if (hasCz) return 10;
+    if (hasSk) return 4;
+    if (hasSubs) return -4;
+    return 0;
+  }
+
+  if (preference === "prefer_cz_sk") {
+    if ((hasCz || hasSk) && hasDual) return 18;
+    if (hasCz) return 14;
+    if (hasSk) return 12;
+    if (hasSubs) return -2;
+    return 0;
+  }
+
+  if (preference === "prefer_original") {
+    if (hasCzDub) return -18;
+    if (hasCz || hasSk) return -10;
+    if (hasDual) return -4;
+    if (hasSubs) return 4;
+    return 6;
+  }
+
+  return 0;
+}
+
+function qualityPreferenceBonus(preference, resolution) {
+  if (preference === "any") return 0;
+
+  if (preference === "prefer_4k") {
+    if (resolution >= 2160) return 15;
+    if (resolution >= 1440) return 10;
+    if (resolution >= 1080) return 5;
+    return 0;
+  }
+
+  if (preference === "prefer_1080p") {
+    if (resolution === 1080) return 15;
+    if (resolution === 1440) return 10;
+    if (resolution >= 2160) return 6;
+    if (resolution === 720) return 8;
+    if (resolution > 0) return 3;
+    return 0;
+  }
+
+  if (preference === "prefer_720p") {
+    if (resolution === 720) return 15;
+    if (resolution === 576) return 10;
+    if (resolution === 1080) return 7;
+    if (resolution > 0 && resolution < 720) return 5;
+    return 0;
+  }
+
+  if (preference === "avoid_4k") {
+    if (resolution >= 2160) return -15;
+    if (resolution > 0) return 8;
+    return 0;
+  }
+
+  return 0;
+}
+
+function sizeTieBreakerValue(parsedSizeBytes) {
+  return Number.isFinite(parsedSizeBytes) && parsedSizeBytes > 0 ? parsedSizeBytes : -1;
+}
+
+function balancedSizeBonus(parsedSizeBytes) {
+  const sizeBytes = sizeTieBreakerValue(parsedSizeBytes);
+  if (sizeBytes <= 0) return 0;
+  return Math.min(10, Math.round(Math.log2(sizeBytes / GB + 1) * 3));
+}
+
+function compareTextTieBreakers(a, b) {
+  const byTitle = String(a.sourceTitle || "").localeCompare(
+    String(b.sourceTitle || ""),
+    "cs",
+    { sensitivity: "base" },
+  );
+  if (byTitle !== 0) return byTitle;
+  return String(a.sourceUrl || "").localeCompare(String(b.sourceUrl || ""));
+}
+
+function compareRankedRows(a, b, sortBy) {
+  const sizeA = sizeTieBreakerValue(a.parsedSizeBytes);
+  const sizeB = sizeTieBreakerValue(b.parsedSizeBytes);
+
+  if (sortBy === "size_desc") {
+    if (sizeB !== sizeA) return sizeB - sizeA;
+    return compareTextTieBreakers(a, b);
+  }
+
+  if (sortBy === "size_asc") {
+    if (sizeA !== sizeB) return sizeA - sizeB;
+    return compareTextTieBreakers(a, b);
+  }
+
+  if (sortBy === "relevance_desc") {
+    if (b.score !== a.score) return b.score - a.score;
+    if (b.qualityBonus !== a.qualityBonus) return b.qualityBonus - a.qualityBonus;
+    if (b.audioBonus !== a.audioBonus) return b.audioBonus - a.audioBonus;
+    if (sizeB !== sizeA) return sizeB - sizeA;
+    return compareTextTieBreakers(a, b);
+  }
+
+  if (b.balancedScore !== a.balancedScore) return b.balancedScore - a.balancedScore;
+  if (b.score !== a.score) return b.score - a.score;
+  if (b.qualityBonus !== a.qualityBonus) return b.qualityBonus - a.qualityBonus;
+  if (b.audioBonus !== a.audioBonus) return b.audioBonus - a.audioBonus;
+  if (sizeB !== sizeA) return sizeB - sizeA;
+  return compareTextTieBreakers(a, b);
+}
+
 function buildInflightKey(type, stremioId, config = {}) {
   return [
     String(type || ""),
@@ -256,6 +401,10 @@ function buildInflightKey(type, stremioId, config = {}) {
     String(config.email || "").toLowerCase(),
     String(config.limit || ""),
     String(config.streamLimit || ""),
+    String(config.sortBy || ""),
+    String(config.maxSizeGb || ""),
+    String(config.audioPreference || ""),
+    String(config.qualityPreference || ""),
   ].join("|");
 }
 
@@ -777,32 +926,43 @@ export const StreamService = {
       }
     }
 
-    const rankedRows = resolvedForRanking
+    const sortBy = String(config?.sortBy || "size_desc");
+    const maxSizeGb = Number(config?.maxSizeGb || 0);
+    const maxSizeBytes = Number.isFinite(maxSizeGb) && maxSizeGb > 0
+      ? Math.round(maxSizeGb * GB)
+      : 0;
+    const audioPreference = String(config?.audioPreference || "any");
+    const qualityPreference = String(config?.qualityPreference || "any");
+
+    const filteredRows = resolvedForRanking
       .map((row) => {
         const sizeFromTag = Number(row.sourceSizeBytes);
         const parsedSizeBytes = Number.isFinite(sizeFromTag) && sizeFromTag > 0
           ? sizeFromTag
           : parseSizeFromTitleBytes(row.sourceTitle);
+        const resolution = resolutionRankFromTitle(row.sourceTitle);
+        const audioBonus = audioPreferenceBonus(audioPreference, row.sourceTitle);
+        const qualityBonus = qualityPreferenceBonus(qualityPreference, resolution);
+        const sizeBonus = balancedSizeBonus(parsedSizeBytes);
         return {
           ...row,
           parsedSizeBytes,
+          resolution,
+          audioBonus,
+          qualityBonus,
+          sizeBonus,
+          balancedScore: row.score + audioBonus + qualityBonus + sizeBonus,
         };
       })
-      .sort((a, b) => {
-        const sa = Number.isFinite(a.parsedSizeBytes) ? a.parsedSizeBytes : -1;
-        const sb = Number.isFinite(b.parsedSizeBytes) ? b.parsedSizeBytes : -1;
-        if (sb !== sa) return sb - sa;
-        const byTitle = String(a.sourceTitle || "").localeCompare(
-          String(b.sourceTitle || ""),
-          "cs",
-          { sensitivity: "base" },
-        );
-        if (byTitle !== 0) return byTitle;
-        return String(a.sourceUrl || "").localeCompare(String(b.sourceUrl || ""));
+      .filter((row) => {
+        if (maxSizeBytes <= 0) return true;
+        if (!Number.isFinite(row.parsedSizeBytes) || row.parsedSizeBytes <= 0) return true;
+        return row.parsedSizeBytes <= maxSizeBytes;
       })
+      .sort((a, b) => compareRankedRows(a, b, sortBy))
       .slice(0, maxStreams);
 
-    const streams = rankedRows.map((row) => {
+    const streams = filteredRows.map((row) => {
       const title = buildDisplayTitle({
         sourceTitle: row.sourceTitle,
         sourceSizeText: row.sourceSizeText,
@@ -826,7 +986,11 @@ export const StreamService = {
       resolvedAfterEpisodeFilter: resolvedForRanking.length,
       streams: streams.length,
       maxStreams,
-      withParsedSize: rankedRows.filter((r) => r.parsedSizeBytes > 0).length,
+      withParsedSize: filteredRows.filter((r) => r.parsedSizeBytes > 0).length,
+      sortBy,
+      maxSizeGb,
+      audioPreference,
+      qualityPreference,
       ms: elapsedMs(startedAt),
     });
 

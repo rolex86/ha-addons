@@ -1,6 +1,6 @@
 name: "Trakt Bridge (Stremio only)"
 description: "Sleduje vybrané media_player entity v HA (jen Stremio) a zapisuje watched do Trakt podle IMDb z entity_picture."
-version: "0.4.0"
+version: "0.4.1"
 slug: "trakt_bridge_stremio"
 init: false
 startup: services

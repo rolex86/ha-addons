@@ -1,7 +1,7 @@
 name: "Stremio Hellspy (private) — Filip"
 slug: "stremio_hellspy"
 description: "Privátní Stremio addon (Hellspy.to) běžící v Home Assistant OS"
-version: "0.1.13"
+version: "0.1.14"
 url: "https://github.com/<your-user>/<your-repo>"
 arch:
   - aarch64
@@ -36,6 +36,9 @@ options:
   stream_request_cache_ttl: 120
   stream_request_inflight_wait_ms: 8000
   stream_request_inflight_poll_ms: 100
+  default_sort_by: "size_desc"
+  default_max_size_gb: 0
+  default_quality_preference: "any"
   log_level: "warn"
   log_http_response_body: false
 
@@ -53,5 +56,8 @@ schema:
   stream_request_cache_ttl: int(5,900)
   stream_request_inflight_wait_ms: int(200,20000)
   stream_request_inflight_poll_ms: int(20,1000)
+  default_sort_by: list(size_desc|size_asc|relevance_desc|balanced)
+  default_max_size_gb: float(0,500)
+  default_quality_preference: list(any|prefer_4k|prefer_1080p|prefer_720p|avoid_4k)
   log_level: list(debug|info|warn|error|warning)
   log_http_response_body: bool

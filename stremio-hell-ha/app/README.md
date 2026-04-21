@@ -103,6 +103,9 @@ Runtime tuning is configurable via environment variables:
 - `MAX_SEARCH_QUERIES` (default `8`) - max number of search queries per request
 - `STREAM_RESOLVE_CONCURRENCY` (default `2`, hard cap `2`) - parallel resolve workers
 - `STREAM_REQUEST_CACHE_TTL` (default `120`) - short cache for deduplicated stream requests
+- `DEFAULT_SORT_BY` (`size_desc`, `size_asc`, `relevance_desc`, `balanced`) - global stream ordering strategy
+- `DEFAULT_MAX_SIZE_GB` (default `0`) - hide results larger than this limit, `0` disables the filter
+- `DEFAULT_QUALITY_PREFERENCE` (`any`, `prefer_4k`, `prefer_1080p`, `prefer_720p`, `avoid_4k`) - global quality preference used in ranking
 - `LOG_LEVEL` (`debug|info|warn|error`) - production default is `warn`
 - `LOG_HTTP_RESPONSE_BODY` (default `false`) - include truncated response body logging
 

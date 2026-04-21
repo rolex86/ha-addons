@@ -5,7 +5,7 @@ declare(strict_types=1);
 
 // ---------- CONFIG ----------
 const ADDON_ID = "org.stremio.hellspy";
-const ADDON_VERSION = "0.1.12";
+const ADDON_VERSION = "0.1.14";
 const ADDON_NAME = "Hellspy";
 const ADDON_DESCRIPTION = "Hellspy.to addon for Stremio";
 
@@ -32,6 +32,9 @@ const STREAM_RESOLVE_CONCURRENCY_HARD_CAP = 2;
 const LOG_LEVEL_DEFAULT = 'info';
 const LOG_LEVEL_DEFAULT_PRODUCTION = 'warn';
 const LOG_HTTP_RESPONSE_BODY = false;
+const DEFAULT_SORT_BY = 'size_desc';
+const DEFAULT_MAX_SIZE_GB = 0.0;
+const DEFAULT_QUALITY_PREFERENCE = 'any';
 
 $__addonUrl = getenv('ADDON_URL') ?: 'https://example.invalid';
 $__addonContact = getenv('ADDON_CONTACT') ?: 'mailto:admin@example.invalid';
@@ -87,6 +90,14 @@ function env_bool(string $name, bool $default): bool {
     return $default;
 }
 
+function env_enum(string $name, string $default, array $allowed): string {
+    $raw = getenv($name);
+    if ($raw === false) return $default;
+    $value = strtolower(trim((string)$raw));
+    if ($value === '') return $default;
+    return in_array($value, $allowed, true) ? $value : $default;
+}
+
 $__hasLegacyDelay = getenv('REQUEST_DELAY') !== false;
 $__legacyDelay = env_float('REQUEST_DELAY', REQUEST_DELAY, 0.0, 10.0);
 $__defaultHellspyDelay = $__hasLegacyDelay ? $__legacyDelay : REQUEST_DELAY_HELLSPY_DEFAULT;
@@ -111,6 +122,15 @@ define('STREAM_REQUEST_INFLIGHT_POLL_MS_RUNTIME', env_int('STREAM_REQUEST_INFLIG
 define(
     'STREAM_RESOLVE_CONCURRENCY_RUNTIME',
     env_int('STREAM_RESOLVE_CONCURRENCY', STREAM_RESOLVE_CONCURRENCY, 1, STREAM_RESOLVE_CONCURRENCY_HARD_CAP)
+);
+define(
+    'DEFAULT_SORT_BY_RUNTIME',
+    env_enum('DEFAULT_SORT_BY', DEFAULT_SORT_BY, ['size_desc', 'size_asc', 'relevance_desc', 'balanced'])
+);
+define('DEFAULT_MAX_SIZE_GB_RUNTIME', env_float('DEFAULT_MAX_SIZE_GB', DEFAULT_MAX_SIZE_GB, 0.0, 500.0));
+define(
+    'DEFAULT_QUALITY_PREFERENCE_RUNTIME',
+    env_enum('DEFAULT_QUALITY_PREFERENCE', DEFAULT_QUALITY_PREFERENCE, ['any', 'prefer_4k', 'prefer_1080p', 'prefer_720p', 'avoid_4k'])
 );
 
 $__appEnv = strtolower(trim((string)(getenv('APP_ENV') ?: getenv('ENV') ?: '')));
@@ -261,6 +281,173 @@ function build_display_quality(string $releaseTitle, ?string $apiQuality): strin
 
     $fallback = normalize_quality_fallback($apiQuality);
     return $fallback ?? 'unknown';
+}
+
+function resolution_rank_from_text(string $text): int {
+    $label = detect_resolution_label($text);
+    if ($label === null) return 0;
+    if (preg_match('/^(\d{3,4})p$/i', $label, $m)) {
+        return (int)$m[1];
+    }
+    return 0;
+}
+
+function result_size_value(array $item): float {
+    return (isset($item['size']) && is_numeric($item['size'])) ? (float)$item['size'] : -1.0;
+}
+
+function quality_preference_bonus(string $preference, int $resolution): int {
+    if ($preference === 'any') return 0;
+
+    if ($preference === 'prefer_4k') {
+        if ($resolution >= 2160) return 15;
+        if ($resolution >= 1440) return 10;
+        if ($resolution >= 1080) return 5;
+        return 0;
+    }
+
+    if ($preference === 'prefer_1080p') {
+        if ($resolution === 1080) return 15;
+        if ($resolution === 1440) return 10;
+        if ($resolution >= 2160) return 6;
+        if ($resolution === 720) return 8;
+        if ($resolution > 0) return 3;
+        return 0;
+    }
+
+    if ($preference === 'prefer_720p') {
+        if ($resolution === 720) return 15;
+        if ($resolution === 576) return 10;
+        if ($resolution === 1080) return 7;
+        if ($resolution > 0 && $resolution < 720) return 5;
+        return 0;
+    }
+
+    if ($preference === 'avoid_4k') {
+        if ($resolution >= 2160) return -15;
+        if ($resolution > 0) return 8;
+        return 0;
+    }
+
+    return 0;
+}
+
+function balanced_size_bonus(float $sizeBytes): int {
+    if ($sizeBytes <= 0) return 0;
+    $gb = 1024.0 * 1024.0 * 1024.0;
+    return (int)min(10, round(log(($sizeBytes / $gb) + 1, 2) * 3));
+}
+
+function compare_result_title(array $a, array $b): int {
+    return strcasecmp((string)($a['title'] ?? ''), (string)($b['title'] ?? ''));
+}
+
+function normalize_search_text(string $text): string {
+    $text = mb_strtolower(trim($text), 'UTF-8');
+    $text = preg_replace('/[^\p{L}\p{N}]+/u', ' ', $text);
+    $text = preg_replace('/\s+/u', ' ', (string)$text);
+    return trim((string)$text);
+}
+
+function title_relevance_score(array $item, string $wantedTitle, ?string $wantedYear): int {
+    $title = normalize_search_text((string)($item['title'] ?? ''));
+    $wanted = normalize_search_text($wantedTitle);
+    if ($title === '' || $wanted === '') return 0;
+
+    $score = 0;
+    if ($title === $wanted) {
+        $score += 60;
+    } elseif (str_contains($title, $wanted) || str_contains($wanted, $title)) {
+        $score += 35;
+    } else {
+        $wantTokens = array_values(array_filter(explode(' ', $wanted), fn($v) => $v !== ''));
+        $titleTokens = array_values(array_filter(explode(' ', $title), fn($v) => $v !== ''));
+        $common = count(array_intersect($wantTokens, $titleTokens));
+        $score += min(25, $common * 5);
+    }
+
+    if ($wantedYear !== null && $wantedYear !== '') {
+        if (preg_match('/\b' . preg_quote($wantedYear, '/') . '\b/', $title) === 1) {
+            $score += 20;
+        } elseif (preg_match('/\b(19|20)\d{2}\b/', $title) === 1) {
+            $score -= 5;
+        }
+    }
+
+    return $score;
+}
+
+function annotate_search_result(array $item, string $qualityPreference, string $wantedTitle, ?string $wantedYear): array {
+    $title = trim((string)($item['title'] ?? ''));
+    $resolution = resolution_rank_from_text($title);
+    $sizeBytes = result_size_value($item);
+    $qualityBonus = quality_preference_bonus($qualityPreference, $resolution);
+    $sizeBonus = balanced_size_bonus($sizeBytes);
+    $relevanceScore = title_relevance_score($item, $wantedTitle, $wantedYear);
+
+    if (!empty($item['__episodePreferred'])) $relevanceScore += 100;
+    if (!empty($item['__preferred'])) $relevanceScore += 80;
+
+    return $item + [
+        '__resolution' => $resolution,
+        '__qualityBonus' => $qualityBonus,
+        '__sizeBonus' => $sizeBonus,
+        '__relevanceScore' => $relevanceScore,
+        '__balancedScore' => $relevanceScore + $qualityBonus + $sizeBonus,
+    ];
+}
+
+function compare_ranked_result(array $a, array $b, string $sortBy): int {
+    $sizeA = result_size_value($a);
+    $sizeB = result_size_value($b);
+
+    if ($sortBy === 'size_desc') {
+        $cmp = $sizeB <=> $sizeA;
+        return $cmp !== 0 ? $cmp : compare_result_title($a, $b);
+    }
+
+    if ($sortBy === 'size_asc') {
+        $cmp = $sizeA <=> $sizeB;
+        return $cmp !== 0 ? $cmp : compare_result_title($a, $b);
+    }
+
+    if ($sortBy === 'relevance_desc') {
+        $cmp = (($b['__relevanceScore'] ?? 0) <=> ($a['__relevanceScore'] ?? 0));
+        if ($cmp !== 0) return $cmp;
+        $cmp = (($b['__qualityBonus'] ?? 0) <=> ($a['__qualityBonus'] ?? 0));
+        if ($cmp !== 0) return $cmp;
+        $cmp = $sizeB <=> $sizeA;
+        return $cmp !== 0 ? $cmp : compare_result_title($a, $b);
+    }
+
+    $cmp = (($b['__balancedScore'] ?? 0) <=> ($a['__balancedScore'] ?? 0));
+    if ($cmp !== 0) return $cmp;
+    $cmp = (($b['__relevanceScore'] ?? 0) <=> ($a['__relevanceScore'] ?? 0));
+    if ($cmp !== 0) return $cmp;
+    $cmp = (($b['__qualityBonus'] ?? 0) <=> ($a['__qualityBonus'] ?? 0));
+    if ($cmp !== 0) return $cmp;
+    $cmp = $sizeB <=> $sizeA;
+    return $cmp !== 0 ? $cmp : compare_result_title($a, $b);
+}
+
+function rank_search_results(array $results, string $sortBy, float $maxSizeGb, string $qualityPreference, string $wantedTitle, ?string $wantedYear): array {
+    $maxSizeBytes = $maxSizeGb > 0 ? $maxSizeGb * 1024.0 * 1024.0 * 1024.0 : 0.0;
+    $ranked = [];
+
+    foreach ($results as $item) {
+        if (!is_array($item)) continue;
+        $sizeBytes = result_size_value($item);
+        if ($maxSizeBytes > 0 && $sizeBytes > 0 && $sizeBytes > $maxSizeBytes) {
+            continue;
+        }
+        $ranked[] = annotate_search_result($item, $qualityPreference, $wantedTitle, $wantedYear);
+    }
+
+    usort($ranked, function (array $a, array $b) use ($sortBy): int {
+        return compare_ranked_result($a, $b, $sortBy);
+    });
+
+    return $ranked;
 }
 
 // ---------- HTTP Requests ----------
@@ -824,16 +1011,12 @@ function handle_stream_request_impl(array $body): array {
         return ['streams' => []];
     }
 
+    $sortBy = DEFAULT_SORT_BY_RUNTIME;
+    $maxSizeGb = DEFAULT_MAX_SIZE_GB_RUNTIME;
+    $qualityPreference = DEFAULT_QUALITY_PREFERENCE_RUNTIME;
+
     // Prepare stream URLs
     $streams = [];
-    $sort_by_size_desc = function (array $items): array {
-        usort($items, function ($a, $b) {
-            $sizeA = (isset($a['size']) && is_numeric($a['size'])) ? (float)$a['size'] : -1.0;
-            $sizeB = (isset($b['size']) && is_numeric($b['size'])) ? (float)$b['size'] : -1.0;
-            return $sizeB <=> $sizeA;
-        });
-        return $items;
-    };
     if ($type === 'series' && $season !== null && $episodeNumber !== null) {
         $seasonStr = str_pad((string)$season, 2, '0', STR_PAD_LEFT);
         $epStr = str_pad((string)$episodeNumber, 2, '0', STR_PAD_LEFT);
@@ -849,16 +1032,31 @@ function handle_stream_request_impl(array $body): array {
             return false;
         }));
         if (!empty($preferred)) {
-            $preferred = $sort_by_size_desc($preferred);
+            $preferred = array_map(function (array $item): array {
+                $item['__preferred'] = true;
+                $item['__episodePreferred'] = true;
+                return $item;
+            }, $preferred);
+            $preferred = rank_search_results($preferred, $sortBy, $maxSizeGb, $qualityPreference, (string)$name, $year !== null ? (string)$year : null);
             $limited = array_slice($preferred, 0, 2);
         } else {
-            $results = $sort_by_size_desc($results);
+            $results = array_map(function (array $item): array {
+                $item['__preferred'] = false;
+                return $item;
+            }, $results);
+            $results = rank_search_results($results, $sortBy, $maxSizeGb, $qualityPreference, (string)$name, $year !== null ? (string)$year : null);
             $limited = array_slice($results, 0, 5);
         }
     } else {
-        $results = $sort_by_size_desc($results);
+        $results = array_map(function (array $item): array {
+            $item['__preferred'] = true;
+            return $item;
+        }, $results);
+        $results = rank_search_results($results, $sortBy, $maxSizeGb, $qualityPreference, (string)$name, $year !== null ? (string)$year : null);
         $limited = array_slice($results, 0, 5);
     }
+
+    log_info("Ranking config: sortBy={$sortBy} maxSizeGb={$maxSizeGb} qualityPreference={$qualityPreference} candidates=" . count($results) . " selected=" . count($limited));
 
     $resolveItems = [];
     foreach ($limited as $res) {

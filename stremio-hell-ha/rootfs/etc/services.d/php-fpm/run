@@ -14,6 +14,9 @@ export STREAM_RESOLVE_CONCURRENCY="$(bashio::config 'stream_resolve_concurrency'
 export STREAM_REQUEST_CACHE_TTL="$(bashio::config 'stream_request_cache_ttl')"
 export STREAM_REQUEST_INFLIGHT_WAIT_MS="$(bashio::config 'stream_request_inflight_wait_ms')"
 export STREAM_REQUEST_INFLIGHT_POLL_MS="$(bashio::config 'stream_request_inflight_poll_ms')"
+export DEFAULT_SORT_BY="$(bashio::config 'default_sort_by')"
+export DEFAULT_MAX_SIZE_GB="$(bashio::config 'default_max_size_gb')"
+export DEFAULT_QUALITY_PREFERENCE="$(bashio::config 'default_quality_preference')"
 
 LOG_LEVEL_RAW="$(bashio::config 'log_level')"
 if [[ "${LOG_LEVEL_RAW}" == "warning" ]]; then

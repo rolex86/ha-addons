@@ -1,0 +1,6 @@
+#!/usr/bin/with-contenv bash
+set -euo pipefail
+
+export PORT="${PORT:-7860}"
+
+exec python3 /app/main.py

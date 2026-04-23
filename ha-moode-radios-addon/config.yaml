@@ -1,0 +1,123 @@
+name: moOde Radios Sync
+slug: ha_moode_radios_addon
+description: Build and sync curated internet radio catalogs into moOde Audio.
+version: "0.2.0"
+url: https://github.com/rolex86/ha-addons
+arch:
+  - aarch64
+  - amd64
+  - armv7
+
+startup: services
+boot: auto
+init: false
+
+webui: "http://[HOST]:[PORT:7860]/"
+panel_icon: mdi:radio-tower
+panel_title: moOde Radios
+
+ports:
+  7860/tcp: 7860
+ports_description:
+  7860/tcp: "Web UI + API"
+
+map:
+  - data:rw
+
+options:
+  port: 7860
+  base_url: "http://homeassistant.local:7860"
+  update_interval_hours: 24
+  sync_on_start: true
+  random_start_delay_seconds: 15
+  source_priority:
+    - radiogarden
+    - radiobrowser
+    - radionet
+  filters:
+    include_countries: []
+    exclude_countries: []
+    include_states: []
+    exclude_states: []
+    include_languages: []
+    exclude_languages: []
+    include_tags: []
+    exclude_tags: []
+    include_keywords: []
+    exclude_keywords: []
+    min_bitrate: 0
+    allowed_codecs: []
+    only_working_streams: true
+    exclude_podcasts: true
+    exclude_talk: false
+  pinned_stations: []
+  max_generated_stations: 100
+  request_timeout: 15
+  dedup_policy: "name_and_stream"
+  station_name_prefix: ""
+  stale_station_grace_runs: 3
+  moode:
+    enabled: false
+    host: ""
+    port: 22
+    username: "pi"
+    password: ""
+    remote_import_path: "/tmp/ha-moode-radios"
+    import_scope: "other"
+    import_policy: "merge"
+  logos:
+    enabled: true
+    default_logo_text: "RADIO"
+  log_level: "info"
+  dry_run: true
+
+schema:
+  port: int(1,65535)
+  base_url: str
+  update_interval_hours: int(1,168)
+  sync_on_start: bool
+  random_start_delay_seconds: int(0,600)
+  source_priority: [str]
+  filters:
+    include_countries: [str]
+    exclude_countries: [str]
+    include_states: [str]
+    exclude_states: [str]
+    include_languages: [str]
+    exclude_languages: [str]
+    include_tags: [str]
+    exclude_tags: [str]
+    include_keywords: [str]
+    exclude_keywords: [str]
+    min_bitrate: int(0,2048)
+    allowed_codecs: [str]
+    only_working_streams: bool
+    exclude_podcasts: bool
+    exclude_talk: bool
+  pinned_stations:
+    - name: str
+      source_url: str?
+      stream_url: str?
+      source_hint: str?
+      country: str?
+      language: str?
+      tags: [str]?
+  max_generated_stations: int(1,1000)
+  request_timeout: int(3,120)
+  dedup_policy: list(name_and_stream|name_only|stream_only|domain)
+  station_name_prefix: str
+  stale_station_grace_runs: int(0,30)
+  moode:
+    enabled: bool
+    host: str
+    port: int(1,65535)
+    username: str
+    password: password
+    remote_import_path: str
+    import_scope: list(other|all|moode)
+    import_policy: list(merge|replace)
+  logos:
+    enabled: bool
+    default_logo_text: str
+  log_level: list(debug|info|warn|warning|error)
+  dry_run: bool

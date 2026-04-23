@@ -78,13 +78,23 @@ class AddonOptions(BaseModel):
     dry_run: bool = True
 
 
+def load_options_payload() -> dict[str, Any]:
+    if not OPTIONS_PATH.exists():
+        return {}
+    return json.loads(OPTIONS_PATH.read_text(encoding="utf-8"))
+
+
 def load_options() -> AddonOptions:
-    payload: dict[str, Any] = {}
-    if OPTIONS_PATH.exists():
-        payload = json.loads(OPTIONS_PATH.read_text(encoding="utf-8"))
+    payload = load_options_payload()
     options = AddonOptions.model_validate(payload)
     DATA_ROOT.mkdir(parents=True, exist_ok=True)
     return options
+
+
+def save_pinned_stations_to_options(pinned_stations: list[dict[str, Any]]) -> None:
+    payload = load_options_payload()
+    payload["pinned_stations"] = pinned_stations
+    OPTIONS_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
 def runtime_port(options: AddonOptions) -> int:

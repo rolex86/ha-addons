@@ -10,17 +10,49 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import TypeAdapter
 
-from .config import PinnedStationInput, load_options, runtime_port
+from .config import PinnedStationInput, load_options, runtime_port, save_pinned_stations_to_options
 from .logging_utils import configure_logging
-from .storage import EXPORTS_DIR, PINNED_STATIONS_PATH, ensure_storage, save_pinned_station_overrides
+from .storage import (
+    EXPORTS_DIR,
+    clear_legacy_pinned_station_overrides,
+    ensure_storage,
+    load_legacy_pinned_station_overrides,
+)
 from .sync_service import SyncService
 
 
 OPTIONS = load_options()
 configure_logging(OPTIONS.log_level)
 ensure_storage()
-SERVICE = SyncService(OPTIONS)
 PINNED_ADAPTER = TypeAdapter(list[PinnedStationInput])
+
+
+def _dedupe_pinned_stations(items: list[dict]) -> list[dict]:
+    seen: set[str] = set()
+    deduped: list[dict] = []
+    for item in items:
+        key = json.dumps(item, sort_keys=True, ensure_ascii=True)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+    return deduped
+
+
+def _migrate_legacy_pinned_stations() -> None:
+    legacy = load_legacy_pinned_station_overrides()
+    if not legacy:
+        return
+    merged = _dedupe_pinned_stations(
+        [item.model_dump(mode="json") for item in OPTIONS.pinned_stations] + legacy
+    )
+    OPTIONS.pinned_stations = [PinnedStationInput.model_validate(item) for item in merged]
+    save_pinned_stations_to_options(merged)
+    clear_legacy_pinned_station_overrides()
+
+
+_migrate_legacy_pinned_stations()
+SERVICE = SyncService(OPTIONS)
 
 
 @asynccontextmanager
@@ -39,12 +71,24 @@ async def lifespan(_: FastAPI):
 app = FastAPI(title="moOde Radios Sync", lifespan=lifespan)
 
 
+def _shared_pinned_stations() -> list[dict]:
+    return [item.model_dump(mode="json") for item in OPTIONS.pinned_stations]
+
+
+def _save_shared_pinned_stations(payload: list[dict]) -> None:
+    validated = [PinnedStationInput.model_validate(item) for item in payload]
+    serializable = [item.model_dump(mode="json") for item in validated]
+    OPTIONS.pinned_stations = validated
+    save_pinned_stations_to_options(serializable)
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index() -> str:
     report = SERVICE.last_report
     station_count = report.summary.station_count if report else 0
     last_run = report.summary.finished_at.isoformat() if report and report.summary.finished_at else "never"
-    pinned_json = PINNED_STATIONS_PATH.read_text(encoding="utf-8") if PINNED_STATIONS_PATH.exists() else "[]"
+    pinned_json = json.dumps(_shared_pinned_stations(), indent=2)
+    pinned_count = len(_shared_pinned_stations())
     return f"""
 <!doctype html>
 <html lang="en">
@@ -123,6 +167,7 @@ async def index() -> str:
         font-family: "SFMono-Regular", Consolas, monospace;
       }}
       .section-title {{ margin-top: 26px; margin-bottom: 8px; font-size: 1.2rem; }}
+      .section-note {{ margin-top: 8px; color: var(--muted); font-size: 0.95rem; }}
       .secondary {{ background: #efe5d4; color: #1e1d19; }}
     </style>
   </head>
@@ -144,8 +189,13 @@ async def index() -> str:
           <div class="card"><div>Stations in last run</div><div style="font-size:1.5rem;margin-top:8px">{station_count}</div></div>
           <div class="card"><div>Last completed sync</div><div style="font-size:1rem;margin-top:8px">{last_run}</div></div>
           <div class="card"><div>Dry run</div><div style="font-size:1.5rem;margin-top:8px">{str(OPTIONS.dry_run).lower()}</div></div>
+          <div class="card"><div>Pinned stations</div><div style="font-size:1.5rem;margin-top:8px">{pinned_count}</div></div>
         </div>
-        <div class="section-title">Pinned Stations JSON</div>
+        <div class="section-title">Pinned Stations</div>
+        <div class="section-note">
+          This is the same shared pinned station list used by both the Home Assistant add-on Configuration tab
+          and this web UI. Saving here updates the add-on options file directly.
+        </div>
         <textarea id="pinned">{pinned_json}</textarea>
         <div class="section-title">Result</div>
         <pre id="result">Ready.</pre>
@@ -200,16 +250,14 @@ async def get_stations():
 
 @app.get("/api/pinned-stations")
 async def get_pinned_stations():
-    if not PINNED_STATIONS_PATH.exists():
-        return []
-    return json.loads(PINNED_STATIONS_PATH.read_text(encoding="utf-8"))
+    return _shared_pinned_stations()
 
 
 @app.put("/api/pinned-stations")
 async def put_pinned_stations(payload: list[dict]):
     validated = PINNED_ADAPTER.validate_python(payload)
     serializable = [item.model_dump(mode="json") for item in validated]
-    save_pinned_station_overrides(serializable)
+    _save_shared_pinned_stations(serializable)
     return {"saved": len(serializable)}
 
 

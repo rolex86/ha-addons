@@ -5,7 +5,7 @@ Home Assistant add-on for building curated internet radio catalogs and syncing t
 ## What works now
 
 - Home Assistant add-on packaging with web UI on port `7860`
-- Pinned stations from add-on options or `/data/moode-radios/pinned_stations.json`
+- One shared pinned stations list editable from the add-on options or the web UI
 - Source resolution from Radio Browser, Radio Garden URLs/search, radio.net page fallback and direct stream URLs
 - Stream resolution for redirects, `.pls` and `.m3u`
 - Metadata enrichment from Radio Browser
@@ -26,8 +26,7 @@ Home Assistant add-on for building curated internet radio catalogs and syncing t
   },
   {
     "name": "KEXP",
-    "source_url": "https://radio.garden/listen/kexp-90-3-fm/CboUxFwk",
-    "source_hint": "radiogarden"
+    "source_hint": "radiobrowser"
   },
   {
     "name": "SomaFM Groove Salad",
@@ -35,6 +34,8 @@ Home Assistant add-on for building curated internet radio catalogs and syncing t
   }
 ]
 ```
+
+For first tests, prefer `radiobrowser` lookups or direct `stream_url` entries. Radio Garden channel URLs can go stale and may start returning `404`.
 
 3. Keep `dry_run: true` for the first sync and verify the generated report and ZIP.
 4. When the catalog looks good, fill in `moode.host`, `moode.username`, `moode.password`, set `moode.enabled: true`, then switch `dry_run: false`.

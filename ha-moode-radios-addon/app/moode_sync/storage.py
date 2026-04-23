@@ -19,9 +19,6 @@ def ensure_storage() -> None:
     EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     LOGOS_DIR.mkdir(parents=True, exist_ok=True)
-    PINNED_STATIONS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    if not PINNED_STATIONS_PATH.exists():
-        PINNED_STATIONS_PATH.write_text("[]\n", encoding="utf-8")
 
 
 def save_report(report: SyncReport) -> None:
@@ -38,11 +35,12 @@ def load_last_report() -> SyncReport | None:
     return SyncReport.model_validate_json(LAST_REPORT_PATH.read_text(encoding="utf-8"))
 
 
-def load_pinned_station_overrides() -> list[dict]:
-    ensure_storage()
+def load_legacy_pinned_station_overrides() -> list[dict]:
+    if not PINNED_STATIONS_PATH.exists():
+        return []
     return json.loads(PINNED_STATIONS_PATH.read_text(encoding="utf-8"))
 
 
-def save_pinned_station_overrides(payload: list[dict]) -> None:
-    ensure_storage()
-    PINNED_STATIONS_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+def clear_legacy_pinned_station_overrides() -> None:
+    if PINNED_STATIONS_PATH.exists():
+        PINNED_STATIONS_PATH.unlink()

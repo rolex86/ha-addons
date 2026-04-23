@@ -17,7 +17,7 @@ from .moode_importer import push_catalog
 from .source_radiobrowser import RadioBrowserClient
 from .source_radiogarden import RadioGardenClient
 from .source_radionet import RadioNetClient
-from .storage import EXPORTS_DIR, LOGOS_DIR, load_last_report, load_pinned_station_overrides, save_report
+from .storage import EXPORTS_DIR, LOGOS_DIR, load_last_report, save_report
 from .stream_resolver import StreamResolver
 from .utils import hostname_from_url, normalize_text, slugify_filename
 
@@ -111,10 +111,6 @@ class SyncService:
 
     async def _collect_stations(self, http: httpx.AsyncClient, summary: SyncSummary) -> list[Station]:
         configured = list(self.options.pinned_stations)
-        configured.extend(
-            PinnedStationInput.model_validate(raw)
-            for raw in load_pinned_station_overrides()
-        )
 
         radiobrowser = RadioBrowserClient(http, self.options)
         radiogarden = RadioGardenClient(http, self.options)

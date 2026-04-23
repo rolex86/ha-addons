@@ -10,6 +10,42 @@ from pydantic import BaseModel, Field, field_validator
 
 OPTIONS_PATH = Path("/data/options.json")
 DATA_ROOT = Path("/data/moode-radios")
+FILTER_LIST_FIELDS = (
+    "include_countries",
+    "exclude_countries",
+    "include_states",
+    "exclude_states",
+    "include_languages",
+    "exclude_languages",
+    "include_tags",
+    "exclude_tags",
+    "include_keywords",
+    "exclude_keywords",
+    "allowed_codecs",
+)
+
+
+def _normalize_text_list(value: Any) -> list[str]:
+    if value in (None, "", []):
+        return []
+    if isinstance(value, str):
+        parts = value.replace("\n", ",").split(",")
+    elif isinstance(value, (list, tuple, set)):
+        parts = [str(item) for item in value]
+    else:
+        parts = [str(value)]
+    seen: set[str] = set()
+    normalized: list[str] = []
+    for item in parts:
+        text = str(item).strip()
+        if not text:
+            continue
+        key = text.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append(text)
+    return normalized
 
 
 class FiltersConfig(BaseModel):
@@ -29,6 +65,11 @@ class FiltersConfig(BaseModel):
     exclude_podcasts: bool = True
     exclude_talk: bool = False
 
+    @field_validator(*FILTER_LIST_FIELDS, mode="before")
+    @classmethod
+    def _normalize_filter_list(cls, value: Any) -> list[str]:
+        return _normalize_text_list(value)
+
 
 class PinnedStationInput(BaseModel):
     name: str
@@ -42,13 +83,7 @@ class PinnedStationInput(BaseModel):
     @field_validator("tags", mode="before")
     @classmethod
     def _normalize_tags(cls, value: Any) -> list[str]:
-        if value in (None, "", []):
-            return []
-        if isinstance(value, str):
-            return [item.strip() for item in value.split(",") if item.strip()]
-        if isinstance(value, list):
-            return [str(item).strip() for item in value if str(item).strip()]
-        return [str(value).strip()] if str(value).strip() else []
+        return _normalize_text_list(value)
 
 
 class MoodeConfig(BaseModel):
@@ -102,6 +137,10 @@ def load_options() -> AddonOptions:
     return options
 
 
+def _write_options_payload(payload: dict[str, Any]) -> None:
+    OPTIONS_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
 def save_pinned_stations_to_options(pinned_stations: list[dict[str, Any]]) -> None:
     payload = load_options_payload()
     serialized: list[dict[str, Any]] = []
@@ -114,7 +153,15 @@ def save_pinned_stations_to_options(pinned_stations: list[dict[str, Any]]) -> No
             item.pop("tags", None)
         serialized.append(item)
     payload["pinned_stations"] = serialized
-    OPTIONS_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    _write_options_payload(payload)
+
+
+def save_filters_to_options(filters: dict[str, Any]) -> FiltersConfig:
+    payload = load_options_payload()
+    validated = FiltersConfig.model_validate(filters)
+    payload["filters"] = validated.model_dump(mode="json")
+    _write_options_payload(payload)
+    return validated
 
 
 def runtime_port(options: AddonOptions) -> int:

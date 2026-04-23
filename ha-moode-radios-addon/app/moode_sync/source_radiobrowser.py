@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from urllib.parse import quote
 
 import httpx
 
@@ -71,6 +72,47 @@ class RadioBrowserClient:
                 return [station for station in stations if self._matches_filters(station, filters)]
             except Exception as exc:
                 LOGGER.warning("Radio Browser discover failed for %s: %s", base, exc)
+        return []
+
+    async def list_facets(
+        self,
+        kind: str,
+        filter_text: str | None = None,
+        limit: int = 80,
+    ) -> list[dict[str, int | str]]:
+        endpoint = {
+            "tags": "tags",
+            "countries": "countries",
+            "languages": "languages",
+            "states": "states",
+        }.get(kind)
+        if not endpoint:
+            raise ValueError(f"Unsupported Radio Browser facet kind: {kind}")
+
+        suffix = ""
+        query = (filter_text or "").strip()
+        if query:
+            suffix = f"/{quote(query, safe='')}"
+
+        params = {
+            "order": "stationcount",
+            "reverse": "true",
+            "hidebroken": "true" if self.options.filters.only_working_streams else "false",
+        }
+        if limit > 0:
+            params["limit"] = str(limit)
+
+        for base in API_BASES:
+            try:
+                response = await self.http.get(
+                    f"{base}/json/{endpoint}{suffix}",
+                    params=params,
+                    timeout=self.options.request_timeout,
+                )
+                response.raise_for_status()
+                return self._normalize_facets(response.json(), limit)
+            except Exception as exc:
+                LOGGER.warning("Radio Browser facet fetch failed for %s/%s: %s", base, endpoint, exc)
         return []
 
     def _convert_many(self, payload: list[dict]) -> list[Station]:
@@ -163,6 +205,27 @@ class RadioBrowserClient:
         if filters.exclude_talk and any(tag.lower() in {"talk", "news", "speech"} for tag in station.genres):
             return False
         return True
+
+    def _normalize_facets(self, payload: list[dict], limit: int) -> list[dict[str, int | str]]:
+        facets: list[dict[str, int | str]] = []
+        seen: set[str] = set()
+        for item in payload:
+            name = str(item.get("name") or "").strip()
+            if not name:
+                continue
+            key = name.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            facets.append(
+                {
+                    "name": name,
+                    "count": _to_int(item.get("stationcount")) or 0,
+                }
+            )
+            if limit > 0 and len(facets) >= limit:
+                break
+        return facets
 
 
 def _split_csv(value: str | None) -> list[str]:

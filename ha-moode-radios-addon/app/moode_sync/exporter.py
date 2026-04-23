@@ -16,16 +16,17 @@ def build_station_bundle(
 ) -> tuple[Path, Path]:
     target.parent.mkdir(parents=True, exist_ok=True)
     manifest_path = target.with_suffix(".json")
+    export_stations = [_export_station_view(station) for station in stations]
     payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "format": "ha-moode-radios-v1",
-        "stations": [station.model_dump(mode="json") for station in stations],
+        "stations": [station.model_dump(mode="json") for station in export_stations],
     }
     manifest_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
     with ZipFile(target, "w", compression=ZIP_DEFLATED) as archive:
         archive.writestr("stations.json", json.dumps(payload, indent=2))
-        for station in stations:
+        for station in export_stations:
             archive.writestr(
                 f"radio/{station.file_basename}.pls",
                 build_pls(station),
@@ -41,6 +42,15 @@ def build_station_bundle(
             ),
         )
     return target, manifest_path
+
+
+def _export_station_view(station: Station) -> Station:
+    preferred_url = preferred_stream_url(station.stream_url_raw, station.stream_url_resolved)
+    return station.model_copy(
+        update={
+            "stream_url_resolved": preferred_url or station.stream_url_resolved,
+        }
+    )
 
 
 def build_pls(station: Station) -> str:

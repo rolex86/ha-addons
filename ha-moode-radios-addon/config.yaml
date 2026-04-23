@@ -1,7 +1,7 @@
 name: moOde Radios Sync
 slug: ha_moode_radios_addon
 description: Build and sync curated internet radio catalogs into moOde Audio.
-version: "0.2.8"
+version: "0.3.0"
 url: https://github.com/rolex86/ha-addons
 arch:
   - aarch64

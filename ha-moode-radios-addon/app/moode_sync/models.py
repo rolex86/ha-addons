@@ -62,3 +62,18 @@ class SyncSummary(BaseModel):
 class SyncReport(BaseModel):
     summary: SyncSummary
     stations: list[Station] = Field(default_factory=list)
+
+
+class SyncProgress(BaseModel):
+    running: bool = False
+    mode: str = "idle"
+    phase: str = "idle"
+    label: str = "Idle"
+    detail: str = ""
+    done: int = 0
+    total: int = 0
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    recent_events: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)

@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 OPTIONS_PATH = Path("/data/options.json")
@@ -38,6 +38,17 @@ class PinnedStationInput(BaseModel):
     country: str | None = None
     language: str | None = None
     tags: list[str] = Field(default_factory=list)
+
+    @field_validator("tags", mode="before")
+    @classmethod
+    def _normalize_tags(cls, value: Any) -> list[str]:
+        if value in (None, "", []):
+            return []
+        if isinstance(value, str):
+            return [item.strip() for item in value.split(",") if item.strip()]
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if str(item).strip()]
+        return [str(value).strip()] if str(value).strip() else []
 
 
 class MoodeConfig(BaseModel):
@@ -93,7 +104,16 @@ def load_options() -> AddonOptions:
 
 def save_pinned_stations_to_options(pinned_stations: list[dict[str, Any]]) -> None:
     payload = load_options_payload()
-    payload["pinned_stations"] = pinned_stations
+    serialized: list[dict[str, Any]] = []
+    for station in pinned_stations:
+        item = dict(station)
+        tags = item.get("tags") or []
+        if isinstance(tags, list):
+            item["tags"] = ", ".join(tag for tag in tags if tag)
+        if not item.get("tags"):
+            item.pop("tags", None)
+        serialized.append(item)
+    payload["pinned_stations"] = serialized
     OPTIONS_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 

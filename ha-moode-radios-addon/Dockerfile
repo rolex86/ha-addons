@@ -12,12 +12,13 @@ RUN apk add --no-cache \
     py3-pillow \
     py3-lxml \
     py3-cryptography \
-    build-base \
-  && python3 -m ensurepip --upgrade \
-  && pip3 install --no-cache-dir --break-system-packages --upgrade pip
+    build-base
+
+RUN python3 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:${PATH}"
 
 COPY app/requirements.txt /app/requirements.txt
-RUN pip3 install --no-cache-dir --break-system-packages -r /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
 
 COPY app /app
 COPY rootfs /

@@ -11,6 +11,8 @@ arch:
 startup: services
 boot: auto
 init: false
+ingress: true
+ingress_port: 7860
 
 webui: "http://[HOST]:[PORT:7860]/"
 panel_icon: mdi:radio-tower

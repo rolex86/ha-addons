@@ -3,4 +3,4 @@ set -euo pipefail
 
 export PORT="${PORT:-7860}"
 
-exec python3 /app/main.py
+exec /opt/venv/bin/python /app/main.py

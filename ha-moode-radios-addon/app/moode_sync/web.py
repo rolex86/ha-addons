@@ -137,8 +137,8 @@ async def index() -> str:
         <div class="actions">
           <button onclick="savePinned()">Save pinned stations</button>
           <button onclick="runSync()">Run Sync Now</button>
-          <a href="/downloads/stations.zip">Download Latest ZIP</a>
-          <a href="/api/report">Open JSON Report</a>
+          <a href="downloads/stations.zip">Download Latest ZIP</a>
+          <a href="api/report">Open JSON Report</a>
         </div>
         <div class="grid">
           <div class="card"><div>Stations in last run</div><div style="font-size:1.5rem;margin-top:8px">{station_count}</div></div>
@@ -155,7 +155,7 @@ async def index() -> str:
       async function runSync() {{
         const result = document.getElementById("result");
         result.textContent = "Running sync...";
-        const response = await fetch("/api/sync-now", {{ method: "POST" }});
+        const response = await fetch("api/sync-now", {{ method: "POST" }});
         const data = await response.json();
         result.textContent = JSON.stringify(data, null, 2);
       }}
@@ -165,7 +165,7 @@ async def index() -> str:
         result.textContent = "Saving pinned stations...";
         const raw = document.getElementById("pinned").value;
         const parsed = JSON.parse(raw);
-        const response = await fetch("/api/pinned-stations", {{
+        const response = await fetch("api/pinned-stations", {{
           method: "PUT",
           headers: {{ "Content-Type": "application/json" }},
           body: JSON.stringify(parsed)

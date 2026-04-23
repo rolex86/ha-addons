@@ -18,6 +18,68 @@ def slugify_filename(value: str, fallback: str = "station") -> str:
     return slug[:96] or fallback
 
 
+def ensure_unique_file_basename(
+    preferred: str,
+    station_id: str,
+    used: set[str],
+) -> str:
+    base = (preferred or "station").strip() or "station"
+    if base not in used:
+        used.add(base)
+        return base
+
+    suffix = slugify_filename(station_id, fallback="id")[:12] or "id"
+    candidate = f"{base}-{suffix}"[:96].strip("-._") or f"station-{suffix}"
+    if candidate not in used:
+        used.add(candidate)
+        return candidate
+
+    counter = 2
+    while True:
+        candidate = f"{base}-{suffix}-{counter}"[:96].strip("-._") or f"station-{suffix}-{counter}"
+        if candidate not in used:
+            used.add(candidate)
+            return candidate
+        counter += 1
+
+
+def preferred_stream_url(
+    stream_url_raw: str | None,
+    stream_url_resolved: str | None,
+) -> str:
+    raw = (stream_url_raw or "").strip()
+    resolved = (stream_url_resolved or "").strip()
+    if not resolved:
+        return raw
+    if raw and _looks_ephemeral_stream_url(resolved):
+        return raw
+    return resolved
+
+
+def _looks_ephemeral_stream_url(url: str) -> bool:
+    value = url.lower()
+    return any(
+        token in value
+        for token in (
+            "token=",
+            "sig=",
+            "signature=",
+            "expires=",
+            "expiry=",
+            "rj-ttl=",
+            "rj-tok=",
+            "aw_0_1st",
+            "amsparams=",
+            "&cid=",
+            "&sid=",
+            "&tvf=",
+            "?cid=",
+            "?sid=",
+            "?tvf=",
+        )
+    )
+
+
 def keyword_match(haystack: str, keywords: list[str]) -> bool:
     if not keywords:
         return True

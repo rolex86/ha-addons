@@ -19,7 +19,7 @@ from .source_radiogarden import RadioGardenClient
 from .source_radionet import RadioNetClient
 from .storage import EXPORTS_DIR, LOGOS_DIR, load_last_report, save_report
 from .stream_resolver import StreamResolver
-from .utils import hostname_from_url, normalize_text, slugify_filename
+from .utils import ensure_unique_file_basename, hostname_from_url, normalize_text, slugify_filename
 
 
 LOGGER = logging.getLogger(__name__)
@@ -210,6 +210,7 @@ class SyncService:
 
         self._update_progress("dedupe", "Deduplicating stations", len(stations), len(stations))
         stations = self._dedupe(stations)
+        self._assign_unique_basenames(stations)
         self._append_event(f"Deduplicated to {len(stations)} stations")
 
         self._update_progress("validate", "Resolving and validating streams", 0, len(stations))
@@ -436,6 +437,21 @@ class SyncService:
         if incoming.pinned:
             existing.pinned = True
         return existing
+
+    def _assign_unique_basenames(self, stations: list[Station]) -> None:
+        used: set[str] = set()
+        for station in stations:
+            preferred = station.file_basename or slugify_filename(station.display_name)
+            unique = ensure_unique_file_basename(
+                preferred,
+                station.station_id,
+                used,
+            )
+            if unique != preferred:
+                self._append_warning(
+                    f"Adjusted file basename for {station.display_name}: {preferred} -> {unique}"
+                )
+            station.file_basename = unique
 
     def _dedupe_key(self, station: Station) -> str:
         if self.options.dedup_policy == "name_only":

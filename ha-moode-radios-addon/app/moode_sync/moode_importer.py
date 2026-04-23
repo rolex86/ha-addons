@@ -27,6 +27,38 @@ asset_root = catalog_path.parent
 policy = sys.argv[2]
 managed_marker = "managed-by=ha-moode-radios-addon"
 
+def preferred_stream_url(raw, resolved):
+    raw = (raw or "").strip()
+    resolved = (resolved or "").strip()
+    if not resolved:
+        return raw
+    if raw and looks_ephemeral_stream_url(resolved):
+        return raw
+    return resolved
+
+def looks_ephemeral_stream_url(url):
+    value = url.lower()
+    return any(
+        token in value
+        for token in (
+            "token=",
+            "sig=",
+            "signature=",
+            "expires=",
+            "expiry=",
+            "rj-ttl=",
+            "rj-tok=",
+            "aw_0_1st",
+            "amsparams=",
+            "&cid=",
+            "&sid=",
+            "&tvf=",
+            "?cid=",
+            "?sid=",
+            "?tvf=",
+        )
+    )
+
 with catalog_path.open("r", encoding="utf-8") as handle:
     payload = json.load(handle)
 
@@ -92,7 +124,10 @@ max_id = cursor.execute("SELECT COALESCE(MAX(id), 0) FROM cfg_radio").fetchone()
 for station in stations:
     basename = station["file_basename"]
     display_name = station["display_name"]
-    stream_url = station.get("stream_url_resolved") or station.get("stream_url_raw") or ""
+    stream_url = preferred_stream_url(
+        station.get("stream_url_raw"),
+        station.get("stream_url_resolved"),
+    )
     if not stream_url:
         continue
 

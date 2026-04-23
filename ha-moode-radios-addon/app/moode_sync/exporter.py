@@ -6,6 +6,7 @@ from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from .models import Station
+from .utils import preferred_stream_url
 
 
 def build_station_bundle(
@@ -43,7 +44,7 @@ def build_station_bundle(
 
 
 def build_pls(station: Station) -> str:
-    stream_url = station.stream_url_resolved or station.stream_url_raw or ""
+    stream_url = preferred_stream_url(station.stream_url_raw, station.stream_url_resolved)
     return (
         "[playlist]\n"
         "NumberOfEntries=1\n"

@@ -137,12 +137,11 @@ def load_options() -> AddonOptions:
     return options
 
 
-def _write_options_payload(payload: dict[str, Any]) -> None:
+def write_options_payload(payload: dict[str, Any]) -> None:
     OPTIONS_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
-def save_pinned_stations_to_options(pinned_stations: list[dict[str, Any]]) -> None:
-    payload = load_options_payload()
+def serialize_pinned_stations(pinned_stations: list[dict[str, Any]]) -> list[dict[str, Any]]:
     serialized: list[dict[str, Any]] = []
     for station in pinned_stations:
         item = dict(station)
@@ -152,15 +151,21 @@ def save_pinned_stations_to_options(pinned_stations: list[dict[str, Any]]) -> No
         if not item.get("tags"):
             item.pop("tags", None)
         serialized.append(item)
+    return serialized
+
+
+def save_pinned_stations_to_options(pinned_stations: list[dict[str, Any]]) -> None:
+    payload = load_options_payload()
+    serialized = serialize_pinned_stations(pinned_stations)
     payload["pinned_stations"] = serialized
-    _write_options_payload(payload)
+    write_options_payload(payload)
 
 
 def save_filters_to_options(filters: dict[str, Any]) -> FiltersConfig:
     payload = load_options_payload()
     validated = FiltersConfig.model_validate(filters)
     payload["filters"] = validated.model_dump(mode="json")
-    _write_options_payload(payload)
+    write_options_payload(payload)
     return validated
 
 

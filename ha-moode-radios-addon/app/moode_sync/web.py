@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import os
 import time
 from contextlib import asynccontextmanager
 
@@ -13,12 +14,15 @@ from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import TypeAdapter
 
 from .config import (
+    AddonOptions,
     FiltersConfig,
     PinnedStationInput,
+    load_options_payload,
     load_options,
     runtime_port,
-    save_filters_to_options,
     save_pinned_stations_to_options,
+    serialize_pinned_stations,
+    write_options_payload,
 )
 from .logging_utils import configure_logging
 from .source_radiobrowser import RadioBrowserClient
@@ -45,6 +49,8 @@ FILTER_FACET_LIMITS = {
 FILTER_FACET_CACHE_TTL = 1800.0
 FILTER_FACET_CACHE: dict[tuple[str, str], tuple[float, list[dict[str, int | str]]]] = {}
 CODEC_CANDIDATES = ["aac", "aac+", "flac", "mp3", "ogg", "opus"]
+SUPERVISOR_URL = "http://supervisor"
+SUPERVISOR_TOKEN = os.getenv("SUPERVISOR_TOKEN", "").strip()
 
 
 def _dedupe_pinned_stations(items: list[dict]) -> list[dict]:
@@ -106,10 +112,97 @@ def _current_filters() -> dict:
     return OPTIONS.filters.model_dump(mode="json")
 
 
-def _save_filters(payload: dict) -> dict:
+def _replace_runtime_options(options: AddonOptions) -> None:
+    global OPTIONS
+    OPTIONS = options
+    SERVICE.options = options
+
+
+def _refresh_runtime_options() -> AddonOptions:
+    options = load_options()
+    _replace_runtime_options(options)
+    return options
+
+
+def _compose_options_payload(overrides: dict) -> dict:
+    base = OPTIONS.model_dump(mode="json")
+    disk_payload = load_options_payload()
+    if disk_payload:
+        base.update(disk_payload)
+    base.update(overrides)
+    return base
+
+
+def _supervisor_headers() -> dict[str, str]:
+    return {
+        "Authorization": f"Bearer {SUPERVISOR_TOKEN}",
+        "Content-Type": "application/json",
+    }
+
+
+def _supervisor_error_message(response: httpx.Response) -> str:
+    with contextlib.suppress(Exception):
+        payload = response.json()
+        if isinstance(payload, dict):
+            if isinstance(payload.get("message"), str) and payload["message"].strip():
+                return payload["message"].strip()
+            data = payload.get("data")
+            if isinstance(data, dict) and isinstance(data.get("message"), str) and data["message"].strip():
+                return data["message"].strip()
+    return f"Supervisor options update failed with HTTP {response.status_code}"
+
+
+async def _persist_options_payload(payload: dict) -> str:
+    if not SUPERVISOR_TOKEN:
+        write_options_payload(payload)
+        return "local"
+
+    async with httpx.AsyncClient(
+        headers=_supervisor_headers(),
+        follow_redirects=True,
+        timeout=15.0,
+    ) as http:
+        validate = await http.post(
+            f"{SUPERVISOR_URL}/addons/self/options/validate",
+            json=payload,
+        )
+        if validate.is_error:
+            raise HTTPException(status_code=400, detail=_supervisor_error_message(validate))
+        validated_body = validate.json()
+        if isinstance(validated_body, dict):
+            data = validated_body.get("data")
+            if isinstance(data, dict) and data.get("valid") is False:
+                detail = data.get("message") or "Supervisor rejected the options payload."
+                raise HTTPException(status_code=400, detail=str(detail))
+
+        response = await http.post(
+            f"{SUPERVISOR_URL}/addons/self/options",
+            json={"options": payload},
+        )
+        if response.is_error:
+            raise HTTPException(status_code=400, detail=_supervisor_error_message(response))
+
+    write_options_payload(payload)
+    return "supervisor"
+
+
+async def _save_shared_pinned_stations(payload: list[dict]) -> tuple[list[dict], str]:
+    validated = [PinnedStationInput.model_validate(item) for item in payload]
+    serializable = [item.model_dump(mode="json") for item in validated]
+    full_payload = _compose_options_payload(
+        {"pinned_stations": serialize_pinned_stations(serializable)}
+    )
+    source = await _persist_options_payload(full_payload)
+    _replace_runtime_options(AddonOptions.model_validate(full_payload))
+    return serializable, source
+
+
+async def _save_filters(payload: dict) -> tuple[dict, str]:
     validated = FILTERS_ADAPTER.validate_python(payload)
-    OPTIONS.filters = validated
-    return save_filters_to_options(validated.model_dump(mode="json")).model_dump(mode="json")
+    full_payload = _compose_options_payload({"filters": validated.model_dump(mode="json")})
+    source = await _persist_options_payload(full_payload)
+    _replace_runtime_options(AddonOptions.model_validate(full_payload))
+    return validated.model_dump(mode="json"), source
 
 
 async def _load_filter_facet(kind: str, query: str | None = None) -> list[dict[str, int | str]]:
@@ -143,6 +236,7 @@ async def _load_filter_facet(kind: str, query: str | None = None) -> list[dict[s
 
 @app.get("/", response_class=HTMLResponse)
 async def index() -> str:
+    _refresh_runtime_options()
     report = SERVICE.last_report
     station_count = report.summary.station_count if report else 0
     last_run_iso = report.summary.finished_at.isoformat() if report and report.summary.finished_at else ""
@@ -299,6 +393,14 @@ async def index() -> str:
       }}
       .badge.state-idle {{
         background: rgba(143, 164, 194, 0.08);
+      }}
+      .badge.state-ok {{
+        background: rgba(124, 242, 213, 0.14);
+        border-color: rgba(124, 242, 213, 0.34);
+      }}
+      .badge.state-warn {{
+        background: rgba(255, 209, 102, 0.14);
+        border-color: rgba(255, 209, 102, 0.34);
       }}
       .progress-bar {{
         margin-top: 14px;
@@ -514,6 +616,70 @@ async def index() -> str:
         color: var(--muted);
         font-size: 0.92rem;
       }}
+      .pinned-shell {{
+        margin-top: 18px;
+        padding: 18px;
+        border-radius: 18px;
+        border: 1px solid var(--line);
+        background: linear-gradient(180deg, rgba(13, 19, 29, 0.95), rgba(10, 16, 24, 0.98));
+      }}
+      .pinned-toolbar {{
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        justify-content: space-between;
+        align-items: center;
+      }}
+      .pinned-list {{
+        display: grid;
+        gap: 14px;
+        margin-top: 16px;
+      }}
+      .pinned-card {{
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background: rgba(143, 164, 194, 0.05);
+        padding: 16px;
+      }}
+      .pinned-card-head {{
+        display: flex;
+        gap: 12px;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+      }}
+      .pinned-card-title {{
+        font-size: 1rem;
+        font-weight: 700;
+      }}
+      .danger-btn {{
+        background: rgba(255, 107, 107, 0.16);
+        border-color: rgba(255, 107, 107, 0.34);
+        color: #ffd8d8;
+      }}
+      .pinned-grid {{
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 12px;
+        margin-top: 14px;
+      }}
+      .field-label {{
+        display: block;
+        color: var(--muted);
+        font-size: 0.85rem;
+        margin-bottom: 6px;
+      }}
+      select.text-input {{
+        appearance: none;
+      }}
+      .pinned-empty {{
+        margin-top: 16px;
+        color: var(--muted);
+        border: 1px dashed var(--line);
+        border-radius: 16px;
+        padding: 18px;
+        text-align: center;
+      }}
       @media (max-width: 720px) {{
         .filter-toolbar {{
           align-items: stretch;
@@ -529,7 +695,7 @@ async def index() -> str:
       <section class="hero">
         <h1>moOde Radios Sync</h1>
         <p>
-          Configure pinned stations as JSON, run sync manually, preview the last report,
+          Configure discovery filters and pinned stations, run sync manually, preview the last report,
           and download the generated radio bundle for moOde.
         </p>
         <div class="actions">
@@ -539,11 +705,14 @@ async def index() -> str:
           <a href="downloads/stations.zip">Download Latest ZIP</a>
           <a href="api/report">Open JSON Report</a>
         </div>
+        <div style="margin-top:14px">
+          <span id="saveStatus" class="badge state-idle">Config status: <strong>Idle</strong></span>
+        </div>
         <div class="grid">
           <div class="card"><div>Stations in last run</div><div style="font-size:1.5rem;margin-top:8px">{station_count}</div></div>
           <div class="card"><div>Last completed sync</div><div id="lastCompletedSync" style="font-size:1rem;margin-top:8px">Never</div></div>
           <div class="card"><div>Dry run</div><div style="font-size:1.5rem;margin-top:8px">{str(OPTIONS.dry_run).lower()}</div></div>
-          <div class="card"><div>Pinned stations</div><div style="font-size:1.5rem;margin-top:8px">{pinned_count}</div></div>
+          <div class="card"><div>Pinned stations</div><div id="pinnedCountValue" style="font-size:1.5rem;margin-top:8px">{pinned_count}</div></div>
         </div>
         <div class="section-title">Discovery Filters</div>
         <div class="section-note">
@@ -655,7 +824,14 @@ async def index() -> str:
           This is the same shared pinned station list used by both the Home Assistant add-on Configuration tab
           and this web UI. Saving here updates the add-on options file directly.
         </div>
-        <textarea id="pinned">{pinned_json}</textarea>
+        <div class="pinned-shell">
+          <div class="pinned-toolbar">
+            <div class="badge">Configured pinned stations: <strong id="pinnedToolbarCount">{pinned_count}</strong></div>
+            <button type="button" onclick="addPinnedStation()">Add pinned station</button>
+          </div>
+          <div id="pinnedEmpty" class="pinned-empty" style="display:none">No pinned stations yet. Add one and save.</div>
+          <div id="pinnedList" class="pinned-list"></div>
+        </div>
         <div class="section-title">Sync Progress</div>
         <div class="progress-wrap">
           <div class="progress-head">
@@ -700,6 +876,7 @@ async def index() -> str:
     <script>
       let syncStatusTimer = null;
       const DEFAULT_FILTERS = {filters_json};
+      const INITIAL_PINNED = {pinned_json};
       const CODEC_OPTIONS = {codec_candidates_json};
       const LAST_RUN_ISO = {json.dumps(last_run_iso)};
       const FACETS = {{
@@ -712,6 +889,7 @@ async def index() -> str:
       const facetTimers = {{}};
       const loadedFacets = new Set();
       const filterState = JSON.parse(JSON.stringify(DEFAULT_FILTERS));
+      let pinnedState = JSON.parse(JSON.stringify(INITIAL_PINNED));
 
       function escapeHtml(value) {{
         return String(value)
@@ -743,6 +921,13 @@ async def index() -> str:
         el.title = LAST_RUN_ISO;
       }}
 
+      function setSaveStatus(text, state = "idle") {{
+        const el = document.getElementById("saveStatus");
+        if (!el) return;
+        el.className = `badge state-${{state}}`;
+        el.innerHTML = `Config status: <strong>${{escapeHtml(text)}}</strong>`;
+      }}
+
       function normalizeList(value) {{
         const raw = Array.isArray(value)
           ? value
@@ -764,9 +949,156 @@ async def index() -> str:
         return normalizeList(document.getElementById(id)?.value || "");
       }}
 
+      function normalizePinnedStation(item = {{}}) {{
+        const normalized = {{
+          name: String(item.name || "").trim(),
+          source_hint: String(item.source_hint || "").trim(),
+          source_url: String(item.source_url || "").trim(),
+          stream_url: String(item.stream_url || "").trim(),
+          country: String(item.country || "").trim(),
+          language: String(item.language || "").trim(),
+          tags: normalizeList(item.tags || []),
+        }};
+        for (const key of Object.keys(normalized)) {{
+          if (key === "tags") continue;
+          if (!normalized[key]) delete normalized[key];
+        }}
+        if (!normalized.tags.length) {{
+          delete normalized.tags;
+        }}
+        return normalized;
+      }}
+
       function setInputCsv(id, values) {{
         const el = document.getElementById(id);
         if (el) el.value = normalizeList(values).join(", ");
+      }}
+
+      function updatePinnedCount() {{
+        const count = pinnedState.length;
+        const card = document.getElementById("pinnedCountValue");
+        const badge = document.getElementById("pinnedToolbarCount");
+        const empty = document.getElementById("pinnedEmpty");
+        if (card) card.textContent = String(count);
+        if (badge) badge.textContent = String(count);
+        if (empty) empty.style.display = count ? "none" : "";
+      }}
+
+      function setPinnedField(index, key, value) {{
+        if (!pinnedState[index]) return;
+        if (key === "tags") {{
+          const tags = normalizeList(value);
+          if (tags.length) pinnedState[index].tags = tags;
+          else delete pinnedState[index].tags;
+          return;
+        }}
+        const text = String(value || "").trim();
+        if (text) pinnedState[index][key] = text;
+        else delete pinnedState[index][key];
+      }}
+
+      function renderPinnedEditor() {{
+        const list = document.getElementById("pinnedList");
+        if (!list) return;
+        list.innerHTML = "";
+        updatePinnedCount();
+        pinnedState.forEach((item, index) => {{
+          const station = normalizePinnedStation(item);
+          const card = document.createElement("section");
+          card.className = "pinned-card";
+
+          const head = document.createElement("div");
+          head.className = "pinned-card-head";
+
+          const title = document.createElement("div");
+          title.className = "pinned-card-title";
+          title.textContent = station.name || `Pinned station ${index + 1}`;
+
+          const remove = document.createElement("button");
+          remove.type = "button";
+          remove.className = "danger-btn";
+          remove.textContent = "Remove";
+          remove.addEventListener("click", () => removePinnedStation(index));
+
+          head.appendChild(title);
+          head.appendChild(remove);
+          card.appendChild(head);
+
+          const grid = document.createElement("div");
+          grid.className = "pinned-grid";
+
+          const fields = [
+            ["name", "Name", "text", "BBC World Service"],
+            ["source_hint", "Source hint", "select", ""],
+            ["source_url", "Source URL", "text", "https://..."],
+            ["stream_url", "Direct stream URL", "text", "https://.../stream.mp3"],
+            ["country", "Country", "text", "Germany"],
+            ["language", "Language", "text", "English"],
+            ["tags", "Tags", "text", "jazz, chill, ambient"],
+          ];
+
+          for (const [key, labelText, type, placeholder] of fields) {{
+            const field = document.createElement("label");
+            const label = document.createElement("span");
+            label.className = "field-label";
+            label.textContent = labelText;
+            field.appendChild(label);
+
+            let input;
+            if (type === "select") {{
+              input = document.createElement("select");
+              input.className = "text-input";
+              for (const [value, text] of [
+                ["", "Auto detect"],
+                ["manual", "Manual"],
+                ["radiobrowser", "Radio Browser"],
+                ["radiogarden", "Radio Garden"],
+                ["radionet", "radio.net"],
+              ]) {{
+                const option = document.createElement("option");
+                option.value = value;
+                option.textContent = text;
+                if ((station[key] || "") === value) option.selected = true;
+                input.appendChild(option);
+              }}
+              input.addEventListener("change", (event) => {{
+                setPinnedField(index, key, event.target.value);
+              }});
+            }} else {{
+              input = document.createElement("input");
+              input.type = "text";
+              input.className = "text-input";
+              input.placeholder = placeholder;
+              input.value = key === "tags"
+                ? normalizeList(station.tags || []).join(", ")
+                : String(station[key] || "");
+              input.addEventListener("input", (event) => {{
+                setPinnedField(index, key, event.target.value);
+              }});
+            }}
+            field.appendChild(input);
+            grid.appendChild(field);
+          }}
+
+          card.appendChild(grid);
+          list.appendChild(card);
+        }});
+      }}
+
+      function addPinnedStation() {{
+        pinnedState.push({{ name: "" }});
+        renderPinnedEditor();
+      }}
+
+      function removePinnedStation(index) {{
+        pinnedState.splice(index, 1);
+        renderPinnedEditor();
+      }}
+
+      function pinnedPayload() {{
+        return pinnedState
+          .map((item) => normalizePinnedStation(item))
+          .filter((item) => item.name);
       }}
 
       function facetLists(kind) {{
@@ -1058,12 +1390,18 @@ async def index() -> str:
         readFilterInputsIntoState();
         const result = document.getElementById("result");
         result.textContent = "Saving filters...";
+        setSaveStatus("Saving filters...", "idle");
         const response = await fetch("api/filters", {{
           method: "PUT",
           headers: {{ "Content-Type": "application/json" }},
           body: JSON.stringify(filterState)
         }});
         const data = await response.json();
+        if (!response.ok) {{
+          setSaveStatus(data?.detail || "Filter save failed", "warn");
+          result.textContent = JSON.stringify(data, null, 2);
+          return;
+        }}
         if (data.filters) {{
           Object.assign(filterState, data.filters);
           syncFilterInputsFromState();
@@ -1071,6 +1409,7 @@ async def index() -> str:
             renderFacet(kind, facetCache.get(currentFacetCacheKey(kind)) || []);
           }}
         }}
+        setSaveStatus(data.message || "Filters saved", data.source === "supervisor" ? "ok" : "warn");
         result.textContent = JSON.stringify(data, null, 2);
       }}
 
@@ -1185,22 +1524,32 @@ async def index() -> str:
       async function savePinned() {{
         const result = document.getElementById("result");
         result.textContent = "Saving pinned stations...";
-        const raw = document.getElementById("pinned").value;
-        const parsed = JSON.parse(raw);
+        setSaveStatus("Saving pinned stations...", "idle");
+        const parsed = pinnedPayload();
         const response = await fetch("api/pinned-stations", {{
           method: "PUT",
           headers: {{ "Content-Type": "application/json" }},
           body: JSON.stringify(parsed)
         }});
         const data = await response.json();
-        if (data.pinned_stations) {{
-          document.getElementById("pinned").value = JSON.stringify(data.pinned_stations, null, 2);
+        if (!response.ok) {{
+          setSaveStatus(data?.detail || "Pinned station save failed", "warn");
+          result.textContent = JSON.stringify(data, null, 2);
+          return;
         }}
+        if (data.pinned_stations) {{
+          pinnedState = Array.isArray(data.pinned_stations)
+            ? data.pinned_stations.map((item) => normalizePinnedStation(item))
+            : [];
+          renderPinnedEditor();
+        }}
+        setSaveStatus(data.message || "Pinned stations saved", data.source === "supervisor" ? "ok" : "warn");
         result.textContent = JSON.stringify(data, null, 2);
       }}
 
       renderLastCompletedSync();
       initFiltersUi();
+      renderPinnedEditor();
       renderSyncStatus({{"progress": {progress_json}}});
       ensureSyncPolling();
     </script>
@@ -1211,18 +1560,25 @@ async def index() -> str:
 
 @app.get("/api/options")
 async def get_options():
+    _refresh_runtime_options()
     return OPTIONS.model_dump(mode="json")
 
 
 @app.get("/api/filters")
 async def get_filters():
+    _refresh_runtime_options()
     return _current_filters()
 
 
 @app.put("/api/filters")
 async def put_filters(payload: dict):
-    saved = _save_filters(payload)
-    return {"saved": True, "filters": saved}
+    saved, source = await _save_filters(payload)
+    return {
+        "saved": True,
+        "source": source,
+        "message": "Filters saved to Home Assistant add-on configuration.",
+        "filters": saved,
+    }
 
 
 @app.get("/api/filter-candidates")
@@ -1255,6 +1611,7 @@ async def get_sync_status():
 
 @app.get("/api/pinned-stations")
 async def get_pinned_stations():
+    _refresh_runtime_options()
     return _shared_pinned_stations()
 
 
@@ -1262,12 +1619,19 @@ async def get_pinned_stations():
 async def put_pinned_stations(payload: list[dict]):
     validated = PINNED_ADAPTER.validate_python(payload)
     serializable = [item.model_dump(mode="json") for item in validated]
-    _save_shared_pinned_stations(serializable)
-    return {"saved": len(serializable), "pinned_stations": serializable}
+    saved, source = await _save_shared_pinned_stations(serializable)
+    return {
+        "saved": len(saved),
+        "source": source,
+        "message": "Pinned stations saved to Home Assistant add-on configuration.",
+        "pinned_stations": saved,
+    }
 
 
 @app.post("/api/sync-now")
 async def sync_now():
+    if not SERVICE.is_sync_running():
+        _refresh_runtime_options()
     started = await SERVICE.start_background_sync(mode="manual")
     return {
         "started": started,

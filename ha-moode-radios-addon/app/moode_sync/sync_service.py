@@ -90,7 +90,7 @@ class SyncService:
             stations: list[Station] = []
             try:
                 async with httpx.AsyncClient(
-                    headers={"User-Agent": "ha-moode-radios-addon/0.3.0"},
+                    headers={"User-Agent": "ha-moode-radios-addon/0.3.1"},
                     follow_redirects=True,
                 ) as http:
                     self._update_progress("collect", "Collecting station candidates")

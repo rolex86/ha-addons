@@ -101,7 +101,7 @@ schema:
       source_hint: str?
       country: str?
       language: str?
-      tags: [str]?
+      tags: [str]
   max_generated_stations: int(1,1000)
   request_timeout: int(3,120)
   dedup_policy: list(name_and_stream|name_only|stream_only|domain)

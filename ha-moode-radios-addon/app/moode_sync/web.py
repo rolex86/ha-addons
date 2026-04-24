@@ -476,9 +476,9 @@ async def index() -> str:
         justify-content: space-between;
       }}
       .filter-layout {{
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-        gap: 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 18px;
         margin-top: 16px;
       }}
       .facet-card, .settings-card {{
@@ -486,6 +486,10 @@ async def index() -> str:
         border-radius: 18px;
         background: rgba(143, 164, 194, 0.05);
         padding: 16px;
+      }}
+      .facet-card {{
+        display: flex;
+        flex-direction: column;
       }}
       .facet-head {{
         display: flex;
@@ -517,10 +521,13 @@ async def index() -> str:
         box-shadow: 0 0 0 4px var(--glow);
       }}
       .facet-actions {{
-        display: flex;
-        flex-wrap: wrap;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto auto;
         gap: 10px;
         margin-top: 12px;
+      }}
+      .facet-actions .text-input {{
+        margin-top: 0;
       }}
       .facet-actions button.small-btn, .codec-pills button, .selected-chip button {{
         padding: 9px 14px;
@@ -538,6 +545,19 @@ async def index() -> str:
         flex-wrap: wrap;
         gap: 10px;
         margin-top: 14px;
+      }}
+      .pill-grid {{
+        max-height: 320px;
+        overflow-y: auto;
+        align-content: flex-start;
+        padding-right: 6px;
+      }}
+      .pill-grid::-webkit-scrollbar {{
+        width: 10px;
+      }}
+      .pill-grid::-webkit-scrollbar-thumb {{
+        background: rgba(118, 146, 181, 0.28);
+        border-radius: 999px;
       }}
       .filter-pill, .codec-pill, .selected-chip {{
         border-radius: 999px;
@@ -586,6 +606,11 @@ async def index() -> str:
         color: var(--muted);
         font-size: 0.9rem;
       }}
+      .facet-hint {{
+        order: -1;
+        margin-top: 12px;
+        margin-bottom: 2px;
+      }}
       .settings-grid {{
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -615,6 +640,17 @@ async def index() -> str:
         margin-top: 12px;
         color: var(--muted);
         font-size: 0.92rem;
+      }}
+      @media (max-width: 760px) {{
+        .facet-actions {{
+          grid-template-columns: 1fr 1fr;
+        }}
+        .facet-actions .text-input {{
+          grid-column: 1 / -1;
+        }}
+        .pill-grid {{
+          max-height: 260px;
+        }}
       }}
       .pinned-shell {{
         margin-top: 18px;

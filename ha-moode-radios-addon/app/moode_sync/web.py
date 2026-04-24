@@ -1181,12 +1181,6 @@ async def index() -> str:
         const merged = [];
         const seen = new Set();
         const lists = facetLists(kind);
-        for (const value of [...lists.include, ...lists.exclude]) {{
-          const key = value.toLowerCase();
-          if (seen.has(key)) continue;
-          seen.add(key);
-          merged.push({{ name: value, count: null }});
-        }}
         for (const item of items || []) {{
           const name = String(item?.name || "").trim();
           if (!name) continue;
@@ -1194,6 +1188,14 @@ async def index() -> str:
           if (seen.has(key)) continue;
           seen.add(key);
           merged.push(item);
+        }}
+        // Keep the grid stable: selected values stay in their original result order.
+        // Only append manual selections that are not present in the current result set.
+        for (const value of [...lists.include, ...lists.exclude]) {{
+          const key = value.toLowerCase();
+          if (seen.has(key)) continue;
+          seen.add(key);
+          merged.push({{ name: value, count: null }});
         }}
         return merged;
       }}

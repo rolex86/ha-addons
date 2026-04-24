@@ -1012,7 +1012,7 @@ async def index() -> str:
 
           const title = document.createElement("div");
           title.className = "pinned-card-title";
-          title.textContent = station.name || `Pinned station ${index + 1}`;
+          title.textContent = station.name || `Pinned station ${{index + 1}}`;
 
           const remove = document.createElement("button");
           remove.type = "button";

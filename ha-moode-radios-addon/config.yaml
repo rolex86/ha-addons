@@ -1,7 +1,7 @@
 name: moOde Radios Sync
 slug: ha_moode_radios_addon
 description: Build and sync curated internet radio catalogs into moOde Audio.
-version: "0.3.3"
+version: "0.4.0"
 url: https://github.com/rolex86/ha-addons
 arch:
   - aarch64
@@ -36,23 +36,6 @@ options:
     - radiogarden
     - radiobrowser
     - radionet
-  filters:
-    include_countries: []
-    exclude_countries: []
-    include_states: []
-    exclude_states: []
-    include_languages: []
-    exclude_languages: []
-    include_tags: []
-    exclude_tags: []
-    include_keywords: []
-    exclude_keywords: []
-    min_bitrate: 0
-    allowed_codecs: []
-    only_working_streams: true
-    exclude_podcasts: true
-    exclude_talk: false
-  pinned_stations: []
   max_generated_stations: 25
   request_timeout: 15
   dedup_policy: "name_and_stream"
@@ -80,30 +63,6 @@ schema:
   sync_on_start: bool
   random_start_delay_seconds: int(0,600)
   source_priority: [str]
-  filters:
-    include_countries: [str]
-    exclude_countries: [str]
-    include_states: [str]
-    exclude_states: [str]
-    include_languages: [str]
-    exclude_languages: [str]
-    include_tags: [str]
-    exclude_tags: [str]
-    include_keywords: [str]
-    exclude_keywords: [str]
-    min_bitrate: int(0,2048)
-    allowed_codecs: [str]
-    only_working_streams: bool
-    exclude_podcasts: bool
-    exclude_talk: bool
-  pinned_stations:
-    - name: str
-      source_url: str?
-      stream_url: str?
-      source_hint: str?
-      country: str?
-      language: str?
-      tags: str?
   max_generated_stations: int(1,1000)
   request_timeout: int(3,120)
   dedup_policy: list(name_and_stream|name_only|stream_only|domain)

@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-import os
 import time
 from contextlib import asynccontextmanager
 
@@ -17,12 +16,13 @@ from .config import (
     AddonOptions,
     FiltersConfig,
     PinnedStationInput,
-    load_options_payload,
+    UiConfig,
+    build_runtime_options,
     load_options,
+    load_ui_config,
+    migrate_ui_config_from_options,
     runtime_port,
-    save_pinned_stations_to_options,
-    serialize_pinned_stations,
-    write_options_payload,
+    write_ui_config,
 )
 from .logging_utils import configure_logging
 from .source_radiobrowser import RadioBrowserClient
@@ -35,7 +35,8 @@ from .storage import (
 from .sync_service import SyncService
 
 
-OPTIONS = load_options()
+UI_CONFIG = migrate_ui_config_from_options()
+OPTIONS = build_runtime_options(load_options(), UI_CONFIG)
 configure_logging(OPTIONS.log_level)
 ensure_storage()
 PINNED_ADAPTER = TypeAdapter(list[PinnedStationInput])
@@ -49,8 +50,6 @@ FILTER_FACET_LIMITS = {
 FILTER_FACET_CACHE_TTL = 1800.0
 FILTER_FACET_CACHE: dict[tuple[str, str], tuple[float, list[dict[str, int | str]]]] = {}
 CODEC_CANDIDATES = ["aac", "aac+", "flac", "mp3", "ogg", "opus"]
-SUPERVISOR_URL = "http://supervisor"
-SUPERVISOR_TOKEN = os.getenv("SUPERVISOR_TOKEN", "").strip()
 
 
 def _dedupe_pinned_stations(items: list[dict]) -> list[dict]:
@@ -66,14 +65,21 @@ def _dedupe_pinned_stations(items: list[dict]) -> list[dict]:
 
 
 def _migrate_legacy_pinned_stations() -> None:
+    global OPTIONS, UI_CONFIG
     legacy = load_legacy_pinned_station_overrides()
     if not legacy:
         return
     merged = _dedupe_pinned_stations(
-        [item.model_dump(mode="json") for item in OPTIONS.pinned_stations] + legacy
+        [item.model_dump(mode="json") for item in UI_CONFIG.pinned_stations] + legacy
     )
-    OPTIONS.pinned_stations = [PinnedStationInput.model_validate(item) for item in merged]
-    save_pinned_stations_to_options(merged)
+    UI_CONFIG = UiConfig.model_validate(
+        {
+            "filters": UI_CONFIG.filters.model_dump(mode="json"),
+            "pinned_stations": merged,
+        }
+    )
+    OPTIONS = build_runtime_options(load_options(), UI_CONFIG)
+    write_ui_config(UI_CONFIG)
     clear_legacy_pinned_station_overrides()
 
 
@@ -98,111 +104,50 @@ app = FastAPI(title="moOde Radios Sync", lifespan=lifespan)
 
 
 def _shared_pinned_stations() -> list[dict]:
-    return [item.model_dump(mode="json") for item in OPTIONS.pinned_stations]
-
-
-def _save_shared_pinned_stations(payload: list[dict]) -> None:
-    validated = [PinnedStationInput.model_validate(item) for item in payload]
-    serializable = [item.model_dump(mode="json") for item in validated]
-    OPTIONS.pinned_stations = validated
-    save_pinned_stations_to_options(serializable)
+    return [item.model_dump(mode="json") for item in UI_CONFIG.pinned_stations]
 
 
 def _current_filters() -> dict:
-    return OPTIONS.filters.model_dump(mode="json")
+    return UI_CONFIG.filters.model_dump(mode="json")
 
 
 def _replace_runtime_options(options: AddonOptions) -> None:
-    global OPTIONS
+    global OPTIONS, UI_CONFIG
     OPTIONS = options
-    SERVICE.options = options
+    UI_CONFIG = UiConfig.model_validate(
+        {
+            "filters": options.filters.model_dump(mode="json"),
+            "pinned_stations": [item.model_dump(mode="json") for item in options.pinned_stations],
+        }
+    )
+    service = globals().get("SERVICE")
+    if service is not None:
+        service.options = options
 
 
 def _refresh_runtime_options() -> AddonOptions:
-    options = load_options()
+    options = build_runtime_options(load_options(), load_ui_config())
     _replace_runtime_options(options)
     return options
-
-
-def _compose_options_payload(overrides: dict) -> dict:
-    base = OPTIONS.model_dump(mode="json")
-    disk_payload = load_options_payload()
-    if disk_payload:
-        base.update(disk_payload)
-    base.update(overrides)
-    return base
-
-
-def _supervisor_headers() -> dict[str, str]:
-    return {
-        "Authorization": f"Bearer {SUPERVISOR_TOKEN}",
-        "Content-Type": "application/json",
-    }
-
-
-def _supervisor_error_message(response: httpx.Response) -> str:
-    with contextlib.suppress(Exception):
-        payload = response.json()
-        if isinstance(payload, dict):
-            if isinstance(payload.get("message"), str) and payload["message"].strip():
-                return payload["message"].strip()
-            data = payload.get("data")
-            if isinstance(data, dict) and isinstance(data.get("message"), str) and data["message"].strip():
-                return data["message"].strip()
-    return f"Supervisor options update failed with HTTP {response.status_code}"
-
-
-async def _persist_options_payload(payload: dict) -> str:
-    if not SUPERVISOR_TOKEN:
-        write_options_payload(payload)
-        return "local"
-
-    async with httpx.AsyncClient(
-        headers=_supervisor_headers(),
-        follow_redirects=True,
-        timeout=15.0,
-    ) as http:
-        validate = await http.post(
-            f"{SUPERVISOR_URL}/addons/self/options/validate",
-            json=payload,
-        )
-        if validate.is_error:
-            raise HTTPException(status_code=400, detail=_supervisor_error_message(validate))
-        validated_body = validate.json()
-        if isinstance(validated_body, dict):
-            data = validated_body.get("data")
-            if isinstance(data, dict) and data.get("valid") is False:
-                detail = data.get("message") or "Supervisor rejected the options payload."
-                raise HTTPException(status_code=400, detail=str(detail))
-
-        response = await http.post(
-            f"{SUPERVISOR_URL}/addons/self/options",
-            json={"options": payload},
-        )
-        if response.is_error:
-            raise HTTPException(status_code=400, detail=_supervisor_error_message(response))
-
-    write_options_payload(payload)
-    return "supervisor"
 
 
 async def _save_shared_pinned_stations(payload: list[dict]) -> tuple[list[dict], str]:
     validated = [PinnedStationInput.model_validate(item) for item in payload]
     serializable = [item.model_dump(mode="json") for item in validated]
-    full_payload = _compose_options_payload(
-        {"pinned_stations": serialize_pinned_stations(serializable)}
-    )
-    source = await _persist_options_payload(full_payload)
-    _replace_runtime_options(AddonOptions.model_validate(full_payload))
-    return serializable, source
+    ui_config = load_ui_config()
+    ui_config.pinned_stations = validated
+    write_ui_config(ui_config)
+    _replace_runtime_options(build_runtime_options(load_options(), ui_config))
+    return serializable, "local"
 
 
 async def _save_filters(payload: dict) -> tuple[dict, str]:
     validated = FILTERS_ADAPTER.validate_python(payload)
-    full_payload = _compose_options_payload({"filters": validated.model_dump(mode="json")})
-    source = await _persist_options_payload(full_payload)
-    _replace_runtime_options(AddonOptions.model_validate(full_payload))
-    return validated.model_dump(mode="json"), source
+    ui_config = load_ui_config()
+    ui_config.filters = validated
+    write_ui_config(ui_config)
+    _replace_runtime_options(build_runtime_options(load_options(), ui_config))
+    return validated.model_dump(mode="json"), "local"
 
 
 async def _load_filter_facet(kind: str, query: str | None = None) -> list[dict[str, int | str]]:
@@ -752,7 +697,7 @@ async def index() -> str:
         </div>
         <div class="section-title">Discovery Filters</div>
         <div class="section-note">
-          Same filter config as the Home Assistant add-on settings. Click a pill to cycle
+          Saved in the add-on web UI config. Click a pill to cycle
           <strong>include</strong> → <strong>exclude</strong> → <strong>ignore</strong>.
         </div>
         <div class="filter-shell">
@@ -1447,7 +1392,7 @@ async def index() -> str:
             renderFacet(kind, facetCache.get(currentFacetCacheKey(kind)) || []);
           }}
         }}
-        setSaveStatus(data.message || "Filters saved", data.source === "supervisor" ? "ok" : "warn");
+        setSaveStatus(data.message || "Filters saved", "ok");
         result.textContent = JSON.stringify(data, null, 2);
       }}
 
@@ -1581,7 +1526,7 @@ async def index() -> str:
             : [];
           renderPinnedEditor();
         }}
-        setSaveStatus(data.message || "Pinned stations saved", data.source === "supervisor" ? "ok" : "warn");
+        setSaveStatus(data.message || "Pinned stations saved", "ok");
         result.textContent = JSON.stringify(data, null, 2);
       }}
 
@@ -1614,7 +1559,7 @@ async def put_filters(payload: dict):
     return {
         "saved": True,
         "source": source,
-        "message": "Filters saved to Home Assistant add-on configuration.",
+        "message": "Filters saved to local web UI configuration.",
         "filters": saved,
     }
 
@@ -1661,7 +1606,7 @@ async def put_pinned_stations(payload: list[dict]):
     return {
         "saved": len(saved),
         "source": source,
-        "message": "Pinned stations saved to Home Assistant add-on configuration.",
+        "message": "Pinned stations saved to local web UI configuration.",
         "pinned_stations": saved,
     }
 

@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field, field_validator
 
 OPTIONS_PATH = Path("/data/options.json")
 DATA_ROOT = Path("/data/moode-radios")
+UI_CONFIG_PATH = DATA_ROOT / "config.json"
 FILTER_LIST_FIELDS = (
     "include_countries",
     "exclude_countries",
@@ -124,6 +125,11 @@ class AddonOptions(BaseModel):
     dry_run: bool = True
 
 
+class UiConfig(BaseModel):
+    filters: FiltersConfig = Field(default_factory=FiltersConfig)
+    pinned_stations: list[PinnedStationInput] = Field(default_factory=list)
+
+
 def load_options_payload() -> dict[str, Any]:
     if not OPTIONS_PATH.exists():
         return {}
@@ -139,6 +145,49 @@ def load_options() -> AddonOptions:
 
 def write_options_payload(payload: dict[str, Any]) -> None:
     OPTIONS_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def load_ui_config_payload() -> dict[str, Any]:
+    DATA_ROOT.mkdir(parents=True, exist_ok=True)
+    if not UI_CONFIG_PATH.exists():
+        return {}
+    return json.loads(UI_CONFIG_PATH.read_text(encoding="utf-8"))
+
+
+def write_ui_config_payload(payload: dict[str, Any]) -> None:
+    DATA_ROOT.mkdir(parents=True, exist_ok=True)
+    UI_CONFIG_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def load_ui_config() -> UiConfig:
+    return UiConfig.model_validate(load_ui_config_payload())
+
+
+def write_ui_config(config: UiConfig) -> None:
+    write_ui_config_payload(config.model_dump(mode="json"))
+
+
+def migrate_ui_config_from_options() -> UiConfig:
+    current_payload = load_ui_config_payload()
+    if current_payload:
+        return UiConfig.model_validate(current_payload)
+
+    options_payload = load_options_payload()
+    migrated = UiConfig.model_validate(
+        {
+            "filters": options_payload.get("filters", {}),
+            "pinned_stations": options_payload.get("pinned_stations", []),
+        }
+    )
+    write_ui_config(migrated)
+    return migrated
+
+
+def build_runtime_options(base_options: AddonOptions, ui_config: UiConfig) -> AddonOptions:
+    payload = base_options.model_dump(mode="json")
+    payload["filters"] = ui_config.filters.model_dump(mode="json")
+    payload["pinned_stations"] = [item.model_dump(mode="json") for item in ui_config.pinned_stations]
+    return AddonOptions.model_validate(payload)
 
 
 def serialize_pinned_stations(pinned_stations: list[dict[str, Any]]) -> list[dict[str, Any]]:

@@ -57,6 +57,8 @@ class SyncSummary(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
     source_counts: dict[str, int] = Field(default_factory=dict)
+    filters: dict = Field(default_factory=dict)
+    pinned_station_count: int = 0
 
 
 class SyncReport(BaseModel):

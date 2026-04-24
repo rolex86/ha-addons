@@ -44,32 +44,53 @@ class RadioBrowserClient:
 
     async def discover(self, filters: FiltersConfig, limit: int | None = None) -> list[Station]:
         limit = limit or self.options.max_generated_stations
-        params = {
+        page_size = max(limit * 2, 50)
+        max_pages = 8
+        base_params = {
             "hidebroken": "true" if filters.only_working_streams else "false",
-            "limit": limit,
+            "limit": page_size,
             "reverse": "true",
             "order": "clickcount",
         }
         country = filters.include_countries[0] if filters.include_countries else None
         if country and len(country) == 2:
-            params["countrycode"] = country.upper()
+            base_params["countrycode"] = country.upper()
         elif country:
-            params["country"] = country
+            base_params["country"] = country
 
         tag = filters.include_tags[0] if filters.include_tags else None
         if tag:
-            params["tag"] = tag
+            base_params["tag"] = tag
 
         for base in API_BASES:
+            discovered: list[Station] = []
+            seen: set[str] = set()
             try:
-                response = await self.http.get(
-                    f"{base}/json/stations/search",
-                    params=params,
-                    timeout=self.options.request_timeout,
-                )
-                response.raise_for_status()
-                stations = self._convert_many(response.json())
-                return [station for station in stations if self._matches_filters(station, filters)]
+                for page in range(max_pages):
+                    params = dict(base_params)
+                    params["offset"] = page * page_size
+                    response = await self.http.get(
+                        f"{base}/json/stations/search",
+                        params=params,
+                        timeout=self.options.request_timeout,
+                    )
+                    response.raise_for_status()
+                    payload = response.json()
+                    if not payload:
+                        break
+                    stations = self._convert_many(payload)
+                    for station in stations:
+                        key = station.station_id or station.stream_url_resolved or station.display_name.lower()
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        if self._matches_filters(station, filters):
+                            discovered.append(station)
+                            if len(discovered) >= limit:
+                                return discovered
+                    if len(payload) < page_size:
+                        break
+                return discovered
             except Exception as exc:
                 LOGGER.warning("Radio Browser discover failed for %s: %s", base, exc)
         return []

@@ -1469,7 +1469,11 @@ async def index() -> str:
         }}
         document.getElementById("progressLog").innerHTML = lines.length ? lines.join("\\n") : "No sync activity yet.";
         if (!running && payload?.last_report) {{
-          document.getElementById("result").textContent = JSON.stringify(payload.last_report, null, 2);
+          document.getElementById("result").textContent = JSON.stringify({{
+            current_filters: payload.current_filters || filterState,
+            current_pinned_station_count: payload.current_pinned_station_count ?? pinnedState.length,
+            last_report: payload.last_report
+          }}, null, 2);
         }}
       }}
 
@@ -1572,6 +1576,7 @@ async def get_filter_candidates(kind: str, q: str = ""):
 
 @app.get("/api/report")
 async def get_report():
+    _refresh_runtime_options()
     report = SERVICE.last_report
     if not report:
         raise HTTPException(status_code=404, detail="No sync report available yet.")
@@ -1586,9 +1591,12 @@ async def get_stations():
 
 @app.get("/api/sync-status")
 async def get_sync_status():
+    _refresh_runtime_options()
     return {
         "progress": SERVICE.progress.model_dump(mode="json"),
-        "last_report": None if not SERVICE.last_report else SERVICE.last_report.summary.model_dump(mode="json"),
+        "current_filters": _current_filters(),
+        "current_pinned_station_count": len(_shared_pinned_stations()),
+        "last_report": None if not SERVICE.last_report else SERVICE.last_report.model_dump(mode="json"),
     }
 
 
@@ -1619,7 +1627,9 @@ async def sync_now():
     return {
         "started": started,
         "progress": SERVICE.progress.model_dump(mode="json"),
-        "last_report": None if not SERVICE.last_report else SERVICE.last_report.summary.model_dump(mode="json"),
+        "current_filters": _current_filters(),
+        "current_pinned_station_count": len(_shared_pinned_stations()),
+        "last_report": None if not SERVICE.last_report else SERVICE.last_report.model_dump(mode="json"),
     }
 
 

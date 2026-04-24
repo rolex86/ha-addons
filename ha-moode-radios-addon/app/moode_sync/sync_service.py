@@ -86,7 +86,12 @@ class SyncService:
     async def run_sync(self, mode: str = "manual") -> SyncReport:
         async with self._lock:
             self._begin_progress(mode)
-            summary = SyncSummary(mode=mode, dry_run=self.options.dry_run)
+            summary = SyncSummary(
+                mode=mode,
+                dry_run=self.options.dry_run,
+                filters=self.options.filters.model_dump(mode="json"),
+                pinned_station_count=len(self.options.pinned_stations),
+            )
             stations: list[Station] = []
             try:
                 async with httpx.AsyncClient(

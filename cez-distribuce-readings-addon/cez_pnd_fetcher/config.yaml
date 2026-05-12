@@ -1,0 +1,31 @@
+name: "ČEZ PND Fetcher"
+version: "0.1.0"
+slug: "cez_pnd_fetcher"
+description: "Companion app exporting ČEZ PND chart JSON for the custom integration"
+url: "https://github.com/your-github-user/ha-cez-distribuce-readings"
+arch:
+  - aarch64
+  - amd64
+  - armhf
+  - armv7
+  - i386
+startup: application
+boot: auto
+init: false
+map:
+  - type: homeassistant_config
+    read_only: false
+options:
+  username: ""
+  password: ""
+  device_set_id: ""
+  id_assembly: -1001
+  update_interval_min: 60
+  debug_dump: true
+schema:
+  username: str
+  password: password
+  device_set_id: str
+  id_assembly: int
+  update_interval_min: int
+  debug_dump: bool

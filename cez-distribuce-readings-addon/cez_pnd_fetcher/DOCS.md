@@ -7,6 +7,11 @@ the last successful chart payload into:
 
 `/config/cez_distribuce_readings/pnd_export_<device_set_id>.json`
 
+Inside the add-on container, the Home Assistant config folder is mounted at
+`/homeassistant`, so the add-on writes to
+`/homeassistant/cez_distribuce_readings/pnd_export_<device_set_id>.json`.
+Home Assistant Core sees that same file under `/config/...`.
+
 The integration then reads this export file and creates the normal PND sensors
 without having to call the fragile PND endpoint from the Core runtime.
 

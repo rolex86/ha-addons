@@ -1,5 +1,5 @@
 name: "ČEZ PND Fetcher"
-version: "0.1.1"
+version: "0.1.2"
 slug: "cez_pnd_fetcher"
 description: "Companion app exporting ČEZ PND chart JSON for the custom integration"
 url: "https://github.com/your-github-user/ha-cez-distribuce-readings"
@@ -15,6 +15,7 @@ init: false
 map:
   - type: homeassistant_config
     read_only: false
+    path: /homeassistant
 options:
   username: ""
   password: ""

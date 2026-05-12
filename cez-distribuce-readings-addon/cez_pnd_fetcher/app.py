@@ -3,7 +3,6 @@ from __future__ import annotations
 import html
 import json
 import logging
-import os
 import time
 import urllib.parse
 from datetime import datetime
@@ -49,6 +48,10 @@ DATA_HEADERS = {
     "Accept": "application/json, text/plain, */*",
     "Content-Type": "application/json",
 }
+
+ADDON_HA_CONFIG_DIR = Path("/homeassistant")
+LEGACY_HA_CONFIG_DIR = Path("/config")
+HA_VISIBLE_CONFIG_DIR = Path("/config")
 
 
 class LoginFormParser(HTMLParser):
@@ -174,6 +177,32 @@ def safe_key(value: str) -> str:
     return "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in value).strip("_") or "unknown"
 
 
+def looks_like_homeassistant_config_dir(path: Path) -> bool:
+    return path.is_dir() and (
+        (path / "configuration.yaml").is_file() or (path / ".storage").is_dir()
+    )
+
+
+def resolve_homeassistant_config_dir() -> Path:
+    if looks_like_homeassistant_config_dir(ADDON_HA_CONFIG_DIR):
+        return ADDON_HA_CONFIG_DIR
+    if looks_like_homeassistant_config_dir(LEGACY_HA_CONFIG_DIR):
+        LOG.warning("Falling back to legacy Home Assistant config mount at: %s", LEGACY_HA_CONFIG_DIR)
+        return LEGACY_HA_CONFIG_DIR
+    raise RuntimeError(
+        "Home Assistant config directory is not mounted. "
+        "Expected `map: type: homeassistant_config` to expose the host config at /homeassistant."
+    )
+
+
+def to_homeassistant_visible_path(path: Path, homeassistant_config_dir: Path) -> Path:
+    try:
+        relative = path.relative_to(homeassistant_config_dir)
+    except ValueError:
+        return path
+    return HA_VISIBLE_CONFIG_DIR / relative
+
+
 def write_json(path: Path, data: dict[str, Any]) -> None:
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -236,8 +265,9 @@ def fetch_once(options: dict[str, Any]) -> None:
     device_set_id = str(options.get("device_set_id") or "").strip()
     id_assembly = int(options.get("id_assembly") or -1001)
     debug_dump = bool(options.get("debug_dump", True))
-    output_dir = Path("/config/cez_distribuce_readings")
-    debug_dir = Path("/config/cez_distribuce_readings_debug") / (
+    homeassistant_config_dir = resolve_homeassistant_config_dir()
+    output_dir = homeassistant_config_dir / "cez_distribuce_readings"
+    debug_dir = (homeassistant_config_dir / "cez_distribuce_readings_debug") / (
         f"addon_cez_pnd_fetcher_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
     )
 
@@ -355,8 +385,17 @@ def fetch_once(options: dict[str, Any]) -> None:
         output_dir.mkdir(parents=True, exist_ok=True)
         export_path = output_dir / f"pnd_export_{safe_key(str(device_set_id))}.json"
         write_json(export_path, export)
-        LOG.warning("PND export saved to: %s", export_path)
-        LOG.warning("Debug files saved in: %s", debug_dir)
+        LOG.warning("Home Assistant config mount resolved to: %s", homeassistant_config_dir)
+        LOG.warning("PND export saved inside add-on container to: %s", export_path)
+        LOG.warning(
+            "PND export is visible in Home Assistant at: %s",
+            to_homeassistant_visible_path(export_path, homeassistant_config_dir),
+        )
+        LOG.warning("Debug files saved inside add-on container to: %s", debug_dir)
+        LOG.warning(
+            "Debug files are visible in Home Assistant at: %s",
+            to_homeassistant_visible_path(debug_dir, homeassistant_config_dir),
+        )
     finally:
         session.close()
 

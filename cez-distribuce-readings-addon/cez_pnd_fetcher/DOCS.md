@@ -7,6 +7,10 @@ the last successful chart payload into:
 
 `/config/cez_distribuce_readings/pnd_export_<device_set_id>.json`
 
+It also keeps a synchronized last-good backup at:
+
+`/config/cez_distribuce_readings/pnd_export_<device_set_id>.last_good.json`
+
 Inside the add-on container, the Home Assistant config folder is mounted at
 `/homeassistant`, so the add-on writes to
 `/homeassistant/cez_distribuce_readings/pnd_export_<device_set_id>.json`.
@@ -41,5 +45,8 @@ responsible for entities, archives, cache handling and diagnostics.
   `device_set_id`.
 - If the export file exists, the integration will prefer it over direct PND
   fetching.
+- If ČEZ returns a valid JSON response without usable measurements, the add-on
+  stores that response only in the debug folder and keeps the main export
+  unchanged.
 - This app is scaffolded inside the integration repository only for convenience.
   It is intended to be easy to move into its own repository later.

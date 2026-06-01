@@ -1,5 +1,5 @@
 name: "ČEZ PND Fetcher"
-version: "0.1.2"
+version: "0.1.3"
 slug: "cez_pnd_fetcher"
 description: "Companion app exporting ČEZ PND chart JSON for the custom integration"
 url: "https://github.com/your-github-user/ha-cez-distribuce-readings"

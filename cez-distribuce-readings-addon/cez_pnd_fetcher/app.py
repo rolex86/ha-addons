@@ -5,7 +5,9 @@ import json
 import logging
 import time
 import urllib.parse
-from datetime import datetime
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from decimal import Decimal, InvalidOperation
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
@@ -52,6 +54,17 @@ DATA_HEADERS = {
 ADDON_HA_CONFIG_DIR = Path("/homeassistant")
 LEGACY_HA_CONFIG_DIR = Path("/config")
 HA_VISIBLE_CONFIG_DIR = Path("/config")
+VALID_PND_STATUS = "naměřená data OK"
+PND_INTERVAL_HOURS = 0.25
+
+
+@dataclass(frozen=True)
+class ExportAssessment:
+    has_data_flag: Any
+    series_count: int | None
+    usable_measurements_count: int
+    is_usable: bool
+    reason: str
 
 
 class LoginFormParser(HTMLParser):
@@ -91,6 +104,42 @@ def current_month_interval() -> tuple[str, str]:
     else:
         end = start.replace(month=start.month + 1)
     return start.strftime("%d.%m.%Y %H:%M"), end.strftime("%d.%m.%Y %H:%M")
+
+
+def parse_pnd_datetime(value: str) -> datetime:
+    date_part, time_part = str(value).strip().split(" ")
+    if time_part == "24:00":
+        day = datetime.strptime(date_part, "%d.%m.%Y")
+        return day + timedelta(days=1)
+    return datetime.strptime(str(value).strip(), "%d.%m.%Y %H:%M")
+
+
+def parse_pnd_timestamp(value: Any) -> datetime:
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, (int, float)):
+        timestamp = float(value)
+        if abs(timestamp) >= 1_000_000_000_000:
+            timestamp /= 1000
+        return datetime.fromtimestamp(timestamp)
+    text = str(value).strip()
+    if not text:
+        raise ValueError("Empty PND timestamp")
+    if text.isdigit():
+        return parse_pnd_timestamp(int(text))
+    try:
+        return parse_pnd_datetime(text)
+    except ValueError:
+        return datetime.fromisoformat(text.replace("Z", "+00:00"))
+
+
+def parse_decimal(value: Any) -> Decimal | None:
+    if value is None:
+        return None
+    try:
+        return Decimal(str(value).strip().replace(",", "."))
+    except (InvalidOperation, ValueError):
+        return None
 
 
 def sanitize_url(value: str | None) -> str | None:
@@ -209,6 +258,12 @@ def write_json(path: Path, data: dict[str, Any]) -> None:
     tmp.replace(path)
 
 
+def copy_file(source: Path, target: Path) -> None:
+    tmp = target.with_suffix(target.suffix + ".tmp")
+    tmp.write_bytes(source.read_bytes())
+    tmp.replace(target)
+
+
 def dump_response(debug_dir: Path, kind: str, response: requests.Response, payload: dict[str, Any] | None = None) -> None:
     debug_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
@@ -257,6 +312,117 @@ def load_options() -> dict[str, Any]:
     if not isinstance(data, dict):
         raise RuntimeError("Invalid add-on options.json")
     return data
+
+
+def count_usable_measurements(payload: dict[str, Any]) -> int:
+    series = payload.get("series")
+    if not isinstance(series, list):
+        return 0
+
+    count = 0
+    seen: set[tuple[str, str, str | None]] = set()
+    interval_duration = timedelta(hours=PND_INTERVAL_HOURS)
+    for series_item in series:
+        if not isinstance(series_item, dict):
+            continue
+
+        series_name = (
+            str(series_item.get("name")).strip()
+            if series_item.get("name") is not None
+            else None
+        )
+        data_points = series_item.get("data")
+        if not isinstance(data_points, list):
+            continue
+
+        for point in data_points:
+            if not isinstance(point, (list, tuple)) or len(point) < 3:
+                continue
+
+            status = str(point[2]).strip() if point[2] is not None else ""
+            if status != VALID_PND_STATUS:
+                continue
+
+            try:
+                end_time = parse_pnd_timestamp(point[0])
+            except (TypeError, ValueError):
+                continue
+
+            kw = parse_decimal(point[1])
+            if kw is None:
+                continue
+
+            start_time = end_time - interval_duration
+            signature = (start_time.isoformat(), end_time.isoformat(), series_name)
+            if signature in seen:
+                continue
+            seen.add(signature)
+            count += 1
+
+    return count
+
+
+def assess_export_payload(payload: dict[str, Any]) -> ExportAssessment:
+    series = payload.get("series")
+    series_count = len(series) if isinstance(series, list) else None
+    has_data_flag = payload.get("hasData")
+    usable_measurements_count = count_usable_measurements(payload)
+
+    if has_data_flag is False:
+        return ExportAssessment(
+            has_data_flag=has_data_flag,
+            series_count=series_count,
+            usable_measurements_count=usable_measurements_count,
+            is_usable=False,
+            reason="payload.hasData is false",
+        )
+    if series_count == 0:
+        return ExportAssessment(
+            has_data_flag=has_data_flag,
+            series_count=series_count,
+            usable_measurements_count=usable_measurements_count,
+            is_usable=False,
+            reason="payload.series is empty",
+        )
+    if usable_measurements_count <= 0:
+        return ExportAssessment(
+            has_data_flag=has_data_flag,
+            series_count=series_count,
+            usable_measurements_count=usable_measurements_count,
+            is_usable=False,
+            reason="payload contains no usable measurements",
+        )
+    return ExportAssessment(
+        has_data_flag=has_data_flag,
+        series_count=series_count,
+        usable_measurements_count=usable_measurements_count,
+        is_usable=True,
+        reason="payload contains usable measurements",
+    )
+
+
+def save_diagnostic_export(path: Path, export: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    write_json(path, export)
+
+
+def ensure_main_export_from_backup(
+    export_path: Path,
+    backup_path: Path,
+    homeassistant_config_dir: Path,
+) -> bool:
+    if export_path.exists():
+        return False
+    if not backup_path.exists():
+        return False
+    export_path.parent.mkdir(parents=True, exist_ok=True)
+    copy_file(backup_path, export_path)
+    LOG.warning("Main PND export restored from last good backup: %s", export_path)
+    LOG.warning(
+        "Restored export is visible in Home Assistant at: %s",
+        to_homeassistant_visible_path(export_path, homeassistant_config_dir),
+    )
+    return True
 
 
 def fetch_once(options: dict[str, Any]) -> None:
@@ -382,15 +548,79 @@ def fetch_once(options: dict[str, Any]) -> None:
             "content_type": response.headers.get("content-type"),
             "payload": chart_payload,
         }
+        assessment = assess_export_payload(chart_payload)
+        export["payload_summary"] = {
+            "has_data": assessment.has_data_flag,
+            "series_count": assessment.series_count,
+            "usable_measurements_count": assessment.usable_measurements_count,
+            "is_usable": assessment.is_usable,
+            "reason": assessment.reason,
+        }
         output_dir.mkdir(parents=True, exist_ok=True)
-        export_path = output_dir / f"pnd_export_{safe_key(str(device_set_id))}.json"
-        write_json(export_path, export)
         LOG.warning("Home Assistant config mount resolved to: %s", homeassistant_config_dir)
-        LOG.warning("PND export saved inside add-on container to: %s", export_path)
-        LOG.warning(
-            "PND export is visible in Home Assistant at: %s",
-            to_homeassistant_visible_path(export_path, homeassistant_config_dir),
-        )
+        export_key = safe_key(str(device_set_id))
+        export_path = output_dir / f"pnd_export_{export_key}.json"
+        backup_path = output_dir / f"pnd_export_{export_key}.last_good.json"
+
+        if assessment.is_usable:
+            write_json(export_path, export)
+            LOG.warning(
+                "PND export downloaded and contains data "
+                "(hasData=%r, series_count=%s, usable_measurements=%s)",
+                assessment.has_data_flag,
+                assessment.series_count,
+                assessment.usable_measurements_count,
+            )
+            LOG.warning("PND export saved inside add-on container to: %s", export_path)
+            LOG.warning(
+                "PND export is visible in Home Assistant at: %s",
+                to_homeassistant_visible_path(export_path, homeassistant_config_dir),
+            )
+            write_json(backup_path, export)
+            LOG.warning("Last good PND export backup updated: %s", backup_path)
+            LOG.warning(
+                "Last good backup is visible in Home Assistant at: %s",
+                to_homeassistant_visible_path(backup_path, homeassistant_config_dir),
+            )
+        else:
+            diagnostic_export_path = debug_dir / f"pnd_export_{export_key}.empty.json"
+            save_diagnostic_export(diagnostic_export_path, export)
+            LOG.warning(
+                "PND export downloaded but is empty and will not overwrite the main export "
+                "(reason=%s, hasData=%r, series_count=%s, usable_measurements=%s)",
+                assessment.reason,
+                assessment.has_data_flag,
+                assessment.series_count,
+                assessment.usable_measurements_count,
+            )
+            LOG.warning("Empty diagnostic export saved to: %s", diagnostic_export_path)
+            LOG.warning(
+                "Empty diagnostic export is visible in Home Assistant at: %s",
+                to_homeassistant_visible_path(diagnostic_export_path, homeassistant_config_dir),
+            )
+            restored_from_backup = ensure_main_export_from_backup(
+                export_path=export_path,
+                backup_path=backup_path,
+                homeassistant_config_dir=homeassistant_config_dir,
+            )
+            if export_path.exists():
+                LOG.warning("Main PND export was not overwritten: %s", export_path)
+                LOG.warning(
+                    "Using last good PND export visible in Home Assistant at: %s",
+                    to_homeassistant_visible_path(export_path, homeassistant_config_dir),
+                )
+            elif backup_path.exists():
+                LOG.warning("Last good PND export backup is available at: %s", backup_path)
+                LOG.warning(
+                    "Backup is visible in Home Assistant at: %s",
+                    to_homeassistant_visible_path(backup_path, homeassistant_config_dir),
+                )
+                if not restored_from_backup:
+                    LOG.warning("Main PND export remains missing because restore was not needed.")
+            else:
+                LOG.warning(
+                    "No last good PND export is available yet; main export remains unchanged."
+                )
         LOG.warning("Debug files saved inside add-on container to: %s", debug_dir)
         LOG.warning(
             "Debug files are visible in Home Assistant at: %s",

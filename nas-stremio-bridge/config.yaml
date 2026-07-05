@@ -1,0 +1,136 @@
+name: "NAS Stremio Bridge"
+slug: "nas_stremio_bridge"
+description: "Serve local NAS media as a Stremio add-on"
+version: "0.1.0"
+url: "https://github.com/rolex86/ha-addons/tree/master/nas-stremio-bridge"
+
+arch:
+  - aarch64
+  - amd64
+  - armv7
+  - i386
+
+startup: services
+boot: auto
+init: false
+
+webui: "http://[HOST]:[PORT:7010]/"
+panel_icon: mdi:nas
+panel_title: "NAS Stremio Bridge"
+
+ports:
+  7010/tcp: 7010
+ports_description:
+  7010/tcp: "Stremio add-on HTTP"
+
+map:
+  - media:ro
+  - data:rw
+
+options:
+  server:
+    public_base_url: "http://homeassistant.local:7010"
+    enable_cors: true
+  media:
+    paths:
+      - path: "/media/nas/Filmy"
+        type: "movie"
+        catalog_id: "nas_movies"
+      - path: "/media/nas/Serialy"
+        type: "series"
+        catalog_id: "nas_series"
+    allowed_extensions:
+      - ".mkv"
+      - ".mp4"
+      - ".avi"
+      - ".mov"
+      - ".m4v"
+      - ".webm"
+    ignore_patterns:
+      - "@eaDir"
+      - "#recycle"
+      - ".DS_Store"
+      - "sample"
+      - "trailer"
+  scan:
+    mode: "manual"
+    run_on_startup: false
+    scan_on_catalog_open: false
+    interval_value: 1
+    interval_unit: "months"
+    cron: "30 4 * * *"
+    scan_type: "light"
+    remove_missing: false
+    mark_missing_unavailable: true
+  metadata:
+    enabled: true
+    provider: "tmdb"
+    tmdb_api_key: ""
+    language: "cs-CZ"
+    fallback_language: "en-US"
+    prefer_nfo: true
+    cache_posters: true
+    cache_backdrops: true
+    only_fetch_for_new_items: true
+    refresh_existing: false
+    refresh_after_days: 365
+    min_auto_match_confidence: 0.9
+  streaming:
+    verify_file_exists_on_play: true
+    enable_range_requests: true
+    mime_fallback: "video/mp4"
+    direct_play_only: true
+  security:
+    admin_token: ""
+    expose_admin_api: false
+    allow_lan_only: true
+  logging:
+    level: "info"
+
+schema:
+  server:
+    public_base_url: str
+    enable_cors: bool
+  media:
+    paths:
+      - path: str
+        type: list(movie|series)
+        catalog_id: str
+    allowed_extensions:
+      - str
+    ignore_patterns:
+      - str
+  scan:
+    mode: list(manual|interval|cron)
+    run_on_startup: bool
+    scan_on_catalog_open: bool
+    interval_value: int(1,1000000)
+    interval_unit: list(minutes|hours|days|weeks|months|years)
+    cron: str
+    scan_type: list(light|deep)
+    remove_missing: bool
+    mark_missing_unavailable: bool
+  metadata:
+    enabled: bool
+    provider: list(tmdb|none)
+    tmdb_api_key: password
+    language: str
+    fallback_language: str
+    prefer_nfo: bool
+    cache_posters: bool
+    cache_backdrops: bool
+    only_fetch_for_new_items: bool
+    refresh_existing: bool
+    refresh_after_days: int(1,3650)
+    min_auto_match_confidence: float(0,1)
+  streaming:
+    verify_file_exists_on_play: bool
+    enable_range_requests: bool
+    mime_fallback: str
+    direct_play_only: bool
+  security:
+    admin_token: password
+    expose_admin_api: bool
+    allow_lan_only: bool
+  logging:
+    level: list(trace|debug|info|warn|error)

@@ -35,6 +35,20 @@ foreach ($cfg in $targets) {
   Set-Content -Path $cfg -Value $txt2 -Encoding UTF8
   Write-Host "Bumped $cfg : $old -> $new"
   $changed += $cfg
+
+  $addonDir = Split-Path $cfg -Parent
+  $packageJson = Join-Path $addonDir "package.json"
+  if (Test-Path $packageJson) {
+    $pkgTxt = Get-Content $packageJson -Raw
+    if ($pkgTxt -match '(?m)^(\s*)"version"\s*:\s*"(\d+\.\d+\.\d+)"\s*,?\s*$') {
+      $pkgTxt2 = [regex]::Replace($pkgTxt, '(?m)^(\s*)"version"\s*:\s*"(\d+\.\d+\.\d+)"(\s*,?\s*)$', { param($m)
+          return ($m.Groups[1].Value + '"version": "' + $new + '"' + $m.Groups[3].Value)
+        }, 1)
+      Set-Content -Path $packageJson -Value $pkgTxt2 -Encoding UTF8
+      Write-Host "Bumped $packageJson : $old -> $new"
+      $changed += $packageJson
+    }
+  }
 }
 
 if ($changed.Count -eq 0) {

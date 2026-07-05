@@ -1,0 +1,9 @@
+#!/usr/bin/with-contenv bash
+set -euo pipefail
+
+export DATA_DIR="/data"
+export NODE_ENV="production"
+export PORT="7010"
+
+echo "[service] Starting NAS Stremio Bridge"
+exec node /app/src/server.js

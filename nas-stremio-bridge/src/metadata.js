@@ -2,11 +2,23 @@ const fs = require("node:fs");
 const fsp = require("node:fs/promises");
 const path = require("node:path");
 const crypto = require("node:crypto");
+const { hasKnownBadMatch, normalizeComparable } = require("./match-rules");
 
 const VIDEO_TAGS = [
   "2160p", "1080p", "720p", "480p", "bluray", "brrip", "webrip", "web-dl",
   "hdrip", "dvdrip", "x264", "x265", "h264", "h265", "hevc", "dts", "aac",
   "ac3", "truehd", "atmos", "sample", "trailer"
+];
+
+const SOURCE_PATTERNS = [
+  { pattern: /\bblu[\s.-]?ray\b/i, label: "BluRay" },
+  { pattern: /\bweb[\s.-]?dl\b/i, label: "WEB-DL" },
+  { pattern: /\bweb[\s.-]?rip\b/i, label: "WEBRip" },
+  { pattern: /\bbrrip\b/i, label: "BRRip" },
+  { pattern: /\bhdrip\b/i, label: "HDRip" },
+  { pattern: /\bdvd[\s.-]?rip\b/i, label: "DVDRip" },
+  { pattern: /\bhdtv\b/i, label: "HDTV" },
+  { pattern: /\bremux\b/i, label: "REMUX" }
 ];
 
 function normalizeWhitespace(value) {
@@ -15,6 +27,21 @@ function normalizeWhitespace(value) {
 
 function normalizeTitle(value) {
   return normalizeWhitespace(value).toLowerCase();
+}
+
+function uniqStrings(values = []) {
+  const unique = new Set();
+  const output = [];
+  for (const value of values) {
+    const normalized = normalizeWhitespace(value);
+    const key = normalizeComparable(normalized);
+    if (!normalized || !key || unique.has(key)) {
+      continue;
+    }
+    unique.add(key);
+    output.push(normalized);
+  }
+  return output;
 }
 
 function extractImdbIdFromText(value) {
@@ -60,6 +87,16 @@ function detectQuality(name) {
   return match ? match[1].toUpperCase() : null;
 }
 
+function detectSource(name) {
+  for (const entry of SOURCE_PATTERNS) {
+    if (entry.pattern.test(String(name || ""))) {
+      return entry.label;
+    }
+  }
+
+  return null;
+}
+
 function extractSeriesEpisodeInfo(text) {
   const value = normalizeWhitespace(text);
   const patterns = [
@@ -100,7 +137,8 @@ function parseMovieFilename(baseName) {
     type: "movie",
     title: title || cleaned,
     year,
-    quality: detectQuality(cleaned)
+    quality: detectQuality(cleaned),
+    source: detectSource(cleaned)
   };
 }
 
@@ -117,7 +155,8 @@ function parseSeriesFilename(baseName, filePath) {
       year: yearMatch ? Number(yearMatch[1]) : null,
       season: episodeInfo.season,
       episode: episodeInfo.episode,
-      quality: detectQuality(cleaned)
+      quality: detectQuality(cleaned),
+      source: detectSource(cleaned)
     };
   }
 
@@ -133,7 +172,8 @@ function parseSeriesFilename(baseName, filePath) {
       year: yearMatch ? Number(yearMatch[1]) : null,
       season: Number(seasonFromFolder[1]),
       episode: Number(episodeFromFilename[1]),
-      quality: detectQuality(cleaned)
+      quality: detectQuality(cleaned),
+      source: detectSource(cleaned)
     };
   }
 
@@ -149,7 +189,8 @@ function parseMediaFromPath(filePath, mediaType) {
       season: null,
       episode: null,
       year: null,
-      quality: detectQuality(baseName)
+      quality: detectQuality(baseName),
+      source: detectSource(baseName)
     };
   }
 
@@ -186,6 +227,11 @@ async function fetchJson(url, options = {}) {
 function scoreTmdbCandidate(parsed, candidate) {
   const parsedTitle = normalizeTitle(parsed.title);
   const candidateTitle = normalizeTitle(candidate.title || candidate.name);
+  const blacklistHit = hasKnownBadMatch(parsed.title, [candidate.title, candidate.name].filter(Boolean));
+  if (blacklistHit) {
+    return 0;
+  }
+
   let score = 0.55;
 
   if (parsedTitle && candidateTitle === parsedTitle) {
@@ -231,11 +277,21 @@ async function fetchTmdbDetailsByTmdbId(mediaType, tmdbId, config) {
   const tmdbType = mediaType === "series" ? "tv" : "movie";
   const detailsUrl = `https://api.themoviedb.org/3/${tmdbType}/${tmdbId}?api_key=${apiKey}&language=${language}`;
   const externalIdsUrl = `https://api.themoviedb.org/3/${tmdbType}/${tmdbId}/external_ids?api_key=${apiKey}`;
+  const altTitlesUrl = mediaType === "series"
+    ? `https://api.themoviedb.org/3/${tmdbType}/${tmdbId}/alternative_titles?api_key=${apiKey}`
+    : `https://api.themoviedb.org/3/${tmdbType}/${tmdbId}/alternative_titles?api_key=${apiKey}`;
 
-  const [details, externalIds] = await Promise.all([
+  const [details, externalIds, alternativeTitlesPayload] = await Promise.all([
     fetchJson(detailsUrl),
-    fetchJson(externalIdsUrl)
+    fetchJson(externalIdsUrl),
+    fetchJson(altTitlesUrl).catch(() => null)
   ]);
+
+  const alternativeTitles = uniqStrings(
+    mediaType === "series"
+      ? (alternativeTitlesPayload && alternativeTitlesPayload.results || []).map((entry) => entry.title || entry.name)
+      : (alternativeTitlesPayload && alternativeTitlesPayload.titles || []).map((entry) => entry.title)
+  );
 
   if (fallbackLanguage && fallbackLanguage !== primaryLanguage) {
     const needsFallback = !details.overview || !(details.title || details.name || details.original_title || details.original_name);
@@ -252,14 +308,16 @@ async function fetchTmdbDetailsByTmdbId(mediaType, tmdbId, config) {
           original_title: details.original_title || fallbackDetails.original_title,
           original_name: details.original_name || fallbackDetails.original_name
         },
-        externalIds
+        externalIds,
+        alternativeTitles
       };
     }
   }
 
   return {
     details,
-    externalIds
+    externalIds,
+    alternativeTitles
   };
 }
 
@@ -300,14 +358,31 @@ async function searchTmdb(parsed, mediaType, config) {
 
   const ranked = candidates
     .map((candidate) => ({ candidate, confidence: scoreTmdbCandidate(parsed, candidate) }))
+    .filter((entry) => entry.confidence > 0)
     .sort((left, right) => right.confidence - left.confidence);
 
-  const best = ranked[0];
-  const detailsBundle = await fetchTmdbDetailsByTmdbId(mediaType, best.candidate.id, config);
-  return {
-    confidence: best.confidence,
-    ...detailsBundle
-  };
+  for (const rankedCandidate of ranked) {
+    const detailsBundle = await fetchTmdbDetailsByTmdbId(mediaType, rankedCandidate.candidate.id, config);
+    const blacklistHit = hasKnownBadMatch(parsed.title, [
+      rankedCandidate.candidate.title,
+      rankedCandidate.candidate.name,
+      detailsBundle.details.title,
+      detailsBundle.details.name,
+      detailsBundle.details.original_title,
+      detailsBundle.details.original_name,
+      ...(detailsBundle.alternativeTitles || [])
+    ].filter(Boolean));
+    if (blacklistHit) {
+      continue;
+    }
+
+    return {
+      confidence: rankedCandidate.confidence,
+      ...detailsBundle
+    };
+  }
+
+  return null;
 }
 
 async function storeMetadataCache(cacheDirs, cacheKey, payload) {
@@ -352,7 +427,7 @@ async function enrichFromTmdb({ mediaType, parsed, imdbId, tmdbId, config, cache
     return null;
   }
 
-  const { details, externalIds } = bundle;
+  const { details, externalIds, alternativeTitles = [] } = bundle;
   const resolvedImdbId = imdbId || externalIds.imdb_id || null;
   const cacheKey = resolvedImdbId || `tmdb-${mediaType}-${details.id}`;
   const posterTarget = path.join(cacheDirs.posters, `${cacheKey}.jpg`);
@@ -382,7 +457,8 @@ async function enrichFromTmdb({ mediaType, parsed, imdbId, tmdbId, config, cache
     media_type: mediaType,
     parsed,
     tmdb: details,
-    external_ids: externalIds
+    external_ids: externalIds,
+    alternative_titles: alternativeTitles
   });
 
   return {
@@ -394,6 +470,13 @@ async function enrichFromTmdb({ mediaType, parsed, imdbId, tmdbId, config, cache
     overview: details.overview || null,
     poster_path: details.poster_path ? createPublicAssetPath("posters", cacheKey) : null,
     backdrop_path: details.backdrop_path ? createPublicAssetPath("backdrops", cacheKey) : null,
+    alternative_titles: uniqStrings([
+      details.title,
+      details.name,
+      details.original_title,
+      details.original_name,
+      ...alternativeTitles
+    ]),
     match_source: imdbId ? "imdb" : "tmdb",
     match_confidence: confidence,
     metadata_language: config.metadata.language,
@@ -402,15 +485,24 @@ async function enrichFromTmdb({ mediaType, parsed, imdbId, tmdbId, config, cache
   };
 }
 
-async function resolveItemMetadata({ filePath, mediaType, config, cacheDirs, existingItem, forceRefresh = false, logger }) {
+async function resolveItemMetadata({
+  filePath,
+  mediaType,
+  config,
+  cacheDirs,
+  existingItem,
+  forceRefresh = false,
+  logger,
+  manualMatchBehavior = "preserve"
+}) {
   const parsed = parseMediaFromPath(filePath, mediaType);
   const nfoImdbId = config.metadata.prefer_nfo ? readNfoImdbId(filePath) : null;
   const inlineImdbId = extractImdbIdFromText(filePath);
+  const explicitPathImdbId = nfoImdbId || inlineImdbId || null;
   const isManualMatch = Boolean(existingItem && existingItem.manual_match);
-  const directImdbId = isManualMatch
-    ? existingItem.imdb_id || null
-    : nfoImdbId || inlineImdbId || null;
-  const directTmdbId = isManualMatch ? existingItem.tmdb_id || null : null;
+  const preserveManualFields = isManualMatch && manualMatchBehavior !== "refresh_from_ids";
+  const directImdbId = explicitPathImdbId || (isManualMatch ? existingItem.imdb_id || null : null);
+  const directTmdbId = explicitPathImdbId ? null : (isManualMatch ? existingItem.tmdb_id || null : null);
 
   let tmdbMetadata = null;
   try {
@@ -429,12 +521,12 @@ async function resolveItemMetadata({ filePath, mediaType, config, cacheDirs, exi
   }
 
   const imdbId = isManualMatch
-    ? existingItem.imdb_id || (tmdbMetadata && tmdbMetadata.imdb_id) || null
+    ? directImdbId || existingItem.imdb_id || (tmdbMetadata && tmdbMetadata.imdb_id) || null
     : directImdbId || (tmdbMetadata && tmdbMetadata.imdb_id) || null;
-  const title = isManualMatch
+  const title = preserveManualFields
     ? existingItem.title || (tmdbMetadata && tmdbMetadata.title) || parsed.title
     : (tmdbMetadata && tmdbMetadata.title) || parsed.title;
-  const year = isManualMatch
+  const year = preserveManualFields
     ? existingItem.year || (tmdbMetadata && tmdbMetadata.year) || parsed.year || null
     : (tmdbMetadata && tmdbMetadata.year) || parsed.year || null;
   const confidence = directImdbId ? 1 : (tmdbMetadata ? tmdbMetadata.match_confidence : 0);
@@ -452,22 +544,38 @@ async function resolveItemMetadata({ filePath, mediaType, config, cacheDirs, exi
         ? existingItem.tmdb_id || (tmdbMetadata ? tmdbMetadata.tmdb_id : null)
         : tmdbMetadata ? tmdbMetadata.tmdb_id : null,
       title,
-      original_title: isManualMatch
+      original_title: preserveManualFields
         ? existingItem.original_title || (tmdbMetadata && tmdbMetadata.original_title) || title
         : (tmdbMetadata && tmdbMetadata.original_title) || title,
       year,
-      season: isManualMatch ? existingItem.season || parsed.season || null : parsed.season || null,
-      episode: isManualMatch ? existingItem.episode || parsed.episode || null : parsed.episode || null,
-      overview: isManualMatch
+      season: preserveManualFields ? existingItem.season || parsed.season || null : parsed.season || null,
+      episode: preserveManualFields ? existingItem.episode || parsed.episode || null : parsed.episode || null,
+      overview: preserveManualFields
         ? existingItem.overview || (tmdbMetadata && tmdbMetadata.overview) || null
         : (tmdbMetadata && tmdbMetadata.overview) || null,
-      poster_path: isManualMatch
+      poster_path: preserveManualFields
         ? existingItem.poster_path || (tmdbMetadata ? tmdbMetadata.poster_path : null)
         : tmdbMetadata ? tmdbMetadata.poster_path : null,
-      backdrop_path: isManualMatch
+      backdrop_path: preserveManualFields
         ? existingItem.backdrop_path || (tmdbMetadata ? tmdbMetadata.backdrop_path : null)
         : tmdbMetadata ? tmdbMetadata.backdrop_path : null,
-      match_source: isManualMatch ? "manual" : nfoImdbId ? "nfo" : inlineImdbId ? "filename_imdb" : tmdbMetadata ? tmdbMetadata.match_source : "local",
+      alternative_titles_json: JSON.stringify(uniqStrings([
+        ...(preserveManualFields ? [] : []),
+        ...(tmdbMetadata && Array.isArray(tmdbMetadata.alternative_titles) ? tmdbMetadata.alternative_titles : []),
+        existingItem && existingItem.alternative_titles_json ? (() => {
+          try {
+            return JSON.parse(existingItem.alternative_titles_json);
+          } catch (_) {
+            return [];
+          }
+        })() : [],
+        title,
+        preserveManualFields ? existingItem && existingItem.original_title : null,
+        tmdbMetadata && tmdbMetadata.original_title
+      ].filter(Boolean))),
+      match_source: explicitPathImdbId
+        ? nfoImdbId ? "nfo" : "filename_imdb"
+        : preserveManualFields ? "manual" : tmdbMetadata ? tmdbMetadata.match_source : "local",
       match_confidence: confidence,
       needs_review: needsReview,
       manual_match: isManualMatch ? 1 : 0,
@@ -479,6 +587,7 @@ async function resolveItemMetadata({ filePath, mediaType, config, cacheDirs, exi
 }
 
 module.exports = {
+  detectSource,
   extractImdbIdFromText,
   hashText,
   parseMediaFromPath,

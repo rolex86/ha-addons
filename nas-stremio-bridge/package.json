@@ -1,13 +1,13 @@
 {
   "name": "nas-stremio-bridge",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Home Assistant add-on that serves a local NAS catalog to Stremio",
   "main": "src/server.js",
   "license": "MIT",
   "type": "commonjs",
   "scripts": {
     "start": "node src/server.js",
-    "check": "node --check src/server.js && node --check src/scanner.js && node --check src/database.js && node --check src/metadata.js && node --check src/stream.js && node --check src/config.js && node --check src/logger.js"
+    "check": "node --check src/server.js && node --check src/scanner.js && node --check src/database.js && node --check src/metadata.js && node --check src/stream.js && node --check src/config.js && node --check src/logger.js && node --check src/audit.js && node --check src/match-rules.js"
   },
   "engines": {
     "node": ">=20"

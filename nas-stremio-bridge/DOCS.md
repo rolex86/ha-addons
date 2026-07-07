@@ -1,14 +1,14 @@
 # NAS Stremio Bridge Docs
 
-## Přehled
+## Prehled
 
-Add-on běží jako lokální HTTP server pro Stremio. Při běžném procházení katalogu pracuje jen s lokální SQLite databází a cache v `/data`.
+Add-on bezi jako lokalni HTTP server pro Stremio. Pri beznem prochazeni katalogu pracuje jen s lokalni SQLite databazi a cache v `/data`.
 
-Interní listen port add-onu je pevný `7010`. Veřejné URL se řídí hodnotou `server.public_base_url`.
+Interni listen port add-onu je pevny `7010`. Verejne URL se ridi hodnotou `server.public_base_url`.
 
 ## Perzistence
 
-Runtime používá:
+Runtime pouziva:
 
 ```text
 /data/index.db
@@ -16,15 +16,18 @@ Runtime používá:
 /data/backdrops/
 /data/metadata/
 /data/logs/
+/data/db_backups/
 ```
 
 ## Endpointy
 
-### Veřejné
+### Verejne
 
 - `GET /`
 - `GET /admin/ui`
 - `GET /admin/ui/unmatched`
+- `GET /admin/ui/audit`
+- `GET /admin/ui/match-audit`
 - `GET /manifest.json`
 - `GET /catalog/movie/:catalogId.json`
 - `GET /catalog/series/:catalogId.json`
@@ -35,86 +38,96 @@ Runtime používá:
 - `GET /stream/movie/:id.json`
 - `GET /stream/series/:id.json`
 - `GET /file/:fileId`
+- `GET /health`
 
 ### Admin
 
 - `GET /admin/status`
+- `GET /admin/config`
 - `POST /admin/scan`
 - `GET /admin/unmatched`
+- `GET /admin/items/search?q=...`
 - `POST /admin/match/:fileId`
+- `POST /admin/match/:fileId/apply-imdb`
 - `POST /admin/refresh-metadata/:itemId`
+- `POST /admin/ignore-test`
+- `GET /admin/audit`
+- `POST /admin/audit/run`
+- `GET /admin/audit/export.tsv`
+- `GET /admin/audit/export.csv`
+- `GET /admin/audit/top.txt`
+- `POST /admin/rebuild`
 
-Pokud je `security.expose_admin_api: true`, admin endpointy vyžadují:
+Pokud je `security.expose_admin_api: true`, admin endpointy vyzaduji:
 
 ```http
 Authorization: Bearer <admin_token>
 ```
 
-## Scan režimy
+## Scan rezimy
 
-- `manual`: nic nespouští automaticky
-- `interval`: plán podle `interval_value + interval_unit`
-- `cron`: plán podle `scan.cron`
+- `manual`: nic nespousti automaticky
+- `interval`: plan podle `interval_value + interval_unit`
+- `cron`: plan podle `scan.cron`
 
-`run_on_startup` je defaultně vypnutý.
+`run_on_startup` je defaultne vypnuty.
 
-## Párování metadata
+## Parovani metadata
 
-Pořadí:
+Poradi:
 
 1. `.nfo`
-2. IMDb ID v názvu
-3. TMDb lookup podle názvu/roku
-4. Ruční match
-5. Lokální interní položka
+2. explicitni IMDb ID v nazvu nebo ceste
+3. TMDb lookup podle nazvu a roku
+4. rucni match
+5. lokalni interni polozka
 
-Nízká jistota nastaví `needs_review = 1`.
+Dulezite:
 
-## Poznámky k sériím
+- pokud cesta obsahuje `tt1234567` a ulozene IMDb ID nesedi, scanner vynuti refresh metadata i kdyz je `only_fetch_for_new_items: true`
+- explicitni IMDb z cesty blokuje rucni remap na jine IMDb ID
+- known bad blacklist se pouziva jak v auditu, tak pri samotnem TMDb matchovani
+- TMDb metadata uklada i alternativni nazvy, aby audit mel mene false positives
 
-- katalog seriálů agreguje epizody do show-level záznamu,
-- stream endpoint používá epizodové ID jako `tt0903747:2:3`, pokud je známé IMDb ID seriálu,
-- bez externího ID se používají interní `nas_` identifikátory.
+Nizka jistota nastavi `needs_review = 1`.
 
-## Lokální test
+## Audit
 
-Po startu add-onu přidej do Stremia:
+Audit umi reasony:
+
+- `IMDB_CONFLICT`
+- `KNOWN_BAD_MATCH`
+- `MISSING_DB_META`
+- `YEAR_CONFLICT`
+- `TITLE_LOW_SIM`
+
+Defaultne audit filtruje jen `files.is_available = 1`. Pres API lze zapnout i unavailable zaznamy:
 
 ```text
-http://homeassistant.local:7010/manifest.json
+include_unavailable=true
 ```
 
-Pro rychlý přehled v Home Assistantu otevři:
+Dalsi filtry:
 
-```text
-http://homeassistant.local:7010/
-```
+- `reason=IMDB_CONFLICT`
+- `min_severity=90`
+- `limit=200`
 
-Pro první naplnění knihovny spusť:
-
-```http
-POST /admin/scan
-```
-
-Příklady s tokenem:
+Priklady:
 
 ```bash
 curl -H "Authorization: Bearer YOUR_TOKEN" \
-  http://homeassistant.local:7010/admin/status
-```
-
-```bash
-curl -X POST \
-  -H "Authorization: Bearer YOUR_TOKEN" \
-  -H "Content-Type: application/json" \
-  http://homeassistant.local:7010/admin/scan \
-  -d '{"scan_type":"light","force_metadata_refresh":false}'
+  "http://homeassistant.local:7010/admin/audit?reason=IMDB_CONFLICT&min_severity=90"
 ```
 
 ```bash
 curl -H "Authorization: Bearer YOUR_TOKEN" \
-  "http://homeassistant.local:7010/catalog/movie/nas_movies/search=interstellar.json"
+  "http://homeassistant.local:7010/admin/audit/export.tsv?include_unavailable=false&limit=1000"
 ```
+
+## Rucni oprava matchu
+
+Zakladni rucni premapovani:
 
 ```bash
 curl -X POST \
@@ -122,4 +135,82 @@ curl -X POST \
   -H "Content-Type: application/json" \
   http://homeassistant.local:7010/admin/match/file_1234567890abcdef \
   -d '{"imdb_id":"tt0816692","tmdb_id":157336,"type":"movie","title":"Interstellar","year":2014}'
+```
+
+One-click IMDb apply + metadata fetch:
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  http://homeassistant.local:7010/admin/match/file_1234567890abcdef/apply-imdb \
+  -d '{"imdb_id":"tt0816692"}'
+```
+
+## Ignore patterns
+
+Aktivni ignore patterns se berou z `media.ignore_patterns`.
+
+Test konkretni cesty:
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  http://homeassistant.local:7010/admin/ignore-test \
+  -d '{"path":"/media/nas/Filmy/sample/movie-sample.mkv"}'
+```
+
+## Clean rebuild DB
+
+Endpoint `POST /admin/rebuild` udela:
+
+1. backup `index.db`, `index.db-wal`, `index.db-shm` do `/data/db_backups/<timestamp>/`
+2. zavre DB
+3. smaze DB soubory
+4. znovu inicializuje databazi
+5. spusti `light` scan
+
+Priklad:
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  http://homeassistant.local:7010/admin/rebuild \
+  -d '{"scan_type":"light","force_metadata_refresh":false}'
+```
+
+## Stream cards
+
+Stream endpoint vraci vice informativni `name/title`:
+
+- nazev titulu
+- rok u filmu
+- `SxxEyy` u serialu
+- kvalitu, pokud jde vycist z nazvu souboru
+- source tag jako `BluRay`, `WEB-DL`, `WEBRip`
+- priponu a velikost
+- volitelne filename a folder podle `streaming.show_filename_in_title` a `streaming.show_folder_in_title`
+
+Pokud existuje vice souboru pro stejny titul nebo stejnou epizodu, streamy se radi takto:
+
+1. `is_available = 1`
+2. novejsi `last_seen_at`
+3. novejsi `mtime`
+4. vyssi kvalita
+5. vetsi soubor
+
+## Lokalni test
+
+Po startu add-onu pridej do Stremia:
+
+```text
+http://homeassistant.local:7010/manifest.json
+```
+
+Pro rychly prehled v Home Assistantu otevri:
+
+```text
+http://homeassistant.local:7010/
 ```

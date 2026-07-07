@@ -1,40 +1,40 @@
 # NAS Stremio Bridge
 
-Home Assistant add-on, který vystaví lokální NAS knihovnu jako vlastní Stremio add-on server.
+Home Assistant add-on, ktery vystavi lokalni NAS knihovnu jako vlastni Stremio add-on server.
 
-## Co umí v MVP
+## Co umi
 
-- katalogy `NAS Filmy` a `NAS Seriály`,
-- lokální SQLite index a cache v `/data`,
-- scan pouze na vyžádání nebo podle plánu,
-- metadata z `.nfo` nebo TMDb,
-- stream URL přes `/file/:fileId` s podporou `Range`,
-- admin API pro status, scan a ruční match,
-- search endpointy nad SQLite indexem pro NAS katalog.
-- jednoduché lokální web UI na `/` a `/admin/ui`.
+- katalogy `NAS Filmy` a `NAS Serialy`
+- lokalni SQLite index a cache v `/data`
+- scan rucne nebo podle planu
+- metadata z `.nfo`, explicitniho IMDb ID v ceste nebo z TMDb
+- stream URL pres `/file/:fileId` s podporou `Range`
+- preferenci dostupnych souboru a vice stream variant pro stejny titul
+- admin API pro status, scan, audit, rucni match a clean rebuild
+- jednoduche lokalni web UI na `/` a `/admin/ui`
 
-## Důležité chování
+## Dulezite chovani
 
-- NAS se nečte při katalogu ani meta requestech,
-- NAS se nečte ani při `/stream/...`, jen se vrací lokální stream URL,
-- NAS se prochází jen při scanu,
-- video soubor se fyzicky otevírá až v `/file/:fileId`,
-- výchozí nastavení chrání disky: `manual` scan, `run_on_startup: false`, `scan_on_catalog_open: false`.
+- NAS se necte pri katalogu ani meta requestech
+- NAS se necte ani pri `/stream/...`, jen se vraci lokalni stream URL
+- NAS se prochazi jen pri scanu
+- video soubor se fyzicky otevre az v `/file/:fileId`
+- vychozi nastaveni chrani disky: `manual` scan, `run_on_startup: false`, `scan_on_catalog_open: false`
 
 ## Instalace
 
-1. Přidej tento repozitář jako custom add-on repository v Home Assistantu.
-2. Otevři add-on `NAS Stremio Bridge`.
+1. Pridej tento repozitar jako custom add-on repository v Home Assistantu.
+2. Otevri add-on `NAS Stremio Bridge`.
 3. Nastav `server.public_base_url` a cesty v `media.paths`.
-4. Pokud chceš TMDb metadata, doplň `metadata.tmdb_api_key`.
-5. Pokud chceš používat admin API, zapni `security.expose_admin_api` a nastav `security.admin_token`.
-6. Spusť add-on a pak ruční scan přes admin endpoint.
+4. Pokud chces TMDb metadata, dopln `metadata.tmdb_api_key`.
+5. Pokud chces pouzivat admin API, zapni `security.expose_admin_api` a nastav `security.admin_token`.
+6. Spust add-on a pak udelej prvni scan.
 
-Port add-onu je pevně `7010`. Do `server.public_base_url` nastav URL, pod kterou bude add-on skutečně dostupný navenek, případně za reverse proxy.
+Port add-onu je pevne `7010`. Do `server.public_base_url` nastav URL, pod kterou bude add-on skutecne dostupny navenek, pripadne za reverse proxy.
 
-## První scan
+## Prvni scan
 
-Admin API je defaultně vypnuté. Pro první ruční scan nastav:
+Admin API je defaultne vypnute. Pro prvni rucni scan nastav:
 
 ```yaml
 security:
@@ -42,7 +42,7 @@ security:
   admin_token: "zvol-silny-token"
 ```
 
-Pak můžeš zavolat:
+Pak muzes zavolat:
 
 ```bash
 curl -X POST \
@@ -52,12 +52,21 @@ curl -X POST \
   -d '{"scan_type":"light","force_metadata_refresh":false}'
 ```
 
-## Hlavní URL
+## Hlavni URL
 
-- Přehled/UI: `/`
+- Prehled/UI: `/`
 - Manifest: `/manifest.json`
-- Katalog filmů: `/catalog/movie/nas_movies.json`
-- Katalog seriálů: `/catalog/series/nas_series.json`
+- Katalog filmu: `/catalog/movie/nas_movies.json`
+- Katalog serialu: `/catalog/series/nas_series.json`
 - Status: `/admin/status`
+- Audit: `/admin/audit`
 
-Podrobnější popis konfigurace, endpointů a chování je v [DOCS.md](./DOCS.md).
+## Admin novinky
+
+- `POST /admin/match/:fileId/apply-imdb`: jednim krokem aplikuje IMDb ID a dotahne metadata
+- `GET/POST /admin/audit...`: audit, filtry a exporty
+- `GET /admin/items/search`: hledani polozek pro rucni remap
+- `POST /admin/ignore-test`: test ignore patterns
+- `POST /admin/rebuild`: backup DB + clean rebuild + novy scan
+
+Podrobnejsi popis konfigurace, endpointu a chovani je v [DOCS.md](./DOCS.md).

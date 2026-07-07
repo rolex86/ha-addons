@@ -1,35 +1,155 @@
 const fs = require("node:fs");
 const fsp = require("node:fs/promises");
+const path = require("node:path");
 const mime = require("mime-types");
+const { parseMediaFromPath } = require("./metadata");
 
 async function verifyFileReadable(filePath) {
   await fsp.access(filePath, fs.constants.R_OK);
 }
 
-function buildStreamResponse(baseUrl, fileRecord, streamInfo = {}) {
-  const extension = String(fileRecord.extension || "").replace(".", "").toUpperCase() || "FILE";
-  const parts = ["NAS"];
-  if (streamInfo.quality) {
-    parts.push(streamInfo.quality);
+function formatSizeLabel(bytes) {
+  if (!bytes || bytes <= 0) {
+    return null;
   }
-  parts.push(extension);
-  if (streamInfo.size_label) {
-    parts.push(streamInfo.size_label);
+
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let value = Number(bytes);
+  let index = 0;
+  while (value >= 1024 && index < units.length - 1) {
+    value /= 1024;
+    index += 1;
   }
-  const title = parts.join(" - ");
+  return `${value.toFixed(value >= 10 || index === 0 ? 0 : 1)} ${units[index]}`;
+}
+
+function buildEpisodeLabel(item) {
+  if (!item || !item.season || !item.episode) {
+    return null;
+  }
+
+  return `S${String(item.season).padStart(2, "0")}E${String(item.episode).padStart(2, "0")}`;
+}
+
+function qualityRank(value) {
+  const normalized = String(value || "").toUpperCase();
+  if (normalized === "2160P") {
+    return 4;
+  }
+  if (normalized === "1080P") {
+    return 3;
+  }
+  if (normalized === "720P") {
+    return 2;
+  }
+  if (normalized === "480P") {
+    return 1;
+  }
+  return 0;
+}
+
+function sortStreamCandidates(candidates = []) {
+  return [...candidates].sort((left, right) => {
+    if (Number(right.is_available || 0) !== Number(left.is_available || 0)) {
+      return Number(right.is_available || 0) - Number(left.is_available || 0);
+    }
+
+    const lastSeenDiff = Number(right.last_seen_at || 0) - Number(left.last_seen_at || 0);
+    if (lastSeenDiff !== 0) {
+      return lastSeenDiff;
+    }
+
+    const mtimeDiff = Number(right.mtime || 0) - Number(left.mtime || 0);
+    if (mtimeDiff !== 0) {
+      return mtimeDiff;
+    }
+
+    const qualityDiff = qualityRank(right.release_quality || right.stream_quality) - qualityRank(left.release_quality || left.stream_quality);
+    if (qualityDiff !== 0) {
+      return qualityDiff;
+    }
+
+    const sizeDiff = Number(right.size || 0) - Number(left.size || 0);
+    if (sizeDiff !== 0) {
+      return sizeDiff;
+    }
+
+    return String(left.path || "").localeCompare(String(right.path || ""));
+  });
+}
+
+function enrichCandidate(candidate) {
+  const parsed = parseMediaFromPath(candidate.path, candidate.media_type);
+  return {
+    ...candidate,
+    release_quality: candidate.stream_quality || parsed.quality || null,
+    release_source: parsed.source || null,
+    file_name: path.basename(candidate.path || ""),
+    folder_name: path.basename(path.dirname(candidate.path || "")),
+    size_label: candidate.size_label || formatSizeLabel(candidate.size),
+    episode_label: buildEpisodeLabel(candidate)
+  };
+}
+
+function buildStreamName(candidate) {
+  const nameBits = ["NAS", candidate.title || candidate.original_title || "Soubor"];
+  if (candidate.media_type === "movie" && candidate.year) {
+    nameBits[nameBits.length - 1] = `${nameBits[nameBits.length - 1]} (${candidate.year})`;
+  }
+
+  return nameBits.join(" • ");
+}
+
+function buildStreamTitle(candidate, config) {
+  const infoBits = [];
+  if (candidate.media_type === "series" && candidate.episode_label) {
+    infoBits.push(candidate.episode_label);
+  }
+  if (candidate.release_quality) {
+    infoBits.push(candidate.release_quality);
+  }
+  if (candidate.release_source) {
+    infoBits.push(candidate.release_source);
+  }
+
+  const extension = String(candidate.extension || "").replace(".", "").toUpperCase() || "FILE";
+  infoBits.push(extension);
+  if (candidate.size_label) {
+    infoBits.push(candidate.size_label);
+  }
+
+  const lines = [infoBits.join(" • ")];
+  if (config.streaming.show_filename_in_title) {
+    lines.push(`Soubor: ${candidate.file_name}`);
+  }
+  if (config.streaming.show_folder_in_title) {
+    lines.push(`Slozka: ${candidate.folder_name}`);
+  }
+
+  return lines.join("\n");
+}
+
+function buildStreamResponse(baseUrl, candidates = [], config) {
+  const ordered = sortStreamCandidates(candidates).map(enrichCandidate);
+  const preferred = ordered.filter((candidate) => Number(candidate.is_available || 0) === 1);
+  const selected = preferred.length ? preferred : ordered;
 
   return {
-    streams: [
-      {
-        name: "NAS",
-        title,
-        url: `${baseUrl}/file/${encodeURIComponent(fileRecord.file_id)}`,
-        behaviorHints: {
-          notWebReady: true
-        }
+    streams: selected.map((candidate) => ({
+      name: buildStreamName(candidate),
+      title: buildStreamTitle(candidate, config),
+      url: `${baseUrl}/file/${encodeURIComponent(candidate.file_id)}`,
+      behaviorHints: {
+        notWebReady: true
       }
-    ]
+    }))
   };
+}
+
+function pickPrimaryCandidate(candidates = []) {
+  const ordered = sortStreamCandidates(candidates).map(enrichCandidate);
+  const preferred = ordered.find((candidate) => Number(candidate.is_available || 0) === 1);
+  return preferred || ordered[0] || null;
 }
 
 function parseRange(rangeHeader, totalSize) {
@@ -125,6 +245,8 @@ async function sendFileStream(req, res, fileRecord, config) {
 
 module.exports = {
   buildStreamResponse,
+  pickPrimaryCandidate,
   sendFileStream,
+  sortStreamCandidates,
   verifyFileReadable
 };

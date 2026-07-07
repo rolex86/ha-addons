@@ -26,6 +26,15 @@ function buildSearchPattern(searchText) {
   return `%${String(searchText || "").trim().toLowerCase()}%`;
 }
 
+function ensureColumn(db, tableName, columnName, definition) {
+  const columns = db.prepare(`PRAGMA table_info(${tableName})`).all();
+  if (columns.some((column) => column.name === columnName)) {
+    return;
+  }
+
+  db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`);
+}
+
 function createDatabase(dataDir) {
   fs.mkdirSync(dataDir, { recursive: true });
   const dbPath = path.join(dataDir, "index.db");
@@ -117,6 +126,12 @@ function createDatabase(dataDir) {
     CREATE INDEX IF NOT EXISTS idx_streams_item_id ON streams(item_id);
   `);
 
+  ensureColumn(db, "scan_runs", "files_ignored", "INTEGER DEFAULT 0");
+  ensureColumn(db, "scan_runs", "auto_matched", "INTEGER DEFAULT 0");
+  ensureColumn(db, "scan_runs", "manual_imdb_matched", "INTEGER DEFAULT 0");
+  ensureColumn(db, "scan_runs", "suspicious_total", "INTEGER DEFAULT 0");
+  ensureColumn(db, "items", "alternative_titles_json", "TEXT DEFAULT '[]'");
+
   const statements = {
     getState: db.prepare("SELECT value FROM settings_state WHERE key = ?"),
     setState: db.prepare(`
@@ -153,13 +168,13 @@ function createDatabase(dataDir) {
         item_id, file_id, stremio_id, imdb_id, tmdb_id, media_type, title, original_title,
         year, season, episode, overview, poster_path, backdrop_path, match_source,
         match_confidence, needs_review, manual_match, metadata_language, metadata_fetched_at,
-        metadata_refresh_after
+        metadata_refresh_after, alternative_titles_json
       )
       VALUES (
         @item_id, @file_id, @stremio_id, @imdb_id, @tmdb_id, @media_type, @title, @original_title,
         @year, @season, @episode, @overview, @poster_path, @backdrop_path, @match_source,
         @match_confidence, @needs_review, @manual_match, @metadata_language, @metadata_fetched_at,
-        @metadata_refresh_after
+        @metadata_refresh_after, @alternative_titles_json
       )
       ON CONFLICT(item_id) DO UPDATE SET
         file_id = excluded.file_id,
@@ -181,7 +196,8 @@ function createDatabase(dataDir) {
         manual_match = excluded.manual_match,
         metadata_language = excluded.metadata_language,
         metadata_fetched_at = excluded.metadata_fetched_at,
-        metadata_refresh_after = excluded.metadata_refresh_after
+        metadata_refresh_after = excluded.metadata_refresh_after,
+        alternative_titles_json = excluded.alternative_titles_json
     `),
     upsertStream: db.prepare(`
       INSERT INTO streams (
@@ -221,9 +237,10 @@ function createDatabase(dataDir) {
       db.prepare(`
         INSERT INTO scan_runs (
           scan_id, started_at, status, files_seen, files_added, files_updated,
-          files_missing, metadata_fetched, errors, error_log
+          files_missing, metadata_fetched, errors, error_log, files_ignored,
+          auto_matched, manual_imdb_matched, suspicious_total
         )
-        VALUES (?, ?, 'running', 0, 0, 0, 0, 0, 0, '')
+        VALUES (?, ?, 'running', 0, 0, 0, 0, 0, 0, '', 0, 0, 0, 0)
       `).run(scanId, startedAt);
       helpers.setState("scanner_running", "1");
     },
@@ -231,7 +248,8 @@ function createDatabase(dataDir) {
       db.prepare(`
         UPDATE scan_runs
         SET finished_at = ?, status = ?, files_seen = ?, files_added = ?, files_updated = ?,
-            files_missing = ?, metadata_fetched = ?, errors = ?, error_log = ?
+            files_missing = ?, metadata_fetched = ?, errors = ?, error_log = ?,
+            files_ignored = ?, auto_matched = ?, manual_imdb_matched = ?, suspicious_total = ?
         WHERE scan_id = ?
       `).run(
         result.finished_at,
@@ -243,6 +261,10 @@ function createDatabase(dataDir) {
         result.metadata_fetched,
         result.errors,
         result.error_log,
+        result.files_ignored || 0,
+        result.auto_matched || 0,
+        result.manual_imdb_matched || 0,
+        result.suspicious_total || 0,
         scanId
       );
       helpers.setState("scanner_running", "0");
@@ -276,7 +298,7 @@ function createDatabase(dataDir) {
     },
     listMoviesByCatalogPath(mediaPath) {
       return db.prepare(`
-        SELECT items.*, files.path, files.is_available, files.extension, files.size
+        SELECT items.*, files.path, files.is_available, files.extension, files.size, files.folder, files.mtime, files.last_seen_at
         FROM items
         JOIN files ON files.file_id = items.file_id
         WHERE items.media_type = 'movie'
@@ -288,7 +310,7 @@ function createDatabase(dataDir) {
     searchMoviesByCatalogPath(mediaPath, searchText) {
       const pattern = buildSearchPattern(searchText);
       return db.prepare(`
-        SELECT items.*, files.path, files.is_available, files.extension, files.size
+        SELECT items.*, files.path, files.is_available, files.extension, files.size, files.folder, files.mtime, files.last_seen_at
         FROM items
         JOIN files ON files.file_id = items.file_id
         WHERE items.media_type = 'movie'
@@ -305,7 +327,7 @@ function createDatabase(dataDir) {
     },
     listSeriesByCatalogPath(mediaPath) {
       return db.prepare(`
-        SELECT items.*, files.path, files.is_available, files.extension, files.size
+        SELECT items.*, files.path, files.is_available, files.extension, files.size, files.folder, files.mtime, files.last_seen_at
         FROM items
         JOIN files ON files.file_id = items.file_id
         WHERE items.media_type = 'series'
@@ -317,7 +339,7 @@ function createDatabase(dataDir) {
     searchSeriesByCatalogPath(mediaPath, searchText) {
       const pattern = buildSearchPattern(searchText);
       return db.prepare(`
-        SELECT items.*, files.path, files.is_available, files.extension, files.size
+        SELECT items.*, files.path, files.is_available, files.extension, files.size, files.folder, files.mtime, files.last_seen_at
         FROM items
         JOIN files ON files.file_id = items.file_id
         WHERE items.media_type = 'series'
@@ -334,7 +356,7 @@ function createDatabase(dataDir) {
     },
     findMovieByAnyId(id) {
       return db.prepare(`
-        SELECT items.*, files.path, files.is_available, files.extension, files.size
+        SELECT items.*, files.path, files.is_available, files.extension, files.size, files.folder, files.mtime, files.last_seen_at
         FROM items
         JOIN files ON files.file_id = items.file_id
         WHERE items.media_type = 'movie'
@@ -342,9 +364,34 @@ function createDatabase(dataDir) {
         LIMIT 1
       `).get(id, id, id, id);
     },
+    listMovieCandidatesByAnyId(id) {
+      return db.prepare(`
+        SELECT
+          items.*,
+          files.path,
+          files.is_available,
+          files.extension,
+          files.size,
+          files.folder,
+          files.mtime,
+          files.last_seen_at,
+          files.first_seen_at,
+          streams.stream_id,
+          streams.title AS stream_title,
+          streams.quality AS stream_quality,
+          streams.codec,
+          streams.size_label,
+          streams.behavior_hints_json
+        FROM items
+        JOIN files ON files.file_id = items.file_id
+        LEFT JOIN streams ON streams.file_id = items.file_id
+        WHERE items.media_type = 'movie'
+          AND (items.stremio_id = ? OR items.imdb_id = ? OR items.item_id = ? OR items.file_id = ?)
+      `).all(id, id, id, id);
+    },
     findSeriesEpisodeByAnyId(id) {
       return db.prepare(`
-        SELECT items.*, files.path, files.is_available, files.extension, files.size
+        SELECT items.*, files.path, files.is_available, files.extension, files.size, files.folder, files.mtime, files.last_seen_at
         FROM items
         JOIN files ON files.file_id = items.file_id
         WHERE items.media_type = 'series'
@@ -352,9 +399,34 @@ function createDatabase(dataDir) {
         LIMIT 1
       `).get(id, id, id);
     },
+    listSeriesEpisodeCandidatesByAnyId(id) {
+      return db.prepare(`
+        SELECT
+          items.*,
+          files.path,
+          files.is_available,
+          files.extension,
+          files.size,
+          files.folder,
+          files.mtime,
+          files.last_seen_at,
+          files.first_seen_at,
+          streams.stream_id,
+          streams.title AS stream_title,
+          streams.quality AS stream_quality,
+          streams.codec,
+          streams.size_label,
+          streams.behavior_hints_json
+        FROM items
+        JOIN files ON files.file_id = items.file_id
+        LEFT JOIN streams ON streams.file_id = items.file_id
+        WHERE items.media_type = 'series'
+          AND (items.stremio_id = ? OR items.item_id = ? OR items.file_id = ?)
+      `).all(id, id, id);
+    },
     listAllAvailableSeries() {
       return db.prepare(`
-        SELECT items.*, files.path, files.is_available, files.extension, files.size
+        SELECT items.*, files.path, files.is_available, files.extension, files.size, files.folder, files.mtime, files.last_seen_at
         FROM items
         JOIN files ON files.file_id = items.file_id
         WHERE items.media_type = 'series'
@@ -368,8 +440,36 @@ function createDatabase(dataDir) {
         FROM items
         JOIN files ON files.file_id = items.file_id
         WHERE items.needs_review = 1
+          AND files.is_available = 1
         ORDER BY files.last_seen_at DESC
       `).all();
+    },
+    listItemsForAudit(includeUnavailable = false) {
+      const availabilityClause = includeUnavailable ? "" : "WHERE files.is_available = 1";
+      return db.prepare(`
+        SELECT items.*, files.path, files.is_available, files.extension, files.size, files.folder, files.mtime, files.last_seen_at
+        FROM items
+        JOIN files ON files.file_id = items.file_id
+        ${availabilityClause}
+        ORDER BY files.last_seen_at DESC, LOWER(COALESCE(items.title, files.path)) ASC
+      `).all();
+    },
+    searchItems(searchText, limit = 50) {
+      const pattern = buildSearchPattern(searchText);
+      return db.prepare(`
+        SELECT items.*, files.path, files.is_available, files.extension, files.size, files.folder, files.mtime, files.last_seen_at
+        FROM items
+        JOIN files ON files.file_id = items.file_id
+        WHERE (
+          LOWER(COALESCE(items.title, '')) LIKE ?
+          OR LOWER(COALESCE(items.original_title, '')) LIKE ?
+          OR LOWER(COALESCE(items.imdb_id, '')) LIKE ?
+          OR LOWER(COALESCE(files.path, '')) LIKE ?
+          OR LOWER(COALESCE(files.folder, '')) LIKE ?
+        )
+        ORDER BY files.is_available DESC, files.last_seen_at DESC, LOWER(COALESCE(items.title, files.path)) ASC
+        LIMIT ?
+      `).all(pattern, pattern, pattern, pattern, pattern, Math.max(1, Number(limit) || 50));
     },
     getStatus(mediaPaths) {
       const prefixes = toPathPrefixes(mediaPaths);
@@ -417,6 +517,13 @@ function createDatabase(dataDir) {
       `).get(...baseParams).total;
 
       const latest = statements.getLatestScanRun.get();
+      let lastAuditSummary = null;
+      try {
+        const raw = helpers.getState("last_audit_summary_json");
+        lastAuditSummary = raw ? JSON.parse(raw) : null;
+      } catch (_) {
+        lastAuditSummary = null;
+      }
 
       return {
         scanner_running: helpers.getState("scanner_running") === "1",
@@ -427,7 +534,8 @@ function createDatabase(dataDir) {
         series_total: seriesTotal,
         episodes_total: episodesTotal,
         unmatched_total: unmatchedTotal,
-        latest_scan_run: latest || null
+        latest_scan_run: latest || null,
+        last_audit_summary: lastAuditSummary
       };
     },
     applyManualMatch(fileId, payload) {
@@ -463,6 +571,7 @@ function createDatabase(dataDir) {
         match_confidence: 1,
         needs_review: 0,
         manual_match: 1,
+        alternative_titles_json: existing.alternative_titles_json || "[]",
         metadata_language: existing.metadata_language,
         metadata_fetched_at: existing.metadata_fetched_at,
         metadata_refresh_after: existing.metadata_refresh_after

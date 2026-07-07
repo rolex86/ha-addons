@@ -1,7 +1,7 @@
 name: "NAS Stremio Bridge"
 slug: "nas_stremio_bridge"
 description: "Serve local NAS media as a Stremio add-on"
-version: "0.1.0"
+version: "0.2.0"
 url: "https://github.com/rolex86/ha-addons/tree/master/nas-stremio-bridge"
 
 arch:
@@ -80,6 +80,8 @@ options:
     enable_range_requests: true
     mime_fallback: "video/mp4"
     direct_play_only: true
+    show_filename_in_title: true
+    show_folder_in_title: false
   security:
     admin_token: ""
     expose_admin_api: false
@@ -128,6 +130,8 @@ schema:
     enable_range_requests: bool
     mime_fallback: str
     direct_play_only: bool
+    show_filename_in_title: bool
+    show_folder_in_title: bool
   security:
     admin_token: password
     expose_admin_api: bool

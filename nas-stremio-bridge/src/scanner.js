@@ -2,7 +2,7 @@ const fs = require("node:fs");
 const fsp = require("node:fs/promises");
 const path = require("node:path");
 const crypto = require("node:crypto");
-const { resolveItemMetadata } = require("./metadata");
+const { extractImdbIdFromText, resolveItemMetadata } = require("./metadata");
 
 function nowTs() {
   return Math.floor(Date.now() / 1000);
@@ -63,6 +63,9 @@ async function walkMediaDirectory(rootPath, options, onFile) {
 
     for (const entry of entries) {
       if (shouldIgnore(entry.name, options.ignorePatterns)) {
+        if (typeof options.onIgnored === "function") {
+          options.onIgnored(path.join(currentPath, entry.name), entry.isDirectory() ? "directory" : "file");
+        }
         continue;
       }
 
@@ -105,12 +108,17 @@ function buildStremioId(mediaType, fileId, metadata) {
   return metadata.imdb_id || `nas_movie_${fileId}`;
 }
 
-function shouldRefreshMetadata(existingItem, fileChanged, config, forceMetadataRefresh) {
+function shouldRefreshMetadata(existingItem, fileChanged, config, forceMetadataRefresh, filePath) {
   if (forceMetadataRefresh) {
     return true;
   }
 
   if (!existingItem) {
+    return true;
+  }
+
+  const explicitPathImdbId = extractImdbIdFromText(filePath);
+  if (explicitPathImdbId && String(existingItem.imdb_id || "").toLowerCase() !== explicitPathImdbId) {
     return true;
   }
 
@@ -167,6 +175,7 @@ function createScanner({ config, database, logger, dataDir }) {
       match_confidence: resolved.metadata.match_confidence,
       needs_review: resolved.metadata.needs_review,
       manual_match: resolved.metadata.manual_match,
+      alternative_titles_json: resolved.metadata.alternative_titles_json || "[]",
       metadata_language: resolved.metadata.metadata_language,
       metadata_fetched_at: resolved.metadata.metadata_fetched_at,
       metadata_refresh_after: resolved.metadata.metadata_refresh_after
@@ -211,6 +220,10 @@ function createScanner({ config, database, logger, dataDir }) {
       files_updated: 0,
       files_missing: 0,
       metadata_fetched: 0,
+      files_ignored: 0,
+      auto_matched: 0,
+      manual_imdb_matched: 0,
+      suspicious_total: 0,
       errors: 0,
       error_log: ""
     };
@@ -228,7 +241,10 @@ function createScanner({ config, database, logger, dataDir }) {
         await walkMediaDirectory(mediaPath.path, {
           allowedExtensions: config.media.allowed_extensions,
           ignorePatterns: config.media.ignore_patterns,
-          logger
+          logger,
+          onIgnored: () => {
+            summary.files_ignored += 1;
+          }
         }, async (filePath, stats, extension) => {
           summary.files_seen += 1;
 
@@ -259,7 +275,7 @@ function createScanner({ config, database, logger, dataDir }) {
           }
 
           const existingItem = database.getItemByFileId(fileId);
-          const refreshMetadata = shouldRefreshMetadata(existingItem, fileChanged, config, forceMetadataRefresh);
+          const refreshMetadata = shouldRefreshMetadata(existingItem, fileChanged, config, forceMetadataRefresh, filePath);
 
           let resolved;
           if (refreshMetadata) {
@@ -300,6 +316,7 @@ function createScanner({ config, database, logger, dataDir }) {
                 match_confidence: existingItem.match_confidence,
                 needs_review: existingItem.needs_review,
                 manual_match: existingItem.manual_match,
+                alternative_titles_json: existingItem.alternative_titles_json || "[]",
                 metadata_language: existingItem.metadata_language,
                 metadata_fetched_at: existingItem.metadata_fetched_at,
                 metadata_refresh_after: existingItem.metadata_refresh_after
@@ -320,6 +337,16 @@ function createScanner({ config, database, logger, dataDir }) {
           const itemRecord = buildItemRecord(fileRecord, resolved, existingItem);
           database.upsertItem(itemRecord);
           upsertStreamForItem(fileRecord, itemRecord, resolved.parsed.quality);
+
+          if (itemRecord.needs_review) {
+            summary.suspicious_total += 1;
+          }
+
+          if (["manual", "nfo", "filename_imdb", "imdb"].includes(itemRecord.match_source)) {
+            summary.manual_imdb_matched += 1;
+          } else if (itemRecord.match_source === "tmdb" && !itemRecord.needs_review) {
+            summary.auto_matched += 1;
+          }
         });
       }
 
@@ -343,7 +370,7 @@ function createScanner({ config, database, logger, dataDir }) {
 
   return {
     runScan,
-    async refreshItemMetadata(itemId) {
+    async refreshItemMetadata(itemId, options = {}) {
       const item = database.getItemByItemId(itemId);
       if (!item) {
         throw new Error("Item not found");
@@ -361,7 +388,8 @@ function createScanner({ config, database, logger, dataDir }) {
         cacheDirs,
         existingItem: item,
         forceRefresh: true,
-        logger
+        logger,
+        manualMatchBehavior: options.manualMatchBehavior || "preserve"
       });
 
       const itemRecord = buildItemRecord(fileRecord, resolved, item);

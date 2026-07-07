@@ -45,7 +45,9 @@ const DEFAULT_CONFIG = {
     verify_file_exists_on_play: true,
     enable_range_requests: true,
     mime_fallback: "video/mp4",
-    direct_play_only: true
+    direct_play_only: true,
+    show_filename_in_title: true,
+    show_folder_in_title: false
   },
   security: {
     admin_token: "",
@@ -163,6 +165,8 @@ function normalizeConfig(config) {
   normalized.metadata.min_auto_match_confidence = Number(normalized.metadata.min_auto_match_confidence) || 0.9;
   normalized.streaming.verify_file_exists_on_play = Boolean(normalized.streaming.verify_file_exists_on_play);
   normalized.streaming.enable_range_requests = Boolean(normalized.streaming.enable_range_requests);
+  normalized.streaming.show_filename_in_title = Boolean(normalized.streaming.show_filename_in_title);
+  normalized.streaming.show_folder_in_title = Boolean(normalized.streaming.show_folder_in_title);
   normalized.security.expose_admin_api = Boolean(normalized.security.expose_admin_api);
   normalized.security.allow_lan_only = Boolean(normalized.security.allow_lan_only);
 

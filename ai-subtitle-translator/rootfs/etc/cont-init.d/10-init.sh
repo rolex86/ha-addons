@@ -1,5 +1,5 @@
-#!/usr/bin/with-contenv bash
-set -euo pipefail
+#!/usr/bin/with-contenv bashio
+set -e
 
 mkdir -p /data/cache
 chmod 700 /data/cache

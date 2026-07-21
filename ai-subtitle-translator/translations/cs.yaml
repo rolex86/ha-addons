@@ -1,0 +1,24 @@
+configuration:
+  gemini_api_key:
+    name: Gemini API klíč
+    description: API klíč používaný pouze uvnitř add-onu pro komunikaci se službou Gemini.
+  gemini_model:
+    name: Gemini model
+    description: Model použitý pro překlad. Výchozí je gemini-3.1-flash-lite.
+  api_token:
+    name: Přístupový token
+    description: Volitelný Bearer token, který musí JustPlayer Plus posílat s překladovými požadavky.
+  batch_max_cues:
+    name: Maximální počet titulků v dávce
+    description: Nejvyšší počet titulkových položek odeslaných do Gemini v jednom požadavku.
+  batch_max_characters:
+    name: Maximální počet znaků v dávce
+    description: Přibližný limit textu odeslaného do Gemini v jednom požadavku.
+  timeout_seconds:
+    name: Časový limit překladu
+    description: Maximální doba kompletního překladu titulků v sekundách.
+  log_level:
+    name: Úroveň logování
+    description: Množství informací zapisovaných do logu add-onu.
+network:
+  8787/tcp: Překladové API pro JustPlayer Plus

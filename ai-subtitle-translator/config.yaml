@@ -1,7 +1,7 @@
 name: "AI Subtitle Translator"
 slug: "ai_subtitle_translator"
 description: "Gemini-backed subtitle translation API for JustPlayer Plus"
-version: "0.1.0"
+version: "0.1.1"
 url: "https://github.com/rolex86/ha-addons/tree/master/ai-subtitle-translator"
 
 arch:

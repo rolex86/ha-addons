@@ -1,0 +1,24 @@
+configuration:
+  gemini_api_key:
+    name: Gemini API key
+    description: API key used only inside the add-on to communicate with Gemini.
+  gemini_model:
+    name: Gemini model
+    description: Model used for translation. The default is gemini-3.1-flash-lite.
+  api_token:
+    name: Access token
+    description: Optional Bearer token that JustPlayer Plus must send with translation requests.
+  batch_max_cues:
+    name: Maximum cues per batch
+    description: Maximum number of subtitle cues sent to Gemini in one request.
+  batch_max_characters:
+    name: Maximum characters per batch
+    description: Approximate maximum text size sent to Gemini in one request.
+  timeout_seconds:
+    name: Translation timeout
+    description: Maximum duration of a complete subtitle translation in seconds.
+  log_level:
+    name: Log level
+    description: Amount of information written to the add-on log.
+network:
+  8787/tcp: Translation API for JustPlayer Plus

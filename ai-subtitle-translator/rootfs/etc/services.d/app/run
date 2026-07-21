@@ -1,5 +1,5 @@
-#!/usr/bin/with-contenv bash
-set -euo pipefail
+#!/usr/bin/with-contenv bashio
+set -e
 
 export GEMINI_API_KEY="$(bashio::config 'gemini_api_key')"
 export GEMINI_MODEL="$(bashio::config 'gemini_model')"

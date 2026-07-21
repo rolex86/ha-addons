@@ -1,0 +1,16 @@
+{
+  "name": "home-assistant-ai-subtitle-translator",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Gemini-backed subtitle translation API for JustPlayer Plus",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test",
+    "check": "node --check src/server.js && node --check src/translation-service.js && node --check src/subtitle-format.js && node --check src/gemini.js && node --check src/cache.js && node --check src/logger.js"
+  },
+  "license": "MIT"
+}

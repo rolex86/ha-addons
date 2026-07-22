@@ -84,8 +84,8 @@ export function createConfiguredService(env = process.env, logger = null) {
     translator,
     cache,
     promptVersion: PROMPT_VERSION,
-    batchMaxCues: readInteger(env.BATCH_MAX_CUES, 60, 1, 200),
-    batchMaxCharacters: readInteger(env.BATCH_MAX_CHARACTERS, 8000, 1000, 30000),
+    batchMaxCues: readInteger(env.BATCH_MAX_CUES, 300, 1, 500),
+    batchMaxCharacters: readInteger(env.BATCH_MAX_CHARACTERS, 30000, 1000, 50000),
     timeoutMs: readInteger(env.TRANSLATION_TIMEOUT_SECONDS, 300, 30, 900) * 1000,
     logger,
   });

@@ -5,12 +5,19 @@ Keep every input ID exactly once and in the original order. Translate only text.
 export const PROMPT_VERSION = "jpp-cs-v2";
 
 export class GeminiTranslator {
-  constructor({ apiKey, model = "gemini-3.1-flash-lite", fetchImpl = globalThis.fetch }) {
+  constructor({
+    apiKey,
+    model = "gemini-3.1-flash-lite",
+    fetchImpl = globalThis.fetch,
+    sleepImpl = delay,
+  }) {
     if (!apiKey) throw new Error("GEMINI_API_KEY is required");
     if (typeof fetchImpl !== "function") throw new Error("fetch is unavailable");
+    if (typeof sleepImpl !== "function") throw new Error("sleep is unavailable");
     this.apiKey = apiKey;
     this.model = model;
     this.fetch = fetchImpl;
+    this.sleep = sleepImpl;
   }
 
   async translateBatch(batch, { sourceLanguage, title }, signal) {
@@ -29,7 +36,10 @@ export class GeminiTranslator {
       } catch (error) {
         lastError = error;
         if (signal?.aborted || attempt === 2) break;
-        await delay(750 * (2 ** attempt), signal);
+        const waitMs = error instanceof GeminiHttpError && error.status === 429
+          ? (error.retryAfterMs ?? 65_000)
+          : 750 * (2 ** attempt);
+        await this.sleep(waitMs, signal);
       }
     }
     throw lastError ?? new Error("TRANSLATION_FAILED");
@@ -53,7 +63,12 @@ export class GeminiTranslator {
       }),
       signal,
     });
-    if (!response.ok) throw new Error(`GEMINI_HTTP_${response.status}`);
+    if (!response.ok) {
+      throw new GeminiHttpError(
+        response.status,
+        parseRetryAfter(response.headers?.get?.("retry-after")),
+      );
+    }
     const payload = await response.json();
     const text = payload?.candidates?.[0]?.content?.parts
       ?.map(part => part.text || "").join("");
@@ -61,6 +76,26 @@ export class GeminiTranslator {
     const parsed = JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, ""));
     return Array.isArray(parsed) ? parsed : parsed.translations;
   }
+}
+
+class GeminiHttpError extends Error {
+  constructor(status, retryAfterMs = null) {
+    super(`GEMINI_HTTP_${status}`);
+    this.name = "GeminiHttpError";
+    this.status = status;
+    this.retryAfterMs = retryAfterMs;
+  }
+}
+
+export function parseRetryAfter(value, now = Date.now()) {
+  if (!value) return null;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.min(120_000, Math.max(1_000, Math.ceil(seconds * 1000)));
+  }
+  const date = Date.parse(value);
+  if (!Number.isFinite(date)) return null;
+  return Math.min(120_000, Math.max(1_000, date - now));
 }
 
 export function validateTranslations(batch, translations) {

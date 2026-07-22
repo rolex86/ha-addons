@@ -38,10 +38,12 @@ Then enable AI subtitle translation in JustPlayer Plus. Translation starts only 
 
 ## Advanced options
 
-- `batch_max_cues`: maximum number of subtitle cues sent to Gemini in one request.
-- `batch_max_characters`: maximum approximate text size of one translation batch.
+- `batch_max_cues`: maximum number of subtitle cues sent to Gemini in one request. Default: `300`.
+- `batch_max_characters`: maximum approximate text size of one translation batch. Default: `30000`.
 - `timeout_seconds`: maximum duration of one complete subtitle translation.
 - `log_level`: `debug`, `info`, `warn`, or `error`.
+
+Larger batches reduce Gemini requests per minute. When Gemini returns HTTP `429`, the add-on respects `Retry-After` when provided; otherwise it waits 65 seconds before retrying the same batch.
 
 ## Storage
 

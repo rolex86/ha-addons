@@ -18,9 +18,7 @@ function parseSrt(text) {
     while (index < lines.length && !lines[index].trim()) index++;
     if (index >= lines.length) break;
     if (/^\d+$/.test(lines[index].trim())) index++;
-    if (index >= lines.length || !TIMESTAMP.test(lines[index].trim())) {
-      throw new Error("INVALID_SRT");
-    }
+    if (index >= lines.length || !TIMESTAMP.test(lines[index].trim())) throw new Error("INVALID_SRT");
     const timing = normalizeTiming(lines[index++].trim());
     const body = [];
     while (index < lines.length && lines[index].trim()) body.push(lines[index++]);
@@ -42,9 +40,7 @@ function parseVtt(text) {
       continue;
     }
     if (!TIMESTAMP.test(lines[index].trim())) index++;
-    if (index >= lines.length || !TIMESTAMP.test(lines[index].trim())) {
-      throw new Error("INVALID_VTT");
-    }
+    if (index >= lines.length || !TIMESTAMP.test(lines[index].trim())) throw new Error("INVALID_VTT");
     const timing = normalizeTiming(lines[index++].trim());
     const body = [];
     while (index < lines.length && lines[index].trim()) body.push(lines[index++]);
@@ -78,7 +74,7 @@ export function renderSrt(cues, translations) {
   }).join("\n\n") + "\n";
 }
 
-export function createBatches(cues, maxCues = 60, maxCharacters = 8000) {
+export function createBatches(cues, maxCues = 300, maxCharacters = 30000) {
   const batches = [];
   let batch = [];
   let characters = 0;

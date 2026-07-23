@@ -10,7 +10,7 @@
   "scripts": {
     "start": "node src/server.js",
     "test": "node --test",
-    "check": "node --check src/server.js && node --check src/translation-service.js && node --check src/subtitle-format.js && node --check src/gemini.js && node --check src/cache.js && node --check src/logger.js"
+    "check": "node --check src/server.js && node --check src/translation-service.js && node --check src/subtitle-format.js && node --check src/gemini.js && node --check src/cache.js && node --check src/job-store.js && node --check src/logger.js"
   },
   "license": "MIT"
 }

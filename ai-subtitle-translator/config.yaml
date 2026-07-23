@@ -1,7 +1,7 @@
 name: "AI Subtitle Translator"
 slug: "ai_subtitle_translator"
 description: "Gemini-backed subtitle translation API for JustPlayer Plus"
-version: "0.1.2"
+version: "0.1.3"
 url: "https://github.com/rolex86/ha-addons/tree/master/ai-subtitle-translator"
 
 arch:
@@ -32,7 +32,9 @@ options:
   api_token: ""
   batch_max_cues: 300
   batch_max_characters: 30000
-  timeout_seconds: 300
+  timeout_seconds: 900
+  gemini_request_timeout_seconds: 45
+  gemini_min_request_interval_ms: 4100
   log_level: "info"
 
 schema:
@@ -41,5 +43,7 @@ schema:
   api_token: password
   batch_max_cues: int(1,500)
   batch_max_characters: int(1000,50000)
-  timeout_seconds: int(30,900)
+  timeout_seconds: int(30,3600)
+  gemini_request_timeout_seconds: int(10,180)
+  gemini_min_request_interval_ms: int(0,60000)
   log_level: list(debug|info|warn|error)

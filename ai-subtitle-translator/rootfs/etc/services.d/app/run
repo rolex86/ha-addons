@@ -7,10 +7,13 @@ export API_TOKEN="$(bashio::config 'api_token')"
 export BATCH_MAX_CUES="$(bashio::config 'batch_max_cues')"
 export BATCH_MAX_CHARACTERS="$(bashio::config 'batch_max_characters')"
 export TRANSLATION_TIMEOUT_SECONDS="$(bashio::config 'timeout_seconds')"
+export GEMINI_REQUEST_TIMEOUT_SECONDS="$(bashio::config 'gemini_request_timeout_seconds')"
+export GEMINI_MIN_REQUEST_INTERVAL_MS="$(bashio::config 'gemini_min_request_interval_ms')"
 export LOG_LEVEL="$(bashio::config 'log_level')"
 export HOST="0.0.0.0"
 export PORT="8787"
 export CACHE_DIR="/data/cache"
+export JOB_DIR="/data/jobs"
 
 if [[ -z "${GEMINI_API_KEY}" ]]; then
   bashio::log.fatal "Gemini API key is missing. Configure gemini_api_key before starting the add-on."

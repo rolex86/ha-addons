@@ -34,18 +34,20 @@ Set the translation-service address to:
 http://HOME_ASSISTANT_IP:8787
 ```
 
-Then enable AI subtitle translation in JustPlayer Plus. Translation starts only after the user presses the AI subtitle button.
+Then enable AI subtitle translation in JustPlayer Plus. Translation starts only after the user presses the AI subtitle button. Playback continues while translation runs in the background.
 
 ## Advanced options
 
-- `batch_max_cues`: maximum number of subtitle cues sent to Gemini in one request. Default: `300`.
-- `batch_max_characters`: maximum approximate text size of one translation batch. Default: `30000`.
-- `timeout_seconds`: maximum duration of one complete subtitle translation.
+- `batch_max_cues`: maximum number of subtitle cues initially sent to Gemini in one request. Default: `300`.
+- `batch_max_characters`: maximum approximate text size of an initial translation batch. Default: `30000`.
+- `timeout_seconds`: maximum time without a successfully completed batch before a job is paused as failed. Default: `900`.
+- `gemini_request_timeout_seconds`: maximum duration of one Gemini request before that batch is retried or split. Default: `45`.
+- `gemini_min_request_interval_ms`: minimum delay between Gemini requests. Default: `4100`, which keeps normal traffic below approximately 15 requests per minute.
 - `log_level`: `debug`, `info`, `warn`, or `error`.
 
-Larger batches reduce Gemini requests per minute. When Gemini returns HTTP `429`, the add-on respects `Retry-After` when provided; otherwise it waits 65 seconds before retrying the same batch.
+When Gemini returns an incomplete or invalid structured response, only the affected batch is divided into smaller batches. Completed cues are preserved. HTTP `429` respects `Retry-After` when provided; otherwise the add-on waits 65 seconds before retrying.
 
-## Storage
+## Storage and recovery
 
 Completed translations are stored in:
 
@@ -53,12 +55,20 @@ Completed translations are stored in:
 /data/cache
 ```
 
-The cache survives add-on updates and restarts. Active jobs are kept only in memory and are lost when the add-on restarts.
+In-progress jobs and completed batches are stored in:
+
+```text
+/data/jobs
+```
+
+Both directories survive add-on updates and restarts. After a restart, unfinished jobs continue from the last successfully stored batch instead of starting from the beginning.
 
 ## API behavior
 
 - A new translation returns HTTP `202` and a job ID.
+- A repeated request for the same unfinished subtitle returns the existing job.
 - A cache hit returns HTTP `200` with the completed SRT.
 - Progress is read from `GET /v1/translations/{jobId}`.
-- An abandoned job can be cancelled with `DELETE /v1/translations/{jobId}`.
+- An explicitly cancelled job can be cancelled with `DELETE /v1/translations/{jobId}`.
+- Disconnecting or closing JustPlayer Plus does not cancel the server-side job.
 - SRT and WebVTT inputs are limited to 2 MiB.

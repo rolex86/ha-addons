@@ -3,6 +3,7 @@ import http from "node:http";
 import { fileURLToPath } from "node:url";
 import { ResultCache } from "./cache.js";
 import { GeminiTranslator, PROMPT_VERSION } from "./gemini.js";
+import { JobStore } from "./job-store.js";
 import { createLogger } from "./logger.js";
 import { MAX_SUBTITLE_BYTES, TranslationService } from "./translation-service.js";
 
@@ -30,18 +31,22 @@ export function createServer(service, { apiToken = "", logger = null } = {}) {
       const match = /^\/v1\/translations\/([0-9a-f-]{36})$/.exec(url.pathname);
       if (request.method === "GET" && match) {
         const job = service.get(match[1]);
-        return job ? send(response, 200, job) : send(response, 404, { error: "JOB_NOT_FOUND" });
+        return job ? send(response, 200, job)
+          : send(response, 404, { error: "JOB_NOT_FOUND" });
       }
       if (request.method === "DELETE" && match) {
         const job = service.cancel(match[1]);
-        return job ? send(response, 200, job) : send(response, 404, { error: "JOB_NOT_FOUND" });
+        return job ? send(response, 200, job)
+          : send(response, 404, { error: "JOB_NOT_FOUND" });
       }
       send(response, 404, { error: "NOT_FOUND" });
     } catch (error) {
-      const code = error?.message === "SUBTITLE_TOO_LARGE" || error?.message === "REQUEST_TOO_LARGE"
-        ? 413 : 400;
+      const code = error?.message === "SUBTITLE_TOO_LARGE"
+        || error?.message === "REQUEST_TOO_LARGE" ? 413 : 400;
       logger?.warn("Request rejected", { status: code, cause: safeErrorName(error) });
-      send(response, code, { error: code === 413 ? "SUBTITLE_TOO_LARGE" : "INVALID_REQUEST" });
+      send(response, code, {
+        error: code === 413 ? "SUBTITLE_TOO_LARGE" : "INVALID_REQUEST",
+      });
     }
   });
 }
@@ -78,22 +83,31 @@ export function createConfiguredService(env = process.env, logger = null) {
   const translator = new GeminiTranslator({
     apiKey: env.GEMINI_API_KEY,
     model: env.GEMINI_MODEL || "gemini-3.1-flash-lite",
+    requestTimeoutMs: readInteger(
+      env.GEMINI_REQUEST_TIMEOUT_SECONDS, 45, 10, 180) * 1000,
+    minimumRequestIntervalMs: readInteger(
+      env.GEMINI_MIN_REQUEST_INTERVAL_MS, 4100, 0, 60000),
   });
   const cache = new ResultCache(env.CACHE_DIR || "/data/cache");
+  const jobStore = new JobStore(env.JOB_DIR || "/data/jobs");
   return new TranslationService({
     translator,
     cache,
+    jobStore,
     promptVersion: PROMPT_VERSION,
     batchMaxCues: readInteger(env.BATCH_MAX_CUES, 300, 1, 500),
-    batchMaxCharacters: readInteger(env.BATCH_MAX_CHARACTERS, 30000, 1000, 50000),
-    timeoutMs: readInteger(env.TRANSLATION_TIMEOUT_SECONDS, 300, 30, 900) * 1000,
+    batchMaxCharacters: readInteger(
+      env.BATCH_MAX_CHARACTERS, 30000, 1000, 50000),
+    timeoutMs: readInteger(
+      env.TRANSLATION_TIMEOUT_SECONDS, 900, 30, 3600) * 1000,
     logger,
   });
 }
 
 function readInteger(value, fallback, minimum, maximum) {
   const parsed = Number.parseInt(value, 10);
-  return Number.isInteger(parsed) && parsed >= minimum && parsed <= maximum ? parsed : fallback;
+  return Number.isInteger(parsed) && parsed >= minimum && parsed <= maximum
+    ? parsed : fallback;
 }
 
 function safeErrorName(error) {

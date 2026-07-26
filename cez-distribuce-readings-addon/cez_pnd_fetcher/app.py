@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 import json
 import logging
+import re
 import time
 import urllib.parse
 from dataclasses import dataclass
@@ -12,36 +13,80 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 
-import requests
+from curl_cffi import requests as curl_requests
 
 LOG = logging.getLogger("cez_pnd_fetcher")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
-CAS_BASE_URL = "https://cas.cez.cz/cas"
+CAS_BASE_URL = "https://mepas.cez.cz/cas"
 CEZ_BASE_URL = "https://dip.cezdistribuce.cz/irj/portal"
 PND_BASE_URL = "https://pnd.cezdistribuce.cz/cezpnd2"
-CEZ_CLIENT_ID = "fjR3ZL9zrtsNcDQF.onpremise.dip.sap.dipcezdistribucecz.prod"
+CEZ_CLIENT_ID = "emiCuDBbivwYxraX.dip.dip.ext.zak.prod.v1"
 CLIENT_NAME = "CasOAuthClient"
 RESPONSE_TYPE = "code"
 SCOPE = "openid"
 TIMEOUT = 30
+TRANSIENT_ATTEMPTS = 3
+TRANSIENT_BACKOFF_SECONDS = 2
+MAX_REDIRECTS = 30
+IMPERSONATE_TARGET = "chrome146"
+REDIRECT_STATUSES = {301, 302, 303, 307, 308}
 
-BROWSER_HEADERS = {
+SESSION_HEADERS = {
     "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/120.0.0.0 Safari/537.36"
+        "Chrome/146.0.0.0 Safari/537.36"
     ),
-    "Accept": (
-        "text/html,application/xhtml+xml,application/xml;q=0.9,"
-        "application/json,text/plain,*/*;q=0.8"
-    ),
+    "Accept-Encoding": "gzip, deflate, br, zstd",
     "Accept-Language": "cs-CZ,cs;q=0.9,en;q=0.8",
+}
+
+NAVIGATION_HEADERS = {
+    "Accept": (
+        "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+    ),
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-User": "?1",
+    "Upgrade-Insecure-Requests": "1",
+}
+
+FORM_HEADERS = {
+    "Accept": (
+        "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+    ),
+    "Origin": "https://mepas.cez.cz",
+    "Sec-Fetch-Site": "same-origin",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-User": "?1",
+    "Upgrade-Insecure-Requests": "1",
+}
+
+AUTHORIZE_HEADERS = {
+    **NAVIGATION_HEADERS,
+    "Referer": CEZ_BASE_URL,
+    "Sec-Fetch-Site": "cross-site",
+}
+
+TOKEN_HEADERS = {
+    "Accept": "application/json",
+    "Referer": CEZ_BASE_URL,
+    "Sec-Fetch-Site": "same-origin",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Dest": "empty",
 }
 
 WARMUP_HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Referer": "https://pnd.cezdistribuce.cz/",
+    "Sec-Fetch-Site": "cross-site",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-User": "?1",
+    "Upgrade-Insecure-Requests": "1",
 }
 
 DATA_HEADERS = {
@@ -49,6 +94,9 @@ DATA_HEADERS = {
     "Referer": "https://pnd.cezdistribuce.cz/cezpnd2/external/dashboard/view",
     "Accept": "application/json, text/plain, */*",
     "Content-Type": "application/json",
+    "Sec-Fetch-Site": "same-origin",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Dest": "empty",
 }
 
 ADDON_HA_CONFIG_DIR = Path("/homeassistant")
@@ -56,6 +104,49 @@ LEGACY_HA_CONFIG_DIR = Path("/config")
 HA_VISIBLE_CONFIG_DIR = Path("/config")
 VALID_PND_STATUS = "naměřená data OK"
 PND_INTERVAL_HOURS = 0.25
+SENSITIVE_KEYS = {
+    "access_token",
+    "authorization",
+    "code",
+    "cookie",
+    "execution",
+    "id_token",
+    "nonce",
+    "password",
+    "refresh_token",
+    "set-cookie",
+    "state",
+    "ticket",
+    "token",
+    "username",
+    "x-request-token",
+    "xrequesttoken",
+    "xsrftoken",
+    "csrftoken",
+}
+
+
+class CasAccessBlockedError(RuntimeError):
+    def __init__(self, status_code: int, reason: str, identifier: str | None = None) -> None:
+        self.status_code = status_code
+        self.reason = reason
+        self.identifier = identifier
+        suffix = f", identifier={identifier}" if identifier else ""
+        super().__init__(
+            f"CAS access blocked with HTTP {status_code}: reason={reason}{suffix}"
+        )
+
+
+class CasLoginPageChangedError(RuntimeError):
+    pass
+
+
+class CasAuthenticationError(RuntimeError):
+    pass
+
+
+class CezTokenError(RuntimeError):
+    pass
 
 
 @dataclass(frozen=True)
@@ -147,17 +238,24 @@ def sanitize_url(value: str | None) -> str | None:
         return value
     parsed = urllib.parse.urlparse(value)
     query = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
-    masked = []
+    masked: list[tuple[str, str]] = []
     for key, val in query:
-        masked.append((key, "***" if key.lower() in {"code", "ticket", "state", "nonce"} else val))
+        lowered = key.lower()
+        if lowered in SENSITIVE_KEYS:
+            safe_value = "***"
+        elif val.startswith(("http://", "https://")):
+            safe_value = sanitize_url(val) or ""
+        else:
+            safe_value = val
+        masked.append((key, safe_value))
     return urllib.parse.urlunparse(
         (
             parsed.scheme,
             parsed.netloc,
             parsed.path,
             parsed.params,
-            urllib.parse.urlencode(masked),
-            parsed.fragment,
+            urllib.parse.urlencode(masked, quote_via=urllib.parse.quote),
+            redact_sensitive_text(parsed.fragment),
         )
     )
 
@@ -166,11 +264,268 @@ def safe_headers(headers: Any) -> dict[str, str]:
     result: dict[str, str] = {}
     for key, value in dict(headers or {}).items():
         lowered = str(key).lower()
-        if lowered in {"cookie", "authorization", "set-cookie", "x-request-token"}:
+        if (
+            lowered in SENSITIVE_KEYS
+            or "authorization" in lowered
+            or "cookie" in lowered
+            or "token" in lowered
+        ):
             result[str(key)] = "***"
+        elif lowered in {"location", "referer"}:
+            result[str(key)] = sanitize_url(str(value)) or ""
         else:
             result[str(key)] = str(value)
     return result
+
+
+def redact_sensitive_text(value: str, secrets: tuple[str, ...] = ()) -> str:
+    redacted = value
+    for secret in sorted((item for item in secrets if item), key=len, reverse=True):
+        redacted = redacted.replace(secret, "***")
+
+    def redact_sensitive_input(match: re.Match[str]) -> str:
+        tag = match.group(0)
+        name_match = re.search(
+            r"""(?i)\bname\s*=\s*["']([^"']+)["']""",
+            tag,
+        )
+        if not name_match or name_match.group(1).lower() not in SENSITIVE_KEYS:
+            return tag
+        return re.sub(
+            r"""(?i)(\bvalue\s*=\s*["'])[^"']*(["'])""",
+            r"\1***\2",
+            tag,
+        )
+
+    redacted = re.sub(
+        r"(?is)<input\b[^>]*>",
+        redact_sensitive_input,
+        redacted,
+    )
+    sensitive_names = "|".join(re.escape(key) for key in sorted(SENSITIVE_KEYS))
+    redacted = re.sub(
+        rf"(?i)((?:{sensitive_names})(?:=|%3d|\"\s*:\s*\"?))([^&\s<>\"']+)",
+        r"\1***",
+        redacted,
+    )
+    redacted = re.sub(r"(?i)\b(ST|TGT)-[A-Za-z0-9._~-]+", r"\1-***", redacted)
+    return redacted
+
+
+def sanitize_diagnostic_data(value: Any, secrets: tuple[str, ...] = ()) -> Any:
+    if isinstance(value, dict):
+        return {
+            str(key): (
+                "***"
+                if str(key).lower() in SENSITIVE_KEYS
+                else sanitize_diagnostic_data(item, secrets)
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [sanitize_diagnostic_data(item, secrets) for item in value]
+    if isinstance(value, tuple):
+        return [sanitize_diagnostic_data(item, secrets) for item in value]
+    if isinstance(value, str):
+        return redact_sensitive_text(value, secrets)
+    return value
+
+
+def build_auth_urls() -> tuple[str, str, str]:
+    service_url = (
+        f"{CAS_BASE_URL}/oauth2.0/callbackAuthorize?"
+        + urllib.parse.urlencode(
+            {
+                "client_id": CEZ_CLIENT_ID,
+                "scope": SCOPE,
+                "redirect_uri": CEZ_BASE_URL,
+                "response_type": RESPONSE_TYPE,
+                "client_name": CLIENT_NAME,
+            },
+            quote_via=urllib.parse.quote,
+        )
+    )
+    login_url = (
+        f"{CAS_BASE_URL}/login?"
+        + urllib.parse.urlencode(
+            {"service": service_url},
+            quote_via=urllib.parse.quote,
+        )
+    )
+    authorize_url = (
+        f"{CAS_BASE_URL}/oidc/oidcAuthorize?"
+        + urllib.parse.urlencode(
+            {
+                "response_type": RESPONSE_TYPE,
+                "redirect_uri": CEZ_BASE_URL,
+                "client_id": CEZ_CLIENT_ID,
+                "scope": SCOPE,
+            },
+            quote_via=urllib.parse.quote,
+        )
+    )
+    return service_url, login_url, authorize_url
+
+
+def classify_cas_response(
+    response: curl_requests.Response,
+) -> tuple[str, str | None]:
+    body = response.text.lower()
+    header_text = " ".join(
+        f"{key}:{value}" for key, value in response.headers.items()
+    ).lower()
+    evidence = f"{header_text}\n{body}"
+    markers = (
+        ("cloudflare", ("cloudflare", "cf-ray", "/cdn-cgi/challenge")),
+        ("akamai", ("akamai", "ak_bmsc", "bm_sv", "reference #")),
+        ("imperva", ("imperva", "incapsula", "_incap_")),
+        ("datadome", ("datadome", "captcha-delivery.com")),
+        ("perimeterx", ("perimeterx", "_pxhd", "px-captcha")),
+    )
+    for identifier, patterns in markers:
+        if any(pattern in evidence for pattern in patterns):
+            return "possible_bot_protection", identifier
+
+    challenge_markers = (
+        "enable javascript",
+        "javascript is required",
+        "checking your browser",
+        "verify you are human",
+        "cookie challenge",
+    )
+    if any(marker in evidence for marker in challenge_markers):
+        return "javascript_or_cookie_challenge", "generic_challenge"
+
+    hostname = (urllib.parse.urlparse(response.url).hostname or "").lower()
+    if response.status_code == 403 and hostname == "cas.cez.cz":
+        return "obsolete_cas_endpoint", "legacy_cas_host"
+    if response.status_code == 403:
+        return "access_denied_by_cas", None
+    return "unexpected_cas_response", None
+
+
+def contains_cas_login_form(html_text: str) -> bool:
+    parser = LoginFormParser()
+    parser.feed(html_text)
+    return any("execution" in (form.get("inputs") or {}) for form in parser.forms)
+
+
+def validate_cas_login_page(response: curl_requests.Response) -> None:
+    if response.status_code != 200:
+        reason, identifier = classify_cas_response(response)
+        if response.status_code == 403:
+            LOG.error(
+                "CAS login blocked: status=%s reason=%s identifier=%s",
+                response.status_code,
+                reason,
+                identifier or "none",
+            )
+            raise CasAccessBlockedError(response.status_code, reason, identifier)
+        response.raise_for_status()
+        raise CasLoginPageChangedError(
+            f"CAS login returned unexpected HTTP {response.status_code}"
+        )
+
+    content_type = (response.headers.get("content-type") or "").lower()
+    if "html" not in content_type:
+        raise CasLoginPageChangedError(
+            f"CAS login page is not HTML (content-type={content_type or 'missing'})"
+        )
+
+    if not contains_cas_login_form(response.text):
+        reason, identifier = classify_cas_response(response)
+        if reason == "javascript_or_cookie_challenge":
+            raise CasAccessBlockedError(response.status_code, reason, identifier)
+        raise CasLoginPageChangedError(
+            "CAS login page does not contain the expected execution token"
+        )
+
+
+def request_with_backoff(
+    session: curl_requests.Session,
+    method: str,
+    url: str,
+    *,
+    sleep: Any = time.sleep,
+    **kwargs: Any,
+) -> curl_requests.Response:
+    response: curl_requests.Response | None = None
+    for attempt in range(1, TRANSIENT_ATTEMPTS + 1):
+        response = request_with_history(session, method, url, **kwargs)
+        is_transient = response.status_code == 429 or response.status_code >= 500
+        if not is_transient or attempt == TRANSIENT_ATTEMPTS:
+            return response
+        delay = TRANSIENT_BACKOFF_SECONDS * (2 ** (attempt - 1))
+        LOG.warning(
+            "Transient HTTP %s at %s; retry %s/%s in %ss",
+            response.status_code,
+            sanitize_url(url),
+            attempt + 1,
+            TRANSIENT_ATTEMPTS,
+            delay,
+        )
+        response.close()
+        sleep(delay)
+    assert response is not None
+    return response
+
+
+def request_with_history(
+    session: curl_requests.Session,
+    method: str,
+    url: str,
+    **kwargs: Any,
+) -> curl_requests.Response:
+    allow_redirects = bool(kwargs.pop("allow_redirects", True))
+    if not allow_redirects:
+        return session.request(method, url, allow_redirects=False, **kwargs)
+
+    history: list[curl_requests.Response] = []
+    current_method = method.upper()
+    current_url = url
+    current_kwargs = dict(kwargs)
+
+    for _ in range(MAX_REDIRECTS + 1):
+        response = session.request(
+            current_method,
+            current_url,
+            allow_redirects=False,
+            **current_kwargs,
+        )
+        location = response.headers.get("location")
+        if response.status_code not in REDIRECT_STATUSES or not location:
+            response.history = history
+            return response
+
+        history.append(response)
+        if len(history) > MAX_REDIRECTS:
+            raise RuntimeError(f"Too many HTTP redirects (limit={MAX_REDIRECTS})")
+
+        next_url = urllib.parse.urljoin(response.url, location)
+        changes_to_get = response.status_code == 303 or (
+            response.status_code in {301, 302} and current_method == "POST"
+        )
+        if changes_to_get and current_method != "HEAD":
+            current_method = "GET"
+            current_kwargs.pop("data", None)
+            current_kwargs.pop("json", None)
+
+        headers = dict(current_kwargs.get("headers") or {})
+        headers["Referer"] = response.url
+        previous = urllib.parse.urlparse(response.url)
+        upcoming = urllib.parse.urlparse(next_url)
+        headers["Sec-Fetch-Site"] = (
+            "same-origin"
+            if (previous.scheme, previous.netloc) == (upcoming.scheme, upcoming.netloc)
+            else "cross-site"
+        )
+        if current_method in {"GET", "HEAD"}:
+            headers.pop("Origin", None)
+            headers.pop("Content-Type", None)
+        current_kwargs["headers"] = headers
+        current_url = next_url
+
+    raise RuntimeError(f"Too many HTTP redirects (limit={MAX_REDIRECTS})")
 
 
 def parse_login_form(html_text: str, login_url: str, username: str, password: str) -> tuple[str, dict[str, str]]:
@@ -186,7 +541,9 @@ def parse_login_form(html_text: str, login_url: str, username: str, password: st
         if "execution" in parser.global_inputs:
             selected_form = {"action": login_url, "inputs": parser.global_inputs}
         else:
-            raise RuntimeError("CAS login form does not contain execution token")
+            raise CasLoginPageChangedError(
+                "CAS login form does not contain execution token"
+            )
     action = html.unescape(str(selected_form.get("action") or login_url))
     form_action = urllib.parse.urljoin(login_url, action)
     payload = dict(selected_form.get("inputs") or {})
@@ -264,18 +621,42 @@ def copy_file(source: Path, target: Path) -> None:
     tmp.replace(target)
 
 
-def dump_response(debug_dir: Path, kind: str, response: requests.Response, payload: dict[str, Any] | None = None) -> None:
+def dump_response(
+    debug_dir: Path,
+    kind: str,
+    response: curl_requests.Response,
+    payload: dict[str, Any] | None = None,
+    secrets: tuple[str, ...] = (),
+) -> None:
     debug_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     base = debug_dir / f"{stamp}_{kind}"
     content_type = response.headers.get("content-type", "")
     if "html" in content_type.lower():
-        body_path = base.with_suffix(".html")
+        body_path = base.with_suffix(".sanitized.html")
     elif "json" in content_type.lower():
-        body_path = base.with_suffix(".response.json")
+        body_path = base.with_suffix(".sanitized.response.json")
     else:
-        body_path = base.with_suffix(".txt")
-    body_path.write_bytes(response.content)
+        body_path = base.with_suffix(".sanitized.txt")
+    if "json" in content_type.lower():
+        try:
+            sanitized_body = json.dumps(
+                sanitize_diagnostic_data(response.json(), secrets),
+                ensure_ascii=False,
+                indent=2,
+            )
+        except (curl_requests.exceptions.RequestException, ValueError):
+            sanitized_body = redact_sensitive_text(response.text, secrets)
+    else:
+        sanitized_body = redact_sensitive_text(response.text, secrets)
+    body_path.write_text(sanitized_body, encoding="utf-8")
+    classification: dict[str, str | None] | None = None
+    if kind.startswith(("01_cas_", "02_cas_", "03_cas_")):
+        reason, identifier = classify_cas_response(response)
+        classification = {
+            "reason": reason,
+            "identifier": identifier,
+        }
     meta = {
         "captured_at": datetime.now().isoformat(),
         "kind": kind,
@@ -296,9 +677,11 @@ def dump_response(debug_dir: Path, kind: str, response: requests.Response, paylo
             "headers": safe_headers(response.request.headers) if response.request else {},
         },
         "response_headers": safe_headers(response.headers),
-        "body_preview": response.text[:3000],
-        "payload": payload,
+        "body_preview": sanitized_body[:5000],
+        "classification": classification,
+        "payload": sanitize_diagnostic_data(payload, secrets),
         "body_path": str(body_path),
+        "body_sanitized": True,
     }
     meta_path = base.with_suffix(".json")
     meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -425,6 +808,64 @@ def ensure_main_export_from_backup(
     return True
 
 
+def error_type_for_exception(error: Exception) -> str:
+    if isinstance(error, CasAccessBlockedError):
+        return "cas_blocked"
+    if isinstance(error, CasLoginPageChangedError):
+        return "cas_login_page_changed"
+    if isinstance(error, CasAuthenticationError):
+        return "cas_authentication_failed"
+    if isinstance(error, CezTokenError):
+        return "cez_token_missing"
+    if isinstance(error, curl_requests.exceptions.HTTPError):
+        return "http_error"
+    return "fetch_failed"
+
+
+def status_code_for_exception(error: Exception) -> int | None:
+    status_code = getattr(error, "status_code", None)
+    if isinstance(status_code, int):
+        return status_code
+    response = getattr(error, "response", None)
+    value = getattr(response, "status_code", None)
+    return value if isinstance(value, int) else None
+
+
+def save_failure_diagnostic(
+    path: Path,
+    *,
+    stage: str,
+    error: Exception,
+    debug_dir: Path,
+    export_path: Path,
+    backup_path: Path,
+    homeassistant_config_dir: Path,
+    secrets: tuple[str, ...],
+) -> None:
+    reason = getattr(error, "reason", None)
+    diagnostic = {
+        "ok": False,
+        "stage": stage,
+        "status_code": status_code_for_exception(error),
+        "error_type": error_type_for_exception(error),
+        "reason": reason,
+        "message": redact_sensitive_text(str(error), secrets),
+        "failed_at": datetime.now().astimezone().isoformat(),
+        "last_good_export_preserved": export_path.exists() or backup_path.exists(),
+        "main_export_exists": export_path.exists(),
+        "last_good_backup_exists": backup_path.exists(),
+        "debug_directory": str(
+            to_homeassistant_visible_path(debug_dir, homeassistant_config_dir)
+        ),
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    write_json(path, diagnostic)
+    LOG.error(
+        "Failure diagnostic saved: %s",
+        to_homeassistant_visible_path(path, homeassistant_config_dir),
+    )
+
+
 def fetch_once(options: dict[str, Any]) -> None:
     username = str(options.get("username") or "").strip()
     password = str(options.get("password") or "").strip()
@@ -440,71 +881,223 @@ def fetch_once(options: dict[str, Any]) -> None:
     if not username or not password or not device_set_id:
         raise RuntimeError("username, password and device_set_id must be configured")
 
+    export_key = safe_key(str(device_set_id))
+    export_path = output_dir / f"pnd_export_{export_key}.json"
+    backup_path = output_dir / f"pnd_export_{export_key}.last_good.json"
+    failure_path = (
+        homeassistant_config_dir
+        / "cez_distribuce_readings_debug"
+        / f"pnd_fetch_{export_key}.last_failure.json"
+    )
     interval_from, interval_to = current_month_interval()
-    session = requests.Session()
-    session.max_redirects = 30
-    session.headers.update(BROWSER_HEADERS)
-
-    service_url = (
-        f"{CAS_BASE_URL}/oauth2.0/callbackAuthorize"
-        f"?client_id={CEZ_CLIENT_ID}"
-        f"&redirect_uri={urllib.parse.quote(CEZ_BASE_URL)}"
-        f"&response_type={RESPONSE_TYPE}"
-        f"&client_name={CLIENT_NAME}"
+    session = curl_requests.Session(
+        impersonate=IMPERSONATE_TARGET,
+        max_redirects=30,
+        headers=SESSION_HEADERS,
     )
-    login_url = f"{CAS_BASE_URL}/login?service={urllib.parse.quote(service_url)}"
-    authorize_url = (
-        f"{CAS_BASE_URL}/oidc/authorize"
-        f"?scope={SCOPE}"
-        f"&response_type={RESPONSE_TYPE}"
-        f"&redirect_uri={urllib.parse.quote(CEZ_BASE_URL)}"
-        f"&client_id={CEZ_CLIENT_ID}"
-    )
+    _, login_url, authorize_url = build_auth_urls()
+    token: str | None = None
+    stage = "initialization"
 
     try:
-        LOG.warning("### 1) CAS login page")
-        response = session.get(login_url, timeout=TIMEOUT)
-        LOG.warning("status=%s url=%s", response.status_code, response.url)
-        response.raise_for_status()
-        form_action, form_payload = parse_login_form(response.text, login_url, username, password)
+        LOG.info("HTTP transport=curl_cffi impersonate=%s", IMPERSONATE_TARGET)
+        LOG.info("CAS login URL: %s", sanitize_url(login_url))
+        LOG.info("CAS authorize URL: %s", sanitize_url(authorize_url))
 
-        LOG.warning("### 2) CAS login submit")
-        response = session.post(
-            form_action,
-            data=form_payload,
-            headers={"Origin": "https://cas.cez.cz", "Referer": login_url},
+        stage = "cas_login"
+        LOG.warning("### 1) CAS login page")
+        response = request_with_backoff(
+            session,
+            "GET",
+            login_url,
+            headers=NAVIGATION_HEADERS,
             timeout=TIMEOUT,
         )
-        LOG.warning("status=%s url=%s", response.status_code, response.url)
-        response.raise_for_status()
+        login_dumped = debug_dump or response.status_code >= 400
+        if login_dumped:
+            dump_response(
+                debug_dir,
+                "01_cas_login",
+                response,
+                secrets=(username, password),
+            )
+        LOG.warning(
+            "status=%s url=%s",
+            response.status_code,
+            sanitize_url(response.url),
+        )
+        try:
+            validate_cas_login_page(response)
+        except Exception:
+            if not login_dumped:
+                dump_response(
+                    debug_dir,
+                    "01_cas_login",
+                    response,
+                    secrets=(username, password),
+                )
+            raise
+        form_action, form_payload = parse_login_form(
+            response.text,
+            login_url,
+            username,
+            password,
+        )
 
+        stage = "cas_submit"
+        LOG.warning("### 2) CAS login submit")
+        response = request_with_backoff(
+            session,
+            "POST",
+            form_action,
+            data=form_payload,
+            headers={**FORM_HEADERS, "Referer": login_url},
+            timeout=TIMEOUT,
+        )
+        submit_dumped = debug_dump or response.status_code >= 400
+        if submit_dumped:
+            dump_response(
+                debug_dir,
+                "02_cas_submit",
+                response,
+                secrets=(username, password),
+            )
+        LOG.warning(
+            "status=%s url=%s",
+            response.status_code,
+            sanitize_url(response.url),
+        )
+        if response.status_code == 403:
+            reason, identifier = classify_cas_response(response)
+            LOG.error(
+                "CAS submit blocked: status=403 reason=%s identifier=%s",
+                reason,
+                identifier or "none",
+            )
+            raise CasAccessBlockedError(403, reason, identifier)
+        response.raise_for_status()
+        if contains_cas_login_form(response.text):
+            if not submit_dumped:
+                dump_response(
+                    debug_dir,
+                    "02_cas_submit",
+                    response,
+                    secrets=(username, password),
+                )
+            raise CasAuthenticationError(
+                "CAS returned the login form after credential submission"
+            )
+
+        stage = "cas_authorize"
         LOG.warning("### 3) CAS authorize")
-        response = session.get(authorize_url, timeout=TIMEOUT)
-        LOG.warning("status=%s url=%s", response.status_code, response.url)
+        response = request_with_backoff(
+            session,
+            "GET",
+            authorize_url,
+            headers=AUTHORIZE_HEADERS,
+            timeout=TIMEOUT,
+        )
+        authorize_dumped = debug_dump or response.status_code >= 400
+        if authorize_dumped:
+            dump_response(
+                debug_dir,
+                "03_cas_authorize",
+                response,
+                secrets=(username, password),
+            )
+        LOG.warning(
+            "status=%s url=%s",
+            response.status_code,
+            sanitize_url(response.url),
+        )
+        if response.status_code == 403:
+            reason, identifier = classify_cas_response(response)
+            LOG.error(
+                "CAS authorize blocked: status=403 reason=%s identifier=%s",
+                reason,
+                identifier or "none",
+            )
+            raise CasAccessBlockedError(403, reason, identifier)
         response.raise_for_status()
+        if contains_cas_login_form(response.text):
+            if not authorize_dumped:
+                dump_response(
+                    debug_dir,
+                    "03_cas_authorize",
+                    response,
+                    secrets=(username, password),
+                )
+            raise CasAuthenticationError(
+                "CAS authorization returned the login form instead of the ČEZ portal"
+            )
 
+        stage = "cez_token"
         LOG.warning("### 4) ČEZ token")
         token_url = f"{CEZ_BASE_URL}/rest-auth-api?path=/token/get"
-        response = session.get(token_url, timeout=TIMEOUT)
-        LOG.warning("status=%s url=%s", response.status_code, response.url)
+        response = request_with_backoff(
+            session,
+            "GET",
+            token_url,
+            headers=TOKEN_HEADERS,
+            timeout=TIMEOUT,
+        )
+        LOG.warning(
+            "status=%s url=%s",
+            response.status_code,
+            sanitize_url(response.url),
+        )
+        if response.status_code >= 400:
+            dump_response(
+                debug_dir,
+                "04_cez_token",
+                response,
+                secrets=(username, password),
+            )
         response.raise_for_status()
         try:
             token = extract_token(response.json())
-        except Exception:
+        except (curl_requests.exceptions.RequestException, ValueError):
             token = None
+        if debug_dump or not token:
+            dump_response(
+                debug_dir,
+                "04_cez_token",
+                response,
+                secrets=(username, password, token or ""),
+            )
+        if not token:
+            raise CezTokenError("ČEZ token response did not contain a request token")
         if token:
             session.headers.update({"X-Request-Token": token})
             LOG.warning("X-Request-Token loaded")
 
+        stage = "pnd_warmup"
         LOG.warning("### 5) PND warm-up")
         warmup_url = f"{PND_BASE_URL}/external/dashboard/view"
-        response = session.get(warmup_url, headers=WARMUP_HEADERS, timeout=TIMEOUT)
+        response = request_with_backoff(
+            session,
+            "GET",
+            warmup_url,
+            headers=WARMUP_HEADERS,
+            timeout=TIMEOUT,
+        )
         warmup_status_code = response.status_code
-        warmup_url_final = response.url
+        warmup_url_final = sanitize_url(response.url)
         if debug_dump or response.status_code >= 400:
-            dump_response(debug_dir, "05_pnd_warmup", response)
-        LOG.warning("status=%s url=%s", response.status_code, response.url)
+            dump_response(
+                debug_dir,
+                "05_pnd_warmup",
+                response,
+                secrets=(username, password, token),
+            )
+        LOG.warning(
+            "status=%s url=%s",
+            response.status_code,
+            sanitize_url(response.url),
+        )
+        response.raise_for_status()
 
+        stage = "pnd_data"
         LOG.warning("### 6) PND data POST")
         payload = {
             "format": "chart",
@@ -516,25 +1109,71 @@ def fetch_once(options: dict[str, Any]) -> None:
             "opmId": None,
             "electrometerId": None,
         }
-        response = session.post(
+        response = request_with_backoff(
+            session,
+            "POST",
             f"{PND_BASE_URL}/external/data",
             json=payload,
             headers=DATA_HEADERS,
             timeout=TIMEOUT,
         )
         data_status_code = response.status_code
-        data_url_final = response.url
-        if debug_dump or response.status_code >= 400:
-            dump_response(debug_dir, "06_pnd_data", response, payload=payload)
-        LOG.warning("status=%s url=%s content-type=%s", response.status_code, response.url, response.headers.get("content-type"))
+        data_url_final = sanitize_url(response.url)
+        data_dumped = debug_dump or response.status_code >= 400
+        if data_dumped:
+            dump_response(
+                debug_dir,
+                "06_pnd_data",
+                response,
+                payload=payload,
+                secrets=(username, password, token),
+            )
+        LOG.warning(
+            "status=%s url=%s content-type=%s",
+            response.status_code,
+            sanitize_url(response.url),
+            response.headers.get("content-type"),
+        )
 
         content_type = (response.headers.get("content-type") or "").lower()
-        if response.status_code != 200 or "application/json" not in content_type:
+        if response.status_code != 200:
+            response.raise_for_status()
+        if "application/json" not in content_type:
+            if not data_dumped:
+                dump_response(
+                    debug_dir,
+                    "06_pnd_data",
+                    response,
+                    payload=payload,
+                    secrets=(username, password, token),
+                )
             raise RuntimeError(
-                f"FAILED status: {response.status_code} content-type: {response.headers.get('content-type')}"
+                "PND response has unexpected content-type: "
+                f"{response.headers.get('content-type')}"
             )
 
-        chart_payload = response.json()
+        try:
+            chart_payload = response.json()
+        except ValueError:
+            if not data_dumped:
+                dump_response(
+                    debug_dir,
+                    "06_pnd_data",
+                    response,
+                    payload=payload,
+                    secrets=(username, password, token),
+                )
+            raise RuntimeError("PND response body is not valid JSON")
+        if not isinstance(chart_payload, dict):
+            if not data_dumped:
+                dump_response(
+                    debug_dir,
+                    "06_pnd_data",
+                    response,
+                    payload=payload,
+                    secrets=(username, password, token),
+                )
+            raise RuntimeError("PND response JSON is not an object")
         export = {
             "fetched_at": datetime.now().isoformat(),
             "device_set_id": str(device_set_id),
@@ -558,9 +1197,6 @@ def fetch_once(options: dict[str, Any]) -> None:
         }
         output_dir.mkdir(parents=True, exist_ok=True)
         LOG.warning("Home Assistant config mount resolved to: %s", homeassistant_config_dir)
-        export_key = safe_key(str(device_set_id))
-        export_path = output_dir / f"pnd_export_{export_key}.json"
-        backup_path = output_dir / f"pnd_export_{export_key}.last_good.json"
 
         if assessment.is_usable:
             write_json(export_path, export)
@@ -621,11 +1257,29 @@ def fetch_once(options: dict[str, Any]) -> None:
                 LOG.warning(
                     "No last good PND export is available yet; main export remains unchanged."
                 )
-        LOG.warning("Debug files saved inside add-on container to: %s", debug_dir)
-        LOG.warning(
-            "Debug files are visible in Home Assistant at: %s",
-            to_homeassistant_visible_path(debug_dir, homeassistant_config_dir),
+        if debug_dir.exists():
+            LOG.warning("Debug files saved inside add-on container to: %s", debug_dir)
+            LOG.warning(
+                "Debug files are visible in Home Assistant at: %s",
+                to_homeassistant_visible_path(debug_dir, homeassistant_config_dir),
+            )
+    except Exception as error:
+        ensure_main_export_from_backup(
+            export_path=export_path,
+            backup_path=backup_path,
+            homeassistant_config_dir=homeassistant_config_dir,
         )
+        save_failure_diagnostic(
+            failure_path,
+            stage=stage,
+            error=error,
+            debug_dir=debug_dir,
+            export_path=export_path,
+            backup_path=backup_path,
+            homeassistant_config_dir=homeassistant_config_dir,
+            secrets=(username, password, token or ""),
+        )
+        raise
     finally:
         session.close()
 
@@ -637,7 +1291,10 @@ def main() -> None:
         try:
             fetch_once(options)
         except Exception as err:
-            LOG.exception("PND fetcher cycle failed: %s", err)
+            LOG.exception(
+                "PND fetcher cycle failed: %s",
+                redact_sensitive_text(str(err)),
+            )
         time.sleep(interval_min * 60)
 
 

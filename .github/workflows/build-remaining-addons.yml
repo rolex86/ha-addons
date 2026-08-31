@@ -149,8 +149,8 @@ jobs:
         run: |
           args=""
           if [[ -f "$ADDON_PATH/build.yaml" ]]; then
-            base="$(yq -r ".build_from.${ARCH} // empty" "$ADDON_PATH/build.yaml")"
-            if [[ -n "$base" ]]; then
+            base="$(yq -r ".build_from.${ARCH}" "$ADDON_PATH/build.yaml" 2>/dev/null || true)"
+            if [[ -n "$base" && "$base" != "null" ]]; then
               args="BUILD_FROM=$base"
             fi
           fi

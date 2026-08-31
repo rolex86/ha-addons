@@ -3,6 +3,7 @@ name: Build NAS Stremio Bridge
 on:
   push:
     branches:
+      - master
       - nas-bridge-ghcr-0.2.1
     paths:
       - "nas-stremio-bridge/**"

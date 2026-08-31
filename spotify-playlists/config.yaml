@@ -1,13 +1,12 @@
 name: Spotify Playlist Builder
 slug: spotify-playlists
 description: Generate/update Spotify playlists from recipes (no-repeat history), triggered via HA automation.
-version: "0.1.15"
+version: "0.1.16"
 url: https://github.com/rolex86/ha-addons
 arch:
   - aarch64
   - amd64
-  - armv7
-  - i386
+image: ghcr.io/rolex86/spotify-playlists
 
 startup: services
 init: false

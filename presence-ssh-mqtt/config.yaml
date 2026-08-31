@@ -1,14 +1,12 @@
 name: "UniFi SSH Presence (MQTT)"
 slug: "unifi_ssh_presence"
 description: "Presence bez UniFi Controlleru: SSH polling UniFi AP a MQTT autodiscovery device_tracker"
-version: "0.4.2"
+version: "0.4.3"
 url: "https://github.com/rolex86/ha-addons/tree/master/presence-ssh-mqtt"
 arch:
   - aarch64
   - amd64
-  - armv7
-  - armhf
-  - i386
+image: ghcr.io/rolex86/presence-ssh-mqtt
 
 init: false
 startup: services
@@ -19,119 +17,43 @@ host_network: false
 ingress: false
 
 options:
-  # MQTT output for discovery/state/attributes.
   mqtt:
-    # MQTT broker host/IP reachable from this add-on.
     host: "core-mosquitto"
-    # MQTT broker TCP port.
     port: 1883
-    # Optional username; keep empty when broker allows anonymous access.
     username: ""
-    # Optional password for username above.
     password: ""
-    # Home Assistant MQTT discovery prefix.
     discovery_prefix: "homeassistant"
-    # Base topic for presence payloads:
-    # <base_topic>/<mac>/state and <base_topic>/<mac>/attributes
     base_topic: "unifi_presence"
-    # MQTT client ID used by this add-on.
     client_id: "unifi_ssh_presence"
-
-  # Poll interval in seconds.
   poll_interval_sec: 90
-  # Number of consecutive missed cycles before publishing not_home.
   away_after_misses: 3
-  # false = basic mode (legacy behavior)
-  # true = extended attributes + presence_confidence
-  # NOTE: extended_mode does NOT change home/not_home decision logic.
   extended_mode: false
-
-  # Configurable confidence scoring (used only when extended_mode=true).
-  # Confidence is only an attribute and does NOT affect home/not_home state.
   confidence:
     enabled: true
-
-    # RSSI thresholds/scores (Atheros scale from wlanconfig).
     rssi_thresholds: [22, 26, 30, 34]
     rssi_scores: [10, 25, 40, 55, 65]
-
-    # idle_s thresholds/scores (seconds).
     idle_thresholds: [10, 120]
     idle_scores: [15, 8, 0]
-
-    # rate thresholds/scores where rate = max(tx_mbps, rx_mbps).
     rate_thresholds: [20, 60, 90]
     rate_scores: [5, 10, 15, 20]
-
-    # Optional fine tuning.
     band5_bonus: 3
     ssid_penalty_patterns: ["cam", "iot", "guest"]
     ssid_penalty: 10
-
     clamp_min: 0
     clamp_max: 100
-
   ssh:
-    # SSH username on UniFi AP.
     username: "unifiap"
-    # SSH password on UniFi AP (required).
     password: ""
-    # SSH port on UniFi AP.
     port: 22
-    # Timeout for establishing SSH connection.
     connect_timeout_sec: 8
-    # Timeout for a single remote command execution.
     cmd_timeout_sec: 12
-    # true = strict host key checking, false = skip known_hosts validation.
     known_hosts_strict: false
-
-  # UniFi AP list (SSH targets).
-  # - name: logical AP name used in attributes as ap_name
-  # - host: AP IP or hostname
-  # - floor: optional explicit floor/zone label (may be ignored by some HA UI versions)
-  #   If floor is missing, fallback is derived from name:
-  #   ap_1_patro -> 1_patro
-  #
-  # Example:
-  # aps:
-  #   - name: "ap_1_patro"
-  #     host: "192.168.0.103"
-  #     floor: "1np"
-  #   - name: "ap_2_patro"
-  #     host: "192.168.0.106"
-  #     floor: "2np"
   aps: []
-
-  # Reliable floor override mapping by AP name (recommended).
-  # Use this when aps[].floor is not persisted by HA UI.
-  # Example:
-  # floor_overrides:
-  #   - ap_name: "ap_1_patro"
-  #     floor: "přízemí"
-  #   - ap_name: "ap_2_patro"
-  #     floor: "patro"
   floor_overrides: []
-
-  # Learn mode:
-  # - true: collect unknown (non-whitelist) devices into /data/seen_devices.json
-  # - logs only when a new MAC appears or IPv4 becomes known
   learn_mode: true
-  # Max number of unknown devices kept in /data/seen_devices.json.
   learn_max_entries: 50
-
-  # Whitelist of tracked devices published as device_tracker.
-  # - mac: device MAC address (aa:bb:cc:dd:ee:ff)
-  # - name: friendly name in Home Assistant
-  # - allow_randomized: allow locally-administered/randomized MAC for this device
-  #
-  # Example:
-  # devices:
-  #   - mac: "aa:bb:cc:dd:ee:ff"
-  #     name: "Phone"
-  #     allow_randomized: false
   devices: []
 
-# Schema validates types for all fields in options above.
 schema:
   mqtt:
     host: str
@@ -141,7 +63,6 @@ schema:
     discovery_prefix: str
     base_topic: str
     client_id: str
-
   poll_interval_sec: int
   away_after_misses: int
   extended_mode: bool
@@ -165,7 +86,6 @@ schema:
     ssid_penalty: int(0,30)
     clamp_min: int(0,100)
     clamp_max: int(0,100)
-
   ssh:
     username: str
     password: password
@@ -173,19 +93,15 @@ schema:
     connect_timeout_sec: int
     cmd_timeout_sec: int
     known_hosts_strict: bool
-
   aps:
     - name: str
       host: str
       floor: str?
-
   floor_overrides:
     - ap_name: str
       floor: str
-
   learn_mode: bool
   learn_max_entries: int
-
   devices:
     - mac: str
       name: str

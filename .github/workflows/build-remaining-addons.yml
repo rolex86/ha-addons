@@ -1,0 +1,243 @@
+name: Build remaining add-ons
+
+on:
+  push:
+    branches:
+      - all-addons-ghcr
+      - master
+    paths:
+      - "ha-moode-radios-addon/**"
+      - "spotify-playlists/**"
+      - "stremio-zebricky/**"
+      - "cez-distribuce-readings-addon/cez_pnd_fetcher/**"
+      - "stremio-prehrajto-addon/**"
+      - "ai-subtitle-translator/**"
+      - "stremio-sos-ha/**"
+      - "presence-ssh-mqtt/**"
+      - "trakt_bridge_stremio/**"
+      - "stremio-hell-ha/**"
+      - ".github/workflows/build-remaining-addons.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      build_matrix: ${{ steps.matrix.outputs.build_matrix }}
+      addon_matrix: ${{ steps.matrix.outputs.addon_matrix }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Select add-ons
+        id: matrix
+        shell: bash
+        env:
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          addons=(
+            "ha-moode-radios-addon"
+            "spotify-playlists"
+            "stremio-zebricky"
+            "cez-distribuce-readings-addon/cez_pnd_fetcher"
+            "stremio-prehrajto-addon"
+            "ai-subtitle-translator"
+            "stremio-sos-ha"
+            "presence-ssh-mqtt"
+            "trakt_bridge_stremio"
+            "stremio-hell-ha"
+          )
+
+          selected=()
+          if [[ "$EVENT_NAME" == "workflow_dispatch" || "$REF_NAME" == "all-addons-ghcr" ]]; then
+            selected=("${addons[@]}")
+          else
+            if [[ -z "${BEFORE:-}" || "$BEFORE" == "0000000000000000000000000000000000000000" ]]; then
+              changed_files="$(git show --pretty='' --name-only "$AFTER")"
+            else
+              changed_files="$(git diff --name-only "$BEFORE" "$AFTER")"
+            fi
+
+            for addon in "${addons[@]}"; do
+              prefix="${addon}/"
+              if grep -qF "$prefix" <<< "$changed_files"; then
+                selected+=("$addon")
+              fi
+            done
+          fi
+
+          build_json='{"include":['
+          addon_json='{"include":['
+          first_build=true
+          first_addon=true
+
+          for addon in "${selected[@]}"; do
+            if [[ "$first_addon" == false ]]; then addon_json+=','; fi
+            addon_json+="{\"path\":\"$addon\"}"
+            first_addon=false
+
+            for arch in amd64 aarch64; do
+              runner="ubuntu-24.04"
+              [[ "$arch" == "aarch64" ]] && runner="ubuntu-24.04-arm"
+              if [[ "$first_build" == false ]]; then build_json+=','; fi
+              build_json+="{\"path\":\"$addon\",\"arch\":\"$arch\",\"runner\":\"$runner\"}"
+              first_build=false
+            done
+          done
+
+          build_json+=']}'
+          addon_json+=']}'
+          echo "build_matrix=$build_json" >> "$GITHUB_OUTPUT"
+          echo "addon_matrix=$addon_json" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build ${{ matrix.path }} (${{ matrix.arch }})
+    needs: prepare
+    if: ${{ needs.prepare.outputs.build_matrix != '{"include":[]}' }}
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.build_matrix) }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Get app information
+        id: info
+        uses: home-assistant/actions/helpers/info@master
+        with:
+          path: ./${{ matrix.path }}
+
+      - name: Normalize metadata
+        id: meta
+        shell: bash
+        run: |
+          strip_quotes() {
+            local value="$1"
+            value="${value#\"}"
+            value="${value%\"}"
+            printf '%s' "$value"
+          }
+          echo "image=$(strip_quotes '${{ steps.info.outputs.image }}')" >> "$GITHUB_OUTPUT"
+          echo "version=$(strip_quotes '${{ steps.info.outputs.version }}')" >> "$GITHUB_OUTPUT"
+          echo "name=$(strip_quotes '${{ steps.info.outputs.name }}')" >> "$GITHUB_OUTPUT"
+          echo "description=$(strip_quotes '${{ steps.info.outputs.description }}')" >> "$GITHUB_OUTPUT"
+          echo "url=$(strip_quotes '${{ steps.info.outputs.url }}')" >> "$GITHUB_OUTPUT"
+
+      - name: Set BUILD_FROM
+        id: args
+        shell: bash
+        env:
+          ADDON_PATH: ${{ matrix.path }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          args=""
+          if [[ -f "$ADDON_PATH/build.yaml" ]]; then
+            base="$(yq -r ".build_from.${ARCH}" "$ADDON_PATH/build.yaml" 2>/dev/null || true)"
+            if [[ -n "$base" && "$base" != "null" ]]; then
+              args="BUILD_FROM=$base"
+            fi
+          fi
+          {
+            echo 'value<<EOF'
+            printf '%s\n' "$args"
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build and push architecture image
+        uses: home-assistant/builder/actions/build-image@2026.06.0
+        with:
+          arch: ${{ matrix.arch }}
+          container-registry-password: ${{ secrets.GITHUB_TOKEN }}
+          context: ./${{ matrix.path }}
+          image: ${{ steps.meta.outputs.image }}
+          image-tags: |
+            ${{ steps.meta.outputs.version }}-${{ matrix.arch }}
+            latest-${{ matrix.arch }}
+          cache-image-tag: latest-${{ matrix.arch }}
+          cache-gha-scope: ${{ matrix.path }}
+          build-args: ${{ steps.args.outputs.value }}
+          labels: |
+            io.hass.type=app
+            io.hass.name=${{ steps.meta.outputs.name }}
+            io.hass.description=${{ steps.meta.outputs.description }}
+            io.hass.url=${{ steps.meta.outputs.url }}
+          cosign: false
+          push: true
+          version: ${{ steps.meta.outputs.version }}
+
+  manifest:
+    name: Publish ${{ matrix.path }} manifest
+    needs:
+      - prepare
+      - build
+    if: ${{ needs.prepare.outputs.addon_matrix != '{"include":[]}' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.addon_matrix) }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Get app information
+        id: info
+        uses: home-assistant/actions/helpers/info@master
+        with:
+          path: ./${{ matrix.path }}
+
+      - name: Normalize metadata
+        id: meta
+        shell: bash
+        run: |
+          strip_quotes() {
+            local value="$1"
+            value="${value#\"}"
+            value="${value%\"}"
+            printf '%s' "$value"
+          }
+          echo "image=$(strip_quotes '${{ steps.info.outputs.image }}')" >> "$GITHUB_OUTPUT"
+          echo "version=$(strip_quotes '${{ steps.info.outputs.version }}')" >> "$GITHUB_OUTPUT"
+
+      - name: Login to GHCR
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5
+
+      - name: Publish multi-arch manifest
+        shell: bash
+        env:
+          IMAGE: ${{ steps.meta.outputs.image }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          docker buildx imagetools create \
+            --tag "$IMAGE:$VERSION" \
+            --tag "$IMAGE:latest" \
+            "$IMAGE:$VERSION-amd64" \
+            "$IMAGE:$VERSION-aarch64"

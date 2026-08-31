@@ -1,13 +1,12 @@
 name: "ČEZ PND Fetcher"
-version: "0.2.0"
+version: "0.2.1"
 slug: "cez_pnd_fetcher"
 description: "Companion app exporting ČEZ PND chart JSON for the custom integration"
 url: "https://github.com/rolex86/ha-addons"
 arch:
   - aarch64
   - amd64
-  - armv7
-  - i386
+image: ghcr.io/rolex86/cez-pnd-fetcher
 startup: application
 boot: auto
 init: false

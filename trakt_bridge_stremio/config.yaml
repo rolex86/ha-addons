@@ -1,16 +1,15 @@
 name: "Trakt Bridge (Stremio only)"
 description: "Sleduje vybrané media_player entity v HA (jen Stremio) a zapisuje watched do Trakt podle IMDb z entity_picture."
-version: "0.4.1"
+version: "0.4.2"
 slug: "trakt_bridge_stremio"
+url: "https://github.com/rolex86/ha-addons/tree/master/trakt_bridge_stremio"
 init: false
 startup: services
 
 arch:
   - aarch64
   - amd64
-  - armhf
-  - armv7
-  - i386
+image: ghcr.io/rolex86/trakt-bridge-stremio
 
 ports:
   8787/tcp: 8787

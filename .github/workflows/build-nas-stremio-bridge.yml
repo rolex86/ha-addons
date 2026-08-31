@@ -17,10 +17,10 @@ jobs:
       build_matrix: ${{ steps.matrix.outputs.matrix }}
       image_name: ${{ steps.normalize.outputs.image_name }}
       registry_prefix: ${{ steps.normalize.outputs.registry_prefix }}
-      version: ${{ steps.info.outputs.version }}
-      name: ${{ steps.info.outputs.name }}
-      description: ${{ steps.info.outputs.description }}
-      url: ${{ steps.info.outputs.url }}
+      version: ${{ steps.normalize.outputs.version }}
+      name: ${{ steps.normalize.outputs.name }}
+      description: ${{ steps.normalize.outputs.description }}
+      url: ${{ steps.normalize.outputs.url }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v7.0.1
@@ -31,13 +31,29 @@ jobs:
         with:
           path: "./nas-stremio-bridge"
 
-      - name: Normalize image information
+      - name: Normalize app information
         id: normalize
         shell: bash
         run: |
-          image='${{ steps.info.outputs.image }}'
+          strip_quotes() {
+            local value="$1"
+            value="${value#\"}"
+            value="${value%\"}"
+            printf '%s' "$value"
+          }
+
+          image="$(strip_quotes '${{ steps.info.outputs.image }}')"
+          version="$(strip_quotes '${{ steps.info.outputs.version }}')"
+          name="$(strip_quotes '${{ steps.info.outputs.name }}')"
+          description="$(strip_quotes '${{ steps.info.outputs.description }}')"
+          url="$(strip_quotes '${{ steps.info.outputs.url }}')"
+
           echo "image_name=${image##*/}" >> "$GITHUB_OUTPUT"
           echo "registry_prefix=${image%/*}" >> "$GITHUB_OUTPUT"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "name=${name}" >> "$GITHUB_OUTPUT"
+          echo "description=${description}" >> "$GITHUB_OUTPUT"
+          echo "url=${url}" >> "$GITHUB_OUTPUT"
 
       - name: Prepare build matrix
         id: matrix

@@ -1,14 +1,14 @@
 name: "NAS Stremio Bridge"
 slug: "nas_stremio_bridge"
 description: "Serve local NAS media as a Stremio add-on"
-version: "0.2.0"
+version: "0.2.1"
 url: "https://github.com/rolex86/ha-addons/tree/master/nas-stremio-bridge"
 
 arch:
   - aarch64
   - amd64
-  - armv7
-  - i386
+
+image: "ghcr.io/rolex86/nas-stremio-bridge"
 
 startup: services
 boot: auto
@@ -26,6 +26,11 @@ ports_description:
 map:
   - media:ro
   - data:rw
+
+backup_exclude:
+  - "backdrops/*"
+  - "posters/*"
+  - "db_backups/*"
 
 options:
   server:
